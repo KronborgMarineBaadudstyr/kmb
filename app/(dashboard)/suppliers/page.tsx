@@ -18,7 +18,8 @@ type ImportProgress = {
   stage:     'fetching' | 'importing' | 'done' | 'error'
   total:     number
   processed: number
-  created:   number
+  matched:   number
+  staged:    number
   updated:   number
   errors:    number
   message:   string
@@ -168,10 +169,11 @@ export default function SuppliersPage() {
                       progress.stage === 'done'  ? 'bg-green-500' : 'bg-blue-500'
                     }`} style={{ width: `${pct}%` }} />
                   </div>
-                  <div className="flex gap-6 text-xs text-gray-500">
+                  <div className="flex gap-6 text-xs text-gray-500 flex-wrap">
                     <span>Behandlet: <strong>{progress.processed.toLocaleString('da-DK')}</strong> / {progress.total.toLocaleString('da-DK')}</span>
-                    <span className="text-green-600">Nye: <strong>{progress.created}</strong></span>
+                    <span className="text-green-600">Matchet: <strong>{progress.matched ?? 0}</strong></span>
                     <span className="text-blue-600">Opdateret: <strong>{progress.updated}</strong></span>
+                    <span className="text-orange-500">Til gennemgang: <strong>{progress.staged ?? 0}</strong></span>
                     {progress.errors > 0 && <span className="text-red-500">Fejl: <strong>{progress.errors}</strong></span>}
                   </div>
                 </div>

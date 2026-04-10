@@ -93,6 +93,8 @@ export default function ProductsPage() {
   const [page,        setPage]        = useState(1)
   const [sort,        setSort]        = useState('name')
   const [order,       setOrder]       = useState<'asc'|'desc'>('asc')
+  const [supplierId,  setSupplierId]  = useState('')
+  const [suppliers,   setSuppliers]   = useState<{ id: string; name: string }[]>([])
   const [categories,  setCategories]  = useState<string[]>([])
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen, setColMenuOpen] = useState(false)
@@ -116,13 +118,14 @@ export default function ProductsPage() {
       page: String(page), per_page: '50',
       sort, order,
     })
+    if (supplierId) params.set('supplier_id', supplierId)
     const res  = await fetch(`/api/products?${params}`)
     const json: ApiResponse = await res.json()
     setProducts(json.data ?? [])
     setTotal(json.total ?? 0)
     setTotalPages(json.total_pages ?? 1)
     setLoading(false)
-  }, [search, status, category, page, sort, order])
+  }, [search, status, category, supplierId, page, sort, order])
 
   useEffect(() => { fetchProducts() }, [fetchProducts])
 
@@ -134,6 +137,12 @@ export default function ProductsPage() {
         json.data.forEach(p => p.categories?.forEach(c => cats.add(c)))
         setCategories([...cats].sort())
       })
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/suppliers')
+      .then(r => r.json())
+      .then(j => setSuppliers((j.data ?? []).map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))))
   }, [])
 
   useEffect(() => {
@@ -318,6 +327,19 @@ export default function ProductsPage() {
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
+          {/* Leverandør filter */}
+          {suppliers.length > 0 && (
+            <select
+              value={supplierId}
+              onChange={e => { setSupplierId(e.target.value); setPage(1) }}
+              className="px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Alle leverandører</option>
+              {suppliers.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          )}
 
           {/* Kolonne-vælger */}
           <div className="relative" ref={colMenuRef}>

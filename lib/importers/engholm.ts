@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { normalizeUnit, resolveUnit } from './unit-normalizer'
 
 const SUPPLIER_ID = '37d879e5-c0f7-48ae-b514-168264c80f9f'
 const API_URL     = 'https://www.engholm.dk/api/products'
@@ -22,36 +23,77 @@ type EngholmProduct = {
 }
 
 export type EngholmImportProgress = {
-  stage:     'fetching' | 'importing' | 'done' | 'error'
-  total:     number
-  processed: number
-  created:   number
-  updated:   number
-  errors:    number
-  message:   string
+  stage:         'fetching' | 'importing' | 'done' | 'error'
+  total:         number
+  processed:     number
+  matched:       number  // tilknyttet eksisterende produkt
+  staged:        number  // lagt i staging til gennemgang
+  updated:       number  // opdateret eksisterende product_supplier
+  errors:        number
+  message:       string
 }
 
 type ProgressCallback = (p: EngholmImportProgress) => void
 
 // Decode HTML entities (&#229; → å osv.)
 function decode(str: string): string {
+  if (!str) return ''
   return str
     .replace(/&#229;/g, 'å').replace(/&#230;/g, 'æ').replace(/&#248;/g, 'ø')
     .replace(/&#197;/g, 'Å').replace(/&#198;/g, 'Æ').replace(/&#216;/g, 'Ø')
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&nbsp;/g, ' ').replace(/&#\d+;/g, '')
+    .trim()
 }
 
 function decodeDetails(details: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(details)) out[decode(k)] = decode(String(v))
+  for (const [k, v] of Object.entries(details ?? {})) out[decode(k)] = decode(String(v))
   return out
 }
 
-// Byg categories array fra Engholms kategori-sti
 function parseCategories(cat: string): string[] {
   if (!cat) return []
   return cat.split('>').map(c => c.trim()).filter(Boolean)
+}
+
+// ── Fuzzy match mod eksisterende produkter via pg_trgm ──
+async function findFuzzyMatches(
+  supabase: ReturnType<typeof createServiceClient>,
+  name: string,
+  ean: string | null,
+): Promise<{ product_id: string; product_name: string; score: number; match_field: string }[]> {
+  const suggestions: { product_id: string; product_name: string; score: number; match_field: string }[] = []
+
+  // Eksakt EAN-match (høj tillid)
+  if (ean) {
+    const { data } = await supabase
+      .from('products')
+      .select('id, name')
+      .eq('ean', ean)
+      .limit(1)
+    if (data && data.length > 0) {
+      suggestions.push({ product_id: data[0].id, product_name: data[0].name, score: 1.0, match_field: 'ean' })
+      return suggestions // EAN-match er definitivt — ingen grund til fuzzy
+    }
+  }
+
+  // Fuzzy navn-match via PostgreSQL trigram similarity
+  // Kræver pg_trgm extension + idx_products_name_trgm index (migration 002)
+  const { data: fuzzy } = await supabase.rpc('fuzzy_product_search', { search_name: name, min_score: 0.35 })
+
+  if (fuzzy && fuzzy.length > 0) {
+    for (const row of fuzzy.slice(0, 5)) {
+      suggestions.push({
+        product_id:   row.id,
+        product_name: row.name,
+        score:        parseFloat(row.score),
+        match_field:  'name',
+      })
+    }
+  }
+
+  return suggestions
 }
 
 export async function importEngholm(
@@ -60,15 +102,16 @@ export async function importEngholm(
 ): Promise<void> {
   const supabase = createServiceClient()
 
-  onProgress({ stage: 'fetching', total: 0, processed: 0, created: 0, updated: 0, errors: 0,
-    message: 'Henter produkter fra Engholm API...' })
+  onProgress({
+    stage: 'fetching', total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0,
+    message: 'Henter produkter fra Engholm API...',
+  })
 
   // ── 1. Hent alle produkter fra Engholm ──
   const resp = await fetch(API_URL, {
     headers: { 'ApiKey': API_KEY },
     signal:  AbortSignal.timeout(60_000),
   })
-
   if (!resp.ok) throw new Error(`Engholm API fejl: ${resp.status}`)
 
   const json = await resp.json() as { success: boolean; products: EngholmProduct[] }
@@ -78,135 +121,164 @@ export async function importEngholm(
   if (options.limit) products = products.slice(0, options.limit)
 
   const total = products.length
-  onProgress({ stage: 'importing', total, processed: 0, created: 0, updated: 0, errors: 0,
-    message: `${total.toLocaleString('da-DK')} produkter hentet — starter import...` })
+  onProgress({
+    stage: 'importing', total, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0,
+    message: `${total.toLocaleString('da-DK')} produkter hentet — starter matching...`,
+  })
 
-  // ── 2. Hent eksisterende product_suppliers for Engholm ──
-  const { data: existing } = await supabase
+  // ── 2. Hent eksisterende product_suppliers for Engholm (til priority-bevarelse) ──
+  const { data: existingSupplierRows } = await supabase
     .from('product_suppliers')
-    .select('id, supplier_sku, product_id')
+    .select('id, supplier_sku, product_id, priority')
     .eq('supplier_id', SUPPLIER_ID)
 
-  const existingBySku = Object.fromEntries((existing ?? []).map(r => [r.supplier_sku, r]))
+  const existingBySku = Object.fromEntries(
+    (existingSupplierRows ?? []).map(r => [r.supplier_sku, r])
+  )
 
-  // ── 3. Importer i batches af 200 ──
-  const BATCH = 200
-  let processed = 0, created = 0, updated = 0, errors = 0
+  // ── 3. Hent eksisterende staging-rækker (til idempotens) ──
+  const { data: existingStagingRows } = await supabase
+    .from('supplier_product_staging')
+    .select('id, normalized_sku, status')
+    .eq('supplier_id', SUPPLIER_ID)
+
+  const existingStaging = Object.fromEntries(
+    (existingStagingRows ?? []).map(r => [r.normalized_sku, r])
+  )
+
+  // ── 4. Importer i batches ──
+  const BATCH = 100
+  let processed = 0, matched = 0, staged = 0, updated = 0, errors = 0
 
   for (let i = 0; i < products.length; i += BATCH) {
     const batch = products.slice(i, i + BATCH)
 
-    // ── Upsert product_suppliers (leverandørdata — altid) ──
-    const supplierRows = batch.map(p => ({
-      supplier_id:              SUPPLIER_ID,
-      // product_id sættes til NULL for nu — matches op mod products via sku-matching bagefter
-      product_id:               null as unknown as string,
-      supplier_sku:             p.sku,
-      supplier_product_name:    decode(p.title),
-      purchase_price:           p.price   > 0 ? p.price   : null,
-      recommended_sales_price:  p.retail  > 0 ? p.retail  : null,
-      supplier_stock_quantity:  p.stock   ?? 0,
-      item_status:              p.stock > 0 ? 'active' : 'out_of_stock',
-      supplier_images:          p.image ? [{ url: p.image, alt: decode(p.title), is_primary: true }] : [],
-      extra_data: {
-        gtin:          p.gtin         || null,
-        nautiskVarenr: p.nautiskVarenr || null,
-        grouping:      p.grouping      || null,
-        unit:          p.unit          || null,
-        description:   decode(p.description || ''),
-        category:      decode(p.category    || ''),
-        lastUpdate:    p.lastUpdate    || null,
-        details:       decodeDetails(p.details ?? {}),
-      },
-      priority:    99, // sættes korrekt når produktet matches
-      is_active:   true,
-    }))
-
-    // Fjern rækker uden product_id fra direkte upsert —
-    // gem dem i en separat staging-struktur eller match mod products
-    // ── Match mod eksisterende produkter via EAN (gtin) eller SKU ──
+    // Hent Supabase-produkter via EAN for hele batchen på én gang
     const gtins = batch.map(p => p.gtin).filter(Boolean)
-    const skus   = batch.map(p => p.sku).filter(Boolean)
+    const { data: byEan } = gtins.length > 0
+      ? await supabase.from('products').select('id, name, ean').in('ean', gtins)
+      : { data: [] }
 
-    const [{ data: byEan }, { data: bySku }] = await Promise.all([
-      gtins.length > 0
-        ? supabase.from('products').select('id, ean, manufacturer_sku').in('ean', gtins)
-        : Promise.resolve({ data: [] }),
-      skus.length > 0
-        ? supabase.from('products').select('id, ean, manufacturer_sku').in('manufacturer_sku', skus)
-        : Promise.resolve({ data: [] }),
-    ])
-
-    const productByEan = Object.fromEntries((byEan ?? []).filter(p => p.ean).map(p => [p.ean, p.id]))
-    const productBySku = Object.fromEntries((bySku ?? []).filter(p => p.manufacturer_sku).map(p => [p.manufacturer_sku, p.id]))
+    const productByEan = Object.fromEntries(
+      (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
+    )
 
     for (const p of batch) {
-      const productId = productByEan[p.gtin] ?? productBySku[p.sku] ?? null
+      const decodedTitle   = decode(p.title)
+      const decodedDetails = decodeDetails(p.details)
+      const { unit, unit_size } = resolveUnit(p.unit, decodedDetails)
 
-      const row = {
-        supplier_id:              SUPPLIER_ID,
-        product_id:               productId,
-        variant_id:               null,
-        supplier_sku:             p.sku,
-        supplier_product_name:    decode(p.title),
-        purchase_price:           p.price  > 0 ? p.price  : null,
-        recommended_sales_price:  p.retail > 0 ? p.retail : null,
-        supplier_stock_quantity:  p.stock  ?? 0,
-        item_status:              p.stock > 0 ? 'active' : 'out_of_stock',
-        supplier_images:          p.image ? [{ url: p.image, alt: decode(p.title), is_primary: true }] : [],
+      const supplierData = {
+        supplier_id:             SUPPLIER_ID,
+        supplier_sku:            p.sku,
+        supplier_product_name:   decodedTitle,
+        purchase_price:          p.price  > 0 ? p.price  : null,
+        recommended_sales_price: p.retail > 0 ? p.retail : null,
+        supplier_stock_quantity: p.stock  ?? 0,
+        supplier_stock_reserved: 0,
+        item_status:             (p.stock ?? 0) > 0 ? 'active' : 'out_of_stock',
+        supplier_images:         p.image ? [{ url: p.image, alt: decodedTitle, is_primary: true }] : [],
         extra_data: {
           gtin:          p.gtin          || null,
           nautiskVarenr: p.nautiskVarenr || null,
-          grouping:      p.grouping       || null,
-          unit:          p.unit           || null,
+          grouping:      p.grouping      || null,
+          unit_raw:      p.unit          || null,
+          unit_normalized: unit,
+          unit_size,
           description:   decode(p.description || ''),
           category:      decode(p.category    || ''),
           categories:    parseCategories(decode(p.category || '')),
           lastUpdate:    p.lastUpdate     || null,
-          details:       decodeDetails(p.details ?? {}),
+          details:       decodedDetails,
         },
-        priority:    1,
-        is_active:   true,
+        variant_id: null,
+        is_active:  true,
       }
 
-      if (!productId) {
-        // Ingen match — gem uden product_id i et rådata-format
-        // Vi lader product_id være NULL og markerer det til manuel godkendelse
-        // (product_id har NOT NULL constraint — skip disse for nu, vis dem i UI)
-        // TODO: opret draft-produkter automatisk i næste fase
-        // processed++
-        // continue
-      }
+      // ── Forsøg hård EAN-match ──
+      const matchedProduct = productByEan[p.gtin] ?? null
 
-      if (productId) {
-        const existingRow = existingBySku[p.sku]
-        if (existingRow) {
-          await supabase.from('product_suppliers').update(row).eq('id', existingRow.id)
+      if (matchedProduct) {
+        // MATCH FUNDET — opdater/opret product_suppliers
+        const existing = existingBySku[p.sku]
+
+        if (existing) {
+          // Bevar priority (intern indstilling) — overskriv ALT andet
+          await supabase
+            .from('product_suppliers')
+            .update({ ...supplierData, priority: existing.priority })
+            .eq('id', existing.id)
           updated++
         } else {
-          const { error } = await supabase.from('product_suppliers').insert(row)
+          // Ny tilknytning — sæt priority til 1 som default
+          const { error } = await supabase
+            .from('product_suppliers')
+            .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
           if (error) errors++
-          else created++
+          else matched++
         }
+      } else {
+        // INGEN HÅRD MATCH — send til staging
+        // Springer over produkter der allerede er i staging og er manuelt behandlet
+        const stagingRow = existingStaging[p.sku]
+        if (stagingRow && stagingRow.status !== 'pending_review') {
+          // Allerede behandlet manuelt — opdater kun rådata, rør ikke status
+          await supabase
+            .from('supplier_product_staging')
+            .update({ raw_data: supplierData.extra_data, normalized_unit: unit, normalized_unit_size: unit_size })
+            .eq('id', stagingRow.id)
+          processed++
+          continue
+        }
+
+        // Fuzzy match-forslag (simpel variant — fuld pg_trgm bruges i API-ruten)
+        // Her gemmer vi bare raw_data og lader UI'en kalde fuzzy search bagefter
+        const stagingUpsertRow = {
+          supplier_id:         SUPPLIER_ID,
+          raw_data: {
+            ...supplierData.extra_data,
+            supplier_sku:            p.sku,
+            supplier_product_name:   decodedTitle,
+            purchase_price:          supplierData.purchase_price,
+            recommended_sales_price: supplierData.recommended_sales_price,
+            supplier_stock_quantity: supplierData.supplier_stock_quantity,
+            supplier_images:         supplierData.supplier_images,
+          },
+          normalized_name:      decodedTitle,
+          normalized_ean:       p.gtin  || null,
+          normalized_sku:       p.sku,
+          normalized_unit:      unit,
+          normalized_unit_size: unit_size,
+          match_suggestions:    [],  // udfyldes af baggrundsjob / on-demand
+          status:               stagingRow ? stagingRow.status : 'pending_review',
+          updated_at:           new Date().toISOString(),
+        }
+
+        const { error } = stagingRow
+          ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
+          : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
+
+        if (error) errors++
+        else staged++
       }
 
       processed++
     }
 
-    // Opdater leverandørens last_synced_at
+    // Opdater last_synced_at for leverandøren
     await supabase
       .from('suppliers')
       .update({ last_synced_at: new Date().toISOString() })
       .eq('id', SUPPLIER_ID)
 
     onProgress({
-      stage: 'importing', total, processed, created, updated, errors,
-      message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} behandlet — ${created} nye, ${updated} opdateret`,
+      stage: 'importing', total, processed, matched, staged, updated, errors,
+      message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} — ${matched} matchet, ${updated} opdateret, ${staged} til gennemgang`,
     })
   }
 
   onProgress({
-    stage: 'done', total, processed, created, updated, errors,
-    message: `Færdig! ${processed.toLocaleString('da-DK')} produkter — ${created} nye tilknytninger, ${updated} opdateret, ${errors} fejl`,
+    stage: 'done', total, processed, matched, staged, updated, errors,
+    message: `Færdig! ${matched} matchet · ${updated} opdateret · ${staged} afventer gennemgang · ${errors} fejl`,
   })
 }
