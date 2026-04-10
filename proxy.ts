@@ -3,11 +3,19 @@ import type { NextRequest } from 'next/server'
 
 const COOKIE = 'kmb-session'
 
+// Stier der aldrig kræver login
+// (interne API-kald fra frontend sender cookie automatisk;
+//  men externe kaldere som WooCommerce og andre services har ingen cookie)
+const PUBLIC_PREFIXES = [
+  '/login',
+  '/api/auth',
+  '/api/webhooks',
+]
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  // Login-side og auth API er altid åbne
-  if (pathname.startsWith('/login') || pathname.startsWith('/api/auth')) {
+  if (PUBLIC_PREFIXES.some(p => pathname.startsWith(p))) {
     return NextResponse.next()
   }
 
