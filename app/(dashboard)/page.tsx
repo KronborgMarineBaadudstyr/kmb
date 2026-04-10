@@ -16,21 +16,41 @@ async function getStats() {
   }
 }
 
-const STEPS = [
-  { label: 'Next.js projekt oprettet og konfigureret',          done: true  },
-  { label: 'Supabase projekt oprettet og forbundet',            done: true  },
-  { label: 'Database tabeller oprettet (13 tabeller + views)',  done: true  },
-  { label: 'WooCommerce API forbundet (37.011 produkter)',       done: true  },
-  { label: 'WooCommerce → Supabase initial import kørt',        done: true  },
-  { label: 'Produktliste med kolonne-vælger og filtrering',     done: true  },
-  { label: 'Produkt detaljevisning med alle felter',            done: true  },
-  { label: 'Password-beskyttet dashboard',                      done: true  },
-  { label: 'Deploy til Vercel (GitHub → Vercel)',               done: false },
-  { label: 'Leverandørstyring — FTP/XML/Excel import',          done: false },
-  { label: 'Supabase → WooCommerce sync (publicér produkter)',  done: false },
-  { label: 'Webhook: ordre → lagerreservation',                 done: false },
-  { label: 'Ordre-routing og forsendelsesoptimering',           done: false },
-  { label: 'admind POS integration',                            done: false },
+const STEPS: { label: string; done: boolean; group?: string }[] = [
+  // ── Fundament ──
+  { group: 'Fundament',        label: 'Next.js projekt oprettet og konfigureret',         done: true  },
+  { label: 'Supabase projekt oprettet og forbundet',                                       done: true  },
+  { label: 'Database tabeller oprettet (13 tabeller + views)',                             done: true  },
+  { label: 'GitHub repo oprettet og kode pushet',                                         done: true  },
+  { label: 'Password-beskyttet dashboard (middleware + cookie)',                           done: true  },
+  { label: 'Deploy til Vercel (env-variable konfigureres i Vercel dashboard)',             done: false },
+
+  // ── WooCommerce ──
+  { group: 'WooCommerce',      label: 'WooCommerce API forbundet (37.011 produkter)',      done: true  },
+  { label: 'WooCommerce → Supabase initial import kørt (idempotent upsert)',              done: true  },
+  { label: 'Produktliste med kolonne-vælger, filtrering og sortering',                    done: true  },
+  { label: 'Produkt detaljevisning med alle felter inkl. tomme',                          done: true  },
+  { label: 'Supabase → WooCommerce sync (publicér/opdatér produkter)',                    done: false },
+  { label: 'Løbende lagersync Woo → Supabase (ca. hvert 15 min, konfigurerbart)',         done: false },
+  { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: false },
+
+  // ── Leverandører ──
+  { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: false },
+  { label: 'FTP/XML/Excel import fra leverandør',                                         done: false },
+  { label: 'Sammenlign import med eksisterende Supabase data (hvad er ændret?)',          done: false },
+  { label: 'Manuel godkendelsesproces for ændringer (nyt produkt / prisændring / udgået)', done: false },
+  { label: 'Opdater/upsert godkendte ændringer til Woo (og senere POS mv.)',              done: false },
+
+  // ── Ordre & Forsendelse ──
+  { group: 'Ordre & Forsendelse', label: 'Ordre-routing motor (optimal leverandørvalg pr. ordre)', done: false },
+  { label: 'Ordrepakkeliste — generer plukliste pr. forsendelse',                         done: false },
+  { label: 'PDF tilbudsgenerator',                                                        done: false },
+
+  // ── Business Intelligence ──
+  { group: 'Business Intelligence', label: 'Produkt prissætningsforslag — salgsoptimering ift. historik og prognoser', done: false },
+
+  // ── POS ──
+  { group: 'POS',              label: 'admind POS integration (afventer API docs)',        done: false },
 ]
 
 export default async function DashboardPage() {
@@ -99,19 +119,26 @@ export default async function DashboardPage() {
           />
         </div>
 
-        <div className="space-y-2.5">
+        <div className="space-y-1">
           {STEPS.map((step, i) => (
-            <div key={i} className="flex items-start gap-3">
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 ${
-                step.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
-              }`}>
-                {step.done ? '✓' : ''}
+            <div key={i}>
+              {step.group && (
+                <p className={`text-xs font-semibold uppercase tracking-wider text-gray-400 ${i > 0 ? 'mt-4' : ''} mb-1.5`}>
+                  {step.group}
+                </p>
+              )}
+              <div className="flex items-start gap-3 py-1">
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 ${
+                  step.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
+                }`}>
+                  {step.done ? '✓' : ''}
+                </div>
+                <span className={`text-sm leading-relaxed ${
+                  step.done ? 'text-gray-400 line-through' : 'text-gray-700'
+                }`}>
+                  {step.label}
+                </span>
               </div>
-              <span className={`text-sm leading-relaxed ${
-                step.done ? 'text-gray-400 line-through' : 'text-gray-700'
-              }`}>
-                {step.label}
-              </span>
             </div>
           ))}
         </div>
