@@ -23,7 +23,7 @@ const STEPS: { label: string; done: boolean; group?: string }[] = [
   { label: 'Database tabeller oprettet (13 tabeller + views)',                             done: true  },
   { label: 'GitHub repo oprettet og kode pushet',                                         done: true  },
   { label: 'Password-beskyttet dashboard (middleware + cookie)',                           done: true  },
-  { label: 'Deploy til Vercel (env-variable konfigureres i Vercel dashboard)',             done: false },
+  { label: 'Deploy til Vercel',                                                             done: true  },
 
   // ── WooCommerce ──
   { group: 'WooCommerce',      label: 'WooCommerce API forbundet (37.011 produkter)',      done: true  },
@@ -32,7 +32,7 @@ const STEPS: { label: string; done: boolean; group?: string }[] = [
   { label: 'Produkt detaljevisning med alle felter inkl. tomme',                          done: true  },
   { label: 'Supabase → WooCommerce sync (publicér/opdatér produkter)',                    done: false },
   { label: 'Løbende lagersync Woo → Supabase (ca. hvert 15 min, konfigurerbart)',         done: false },
-  { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: false },
+  { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: true  },
 
   // ── Leverandører ──
   { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: false },
