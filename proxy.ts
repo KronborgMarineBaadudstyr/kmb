@@ -3,7 +3,7 @@ import type { NextRequest } from 'next/server'
 
 const COOKIE = 'kmb-session'
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // Login-side og auth API er altid åbne
