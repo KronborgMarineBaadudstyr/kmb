@@ -8,6 +8,7 @@ type Supplier = {
   data_format:         string | null
   api_url:             string | null
   api_auth_type:       string | null
+  ftp_host:            string | null
   sync_interval_hours: number
   last_synced_at:      string | null
   active:              boolean
@@ -15,14 +16,21 @@ type Supplier = {
 }
 
 type ImportProgress = {
-  stage:     'fetching' | 'importing' | 'done' | 'error'
+  stage:     'fetching' | 'connecting' | 'downloading' | 'parsing' | 'importing' | 'done' | 'error'
   total:     number
   processed: number
   matched:   number
   staged:    number
   updated:   number
+  skipped?:  number
   errors:    number
   message:   string
+}
+
+// Leverandører med implementeret import + evt. krav
+const IMPORT_CONFIG: Record<string, { endpoint: string; needsFtp?: boolean }> = {
+  Engholm: { endpoint: '/api/import/engholm' },
+  Palby:   { endpoint: '/api/import/palby',   needsFtp: true },
 }
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -46,8 +54,15 @@ export default function SuppliersPage() {
 
   function startImport(supplier: Supplier) {
     if (importing) return
-    if (supplier.name !== 'Engholm') {
-      alert('Import er endnu kun implementeret for Engholm')
+
+    const cfg = IMPORT_CONFIG[supplier.name]
+    if (!cfg) {
+      alert(`Import er endnu ikke implementeret for ${supplier.name}`)
+      return
+    }
+
+    if (cfg.needsFtp && !supplier.ftp_host) {
+      alert(`${supplier.name}: FTP-adgang er endnu ikke konfigureret.\nKontakt leverandøren for login og opdater leverandøren i Supabase.`)
       return
     }
 
@@ -55,8 +70,8 @@ export default function SuppliersPage() {
     setProgress(null)
 
     const url = testMode
-      ? '/api/import/engholm?limit=100'
-      : '/api/import/engholm'
+      ? `${cfg.endpoint}?limit=100`
+      : cfg.endpoint
 
     const es = new EventSource(url)
     esRef.current = es

@@ -7,6 +7,7 @@ const navItems = [
   { href: '/',          label: 'Dashboard',      icon: '⊞' },
   { href: '/products',  label: 'Produkter',       icon: '📦' },
   { href: '/suppliers', label: 'Leverandører',    icon: '🏭' },
+  { href: '/staging',   label: 'Til gennemgang',  icon: '🔍' },
   { href: '/inventory', label: 'Lagerbeholdning', icon: '📊' },
   { href: '/sync',      label: 'Sync & Logs',     icon: '🔄' },
 ]

@@ -53,11 +53,12 @@ export function normalizeUnit(raw: string | null | undefined): string | null {
 //   "Pakke med 5 stk"     → { unit: "pakke", unit_size: 5   }
 
 // Nøgleord der indikerer at værdien er en unit_size
+// (Ingen named capture groups — kompatibel med ES2017)
 const UNIT_SIZE_PATTERNS: RegExp[] = [
   // "Spoler à: 120 m" / "Pose(r) à 10 stk" / "Ruller af: 50 m"
-  /^(?<container>.+?)\s*(?:à|af|a:|af:|med)\s*:?\s*(?<size>[\d,.]+)\s*(?<unit>\w+)?$/i,
+  /^(.+?)\s*(?:à|af|a:|af:|med)\s*:?\s*([\d,.]+)\s*(\w+)?$/i,
   // "120 m" / "50 stk" — bare et tal + enhed
-  /^(?<size>[\d,.]+)\s*(?<unit>[a-zæøå.]+)$/i,
+  /^([\d,.]+)\s*([a-zæøå.]+)$/i,
 ]
 
 type UnitSizeResult = {
