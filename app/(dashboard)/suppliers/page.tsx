@@ -29,8 +29,9 @@ type ImportProgress = {
 
 // Leverandører med implementeret import + evt. krav
 const IMPORT_CONFIG: Record<string, { endpoint: string; needsFtp?: boolean }> = {
-  Engholm: { endpoint: '/api/import/engholm' },
-  Palby:   { endpoint: '/api/import/palby',   needsFtp: true },
+  Engholm:    { endpoint: '/api/import/engholm'    },
+  Palby:      { endpoint: '/api/import/palby',      needsFtp: true },
+  Scanmarine: { endpoint: '/api/import/scanmarine' },
 }
 
 const FORMAT_LABELS: Record<string, string> = {
