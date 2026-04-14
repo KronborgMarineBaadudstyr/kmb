@@ -38,6 +38,9 @@ yarn-error.log*
 # Claude Code — kan indeholde credentials i permissions
 .claude/
 
+# Lokale SQL-scripts med credentials (køres manuelt i Supabase SQL Editor)
+supabase/local/
+
 # vercel
 .vercel
 

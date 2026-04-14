@@ -2,38 +2,43 @@ import { importPalby, syncPalbyStock } from '@/lib/importers/palby'
 import type { PalbyImportProgress } from '@/lib/importers/palby'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300  // 5 min — store XML-filer tager tid
+export const maxDuration = 300
 
-// GET /api/import/palby         → fuld produktimport (SSE)
-// GET /api/import/palby?limit=N → test med N produkter
-// GET /api/import/palby?mode=stock → kun lagersync
+// GET /api/import/palby                 → fuld produktimport
+// GET /api/import/palby?delta=1         → delta produktimport (kun ændringer siden sidst)
+// GET /api/import/palby?limit=N         → test-import med N produkter
+// GET /api/import/palby?mode=stock      → delta lagersync (kun nye delta-filer)
+// GET /api/import/palby?mode=stock-full → komplet lagersync (web_stockstatus_newitemid.xml)
+
 export async function GET(request: Request) {
   const url   = new URL(request.url)
+  const mode  = url.searchParams.get('mode')   // 'stock' | 'stock-full' | null
+  const delta = url.searchParams.get('delta')  // '1' = brug delta produktfil
   const limit = url.searchParams.get('limit')
-  const mode  = url.searchParams.get('mode')
 
   const encoder = new TextEncoder()
-  let controller: ReadableStreamDefaultController
+  // eslint-disable-next-line prefer-const
+  let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
 
-  const stream = new ReadableStream({
-    start(c) { controller = c },
+  const stream = new ReadableStream<Uint8Array>({
+    start(c) { ctrl = c },
   })
 
   function send(data: PalbyImportProgress) {
-    controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
+    ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
   }
 
-  function done() {
-    controller.close()
-  }
-
-  // Start import asynkront
   ;(async () => {
     try {
       if (mode === 'stock') {
-        await syncPalbyStock(send)
+        await syncPalbyStock(send, { full: false })
+      } else if (mode === 'stock-full') {
+        await syncPalbyStock(send, { full: true })
       } else {
-        await importPalby(send, { limit: limit ? parseInt(limit, 10) : undefined })
+        await importPalby(send, {
+          limit: limit ? parseInt(limit, 10) : undefined,
+          delta: delta === '1',
+        })
       }
     } catch (e: unknown) {
       send({
@@ -42,7 +47,7 @@ export async function GET(request: Request) {
         message: e instanceof Error ? e.message : String(e),
       })
     } finally {
-      done()
+      ctrl.close()
     }
   })()
 

@@ -52,7 +52,7 @@ export default function SuppliersPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  function startImport(supplier: Supplier) {
+  function startImport(supplier: Supplier, mode?: string) {
     if (importing) return
 
     const cfg = IMPORT_CONFIG[supplier.name]
@@ -69,9 +69,12 @@ export default function SuppliersPage() {
     setImporting(supplier.id)
     setProgress(null)
 
-    const url = testMode
-      ? `${cfg.endpoint}?limit=100`
-      : cfg.endpoint
+    let url = cfg.endpoint
+    if (testMode) {
+      url += mode ? `?mode=${mode}&limit=20` : '?limit=100'
+    } else if (mode) {
+      url += `?mode=${mode}`
+    }
 
     const es = new EventSource(url)
     esRef.current = es
@@ -146,19 +149,40 @@ export default function SuppliersPage() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3 ml-6">
+                <div className="flex items-center gap-3 ml-6 flex-wrap justify-end">
                   {importing === s.id ? (
                     <button onClick={stopImport}
                       className="px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
                       Stop
                     </button>
-                  ) : (
+                  ) : IMPORT_CONFIG[s.name] ? (
                     <>
                       <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer">
                         <input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)}
                           className="accent-blue-500" />
-                        Test (100 stk.)
+                        Test
                       </label>
+                      {/* Palby: ekstra knapper til lager-sync */}
+                      {s.name === 'Palby' && (
+                        <>
+                          <button
+                            onClick={() => startImport(s, 'stock')}
+                            disabled={!!importing}
+                            title="Henter kun nye delta-lagerfiler (hvert 15. min)"
+                            className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 disabled:opacity-40"
+                          >
+                            Lager Δ
+                          </button>
+                          <button
+                            onClick={() => startImport(s, 'stock-full')}
+                            disabled={!!importing}
+                            title="Henter komplet lagerstatus-fil"
+                            className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 disabled:opacity-40"
+                          >
+                            Lager fuld
+                          </button>
+                        </>
+                      )}
                       <button
                         onClick={() => startImport(s)}
                         disabled={!!importing}
@@ -167,6 +191,8 @@ export default function SuppliersPage() {
                         Importér nu
                       </button>
                     </>
+                  ) : (
+                    <span className="text-xs text-gray-400 italic">Import ikke implementeret</span>
                   )}
                 </div>
               </div>
