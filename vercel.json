@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/sync-engholm",
+      "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/cron/sync-scanmarine",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/sync-palby-products",
+      "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/cron/sync-palby-stock",
+      "schedule": "0 7,12,17,22 * * *"
+    }
+  ]
+}
