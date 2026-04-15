@@ -157,41 +157,58 @@ export default function SuppliersPage() {
                       Stop
                     </button>
                   ) : IMPORT_CONFIG[s.name] ? (
-                    <>
-                      <label className="flex items-center gap-1.5 text-sm text-gray-500 cursor-pointer">
-                        <input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)}
-                          className="accent-blue-500" />
-                        Test
-                      </label>
-                      {/* Palby: ekstra knapper til lager-sync */}
+                    <div className="flex flex-col items-end gap-2">
+                      {/* Palby: lager-knapper øverst */}
                       {s.name === 'Palby' && (
-                        <>
-                          <button
-                            onClick={() => startImport(s, 'stock')}
-                            disabled={!!importing}
-                            title="Henter kun nye delta-lagerfiler (hvert 15. min)"
-                            className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 disabled:opacity-40"
-                          >
-                            Lager Δ
-                          </button>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-gray-400">Lager:</span>
                           <button
                             onClick={() => startImport(s, 'stock-full')}
                             disabled={!!importing}
-                            title="Henter komplet lagerstatus-fil"
+                            title="Henter komplet lagerstatus-fil fra Palby FTP og opdaterer alle kendte produkter. Brug ved første opsætning."
                             className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 disabled:opacity-40"
                           >
-                            Lager fuld
+                            Fuld opdatering
                           </button>
-                        </>
+                          <button
+                            onClick={() => startImport(s, 'stock')}
+                            disabled={!!importing}
+                            title="Henter kun nye delta-lagerfiler siden sidst — hurtig opdatering. Kræver at 'Fuld opdatering' er kørt mindst én gang."
+                            className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 border border-teal-200 rounded-lg hover:bg-teal-100 disabled:opacity-40"
+                          >
+                            Nye ændringer
+                          </button>
+                        </div>
                       )}
-                      <button
-                        onClick={() => startImport(s)}
-                        disabled={!!importing}
-                        className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
-                      >
-                        Importér nu
-                      </button>
-                    </>
+
+                      {/* Produkt-import */}
+                      <div className="flex items-center gap-2">
+                        <label
+                          className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer"
+                          title="Importerer kun de første 100 produkter — til at verificere at importen virker korrekt"
+                        >
+                          <input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)}
+                            className="accent-blue-500" />
+                          Testmodus (100 stk.)
+                        </label>
+                        <button
+                          onClick={() => startImport(s)}
+                          disabled={!!importing}
+                          title={
+                            s.name === 'Palby'
+                              ? 'Henter komplet produktfil fra Palby FTP, matcher via EAN og opdaterer produkt-leverandør data. Ukendte produkter sendes til gennemgang.'
+                              : s.name === 'Engholm'
+                              ? 'Henter alle produkter fra Engholm API, matcher via EAN/GTIN og opdaterer data. Ukendte produkter sendes til gennemgang.'
+                              : s.name === 'Scanmarine'
+                              ? 'Henter CSV-fil fra Scanmarine, matcher via EAN og opdaterer data. Ukendte produkter sendes til gennemgang.'
+                              : 'Importér produktdata fra leverandøren og match mod eksisterende produkter'
+                          }
+                          className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
+                        >
+                          Importér produkter
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <span className="text-xs text-gray-400 italic">Import ikke implementeret</span>
                   )}
