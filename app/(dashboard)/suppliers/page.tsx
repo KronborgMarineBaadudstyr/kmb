@@ -28,10 +28,11 @@ type ImportProgress = {
 }
 
 // Leverandører med implementeret import + evt. krav
-const IMPORT_CONFIG: Record<string, { endpoint: string; needsFtp?: boolean }> = {
-  Engholm:    { endpoint: '/api/import/engholm'    },
-  Palby:      { endpoint: '/api/import/palby',      needsFtp: true },
-  Scanmarine: { endpoint: '/api/import/scanmarine' },
+const IMPORT_CONFIG: Record<string, { endpoint: string; needsFtp?: boolean; needsFile?: boolean }> = {
+  Engholm:              { endpoint: '/api/import/engholm'    },
+  Palby:                { endpoint: '/api/import/palby',      needsFtp: true },
+  Scanmarine:           { endpoint: '/api/import/scanmarine' },
+  'HF Industri Marine': { endpoint: '/api/import/hf-industri', needsFile: true },
 }
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -39,11 +40,12 @@ const FORMAT_LABELS: Record<string, string> = {
 }
 
 export default function SuppliersPage() {
-  const [suppliers,  setSuppliers]  = useState<Supplier[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [importing,  setImporting]  = useState<string | null>(null) // supplier id under import
-  const [progress,   setProgress]   = useState<ImportProgress | null>(null)
-  const [testMode,   setTestMode]   = useState(false)
+  const [suppliers,    setSuppliers]    = useState<Supplier[]>([])
+  const [loading,      setLoading]      = useState(true)
+  const [importing,    setImporting]    = useState<string | null>(null) // supplier id under import
+  const [progress,     setProgress]     = useState<ImportProgress | null>(null)
+  const [testMode,     setTestMode]     = useState(false)
+  const [selectedFile, setSelectedFile] = useState<Record<string, File>>({}) // supplierId → File
   const esRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
@@ -95,6 +97,62 @@ export default function SuppliersPage() {
       es.close()
       setImporting(null)
       setProgress(p => p ? { ...p, stage: 'error', message: 'Forbindelsesfejl' } : null)
+    }
+  }
+
+  async function startFileImport(supplier: Supplier) {
+    if (importing) return
+    const cfg = IMPORT_CONFIG[supplier.name]
+    if (!cfg) return
+
+    const file = selectedFile[supplier.id]
+    if (!file) {
+      alert('Vælg en XLSX-fil først')
+      return
+    }
+
+    setImporting(supplier.id)
+    setProgress(null)
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    let url = cfg.endpoint
+    if (testMode) url += '?limit=100'
+
+    try {
+      const response = await fetch(url, { method: 'POST', body: formData })
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP fejl: ${response.status}`)
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data:')) continue
+          const data: ImportProgress = JSON.parse(line.slice(5).trim())
+          setProgress(data)
+          if (data.stage === 'done' || data.stage === 'error') {
+            setImporting(null)
+            fetch('/api/suppliers').then(r => r.json()).then(j => setSuppliers(j.data ?? []))
+          }
+        }
+      }
+    } catch (e: unknown) {
+      setProgress(p => p
+        ? { ...p, stage: 'error', message: e instanceof Error ? e.message : String(e) }
+        : { stage: 'error', total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 1, message: String(e) }
+      )
+      setImporting(null)
     }
   }
 
@@ -156,6 +214,46 @@ export default function SuppliersPage() {
                       className="px-4 py-2 text-sm bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100">
                       Stop
                     </button>
+                  ) : IMPORT_CONFIG[s.name]?.needsFile ? (
+                    <div className="flex flex-col items-end gap-2">
+                      <div className="flex items-center gap-2">
+                        <label
+                          className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer"
+                          title="Importerer kun de første 100 produkter — til at verificere at importen virker korrekt"
+                        >
+                          <input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)}
+                            className="accent-blue-500" />
+                          Testmodus (100 stk.)
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <span className="text-xs text-gray-500">
+                            {selectedFile[s.id] ? selectedFile[s.id].name : 'Ingen fil valgt'}
+                          </span>
+                          <span className="px-3 py-1.5 text-xs bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer text-gray-700">
+                            Vælg fil…
+                          </span>
+                          <input
+                            type="file"
+                            accept=".xlsx"
+                            className="hidden"
+                            onChange={e => {
+                              const f = e.target.files?.[0]
+                              if (f) setSelectedFile(prev => ({ ...prev, [s.id]: f }))
+                            }}
+                          />
+                        </label>
+                        <button
+                          onClick={() => startFileImport(s)}
+                          disabled={!!importing || !selectedFile[s.id]}
+                          title="Upload XLSX-fil fra HF Industri Marine og importer produkter. Matcher via EAN og sender ukendte til gennemgang."
+                          className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
+                        >
+                          Upload & Importér
+                        </button>
+                      </div>
+                    </div>
                   ) : IMPORT_CONFIG[s.name] ? (
                     <div className="flex flex-col items-end gap-2">
                       {/* Palby: lager-knapper øverst */}
