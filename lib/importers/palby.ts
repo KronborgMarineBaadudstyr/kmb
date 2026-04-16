@@ -3,44 +3,37 @@ import { XMLParser } from 'fast-xml-parser'
 import * as ftp from 'basic-ftp'
 import { Writable } from 'stream'
 
-const CATALOG_FILTER = 'Kompakt'  // kun web-publicerede produkter
-
 // Palby FTP fil-stier
 const FILES = {
-  productFull:    '/webcataloginventitems_cust_newitemid.xml',
-  productDelta:   '/webcataloginventitems_cust_newitemid_delta.xml',
-  stockFull:      '/web_stockstatus_newitemid.xml',
-  stockDeltaDir:  '/',
+  productFull:      '/webcataloginventitems_flat_da_full.csv',
+  stockFull:        '/web_stockstatus_newitemid.xml',
+  stockDeltaDir:    '/delta/',
   stockDeltaPrefix: 'web_stockstatus_newitemid_delta_',
 }
 
+// Felt-indeks i CSV-headeren (0-baseret, sættes ved parsning)
+type CsvFieldMap = Record<string, number>
+
 type PalbyProduct = {
-  ItemId:               string
-  ItemName:             string
-  ItemCaption:          string
-  ShortTxt:             string
-  DescriptionTxt:       string
-  SpecificationsTxt:    string
-  ItemImageLargeUrl:    string
-  AlternateItemImages?: { Img?: { Url: string } | Array<{ Url: string }> }
-  GrossSalesPrice:      number
-  SalesPrice:           number
-  LowestQty:            number
-  MultipleQty:          number
-  ItemEan:              string
-  GrossWeight:          number
-  OnHandAvailPhysical:  number
-  OnHandAvailMore:      string
-  MainItemId:           string
-  ItemBrand:            string
-  HeaderItem:           string
-  InStockConfirmed:     string
-  InStockBestGuess:     string
-  StockOrderedQty:      number
-  OrigCountryRegionId:  string
-  Intracode:            string
-  CatalogCategories?:   { Category: string | string[] }
-  Catalog?:             { CatalogNode: { CatalogId: string } | Array<{ CatalogId: string }> }
+  ItemId:                   string
+  SalesPrice:               string   // indkøbspris til forhandler
+  RecommendedRetailPrice:   string   // vejledende salgspris
+  Currency:                 string
+  Productname:              string
+  ImageUrls:                string   // space-separerede URLs
+  Barcode:                  string   // EAN
+  Caption:                  string
+  ShortDescription:         string
+  LongDescription:          string
+  GrossWeight:              string
+  GrossHeight:              string
+  GrossWidth:               string
+  GrossDepth:               string
+  CatalogElementType:       string   // 'Single' | 'Master'
+  MasterItemId:             string
+  VariantName:              string
+  DropshippingNotPossible:  string
+  CatalogNodeIds:           string
 }
 
 type StockRow = {
@@ -98,72 +91,127 @@ async function downloadFile(client: ftp.Client, remotePath: string): Promise<Buf
   return Buffer.concat(chunks)
 }
 
-// Liste filer i en FTP-mappe og returner navne der matcher prefix
 async function listDeltaFiles(client: ftp.Client, dir: string, prefix: string): Promise<string[]> {
   const entries = await client.list(dir)
   return entries
     .filter(e => e.type === ftp.FileType.File && e.name.startsWith(prefix) && e.name.endsWith('.xml'))
     .map(e => e.name)
-    .sort()  // filnavnene indeholder timestamp → kronologisk sortering ved string-sort
+    .sort()
 }
 
-// Parse timestamp fra delta-filnavn: "web_stockstatus_newitemid_delta_20250414143000.xml" → "20250414143000"
 function parseDeltaTimestamp(filename: string, prefix: string): string {
   return filename.replace(prefix, '').replace('.xml', '')
 }
 
-// ── XML parse helpers ────────────────────────────────────────
+// ── CSV parser (Windows-1252, komma-separeret, dobbelte anførselstegn) ──
+
+function parseCsvRow(line: string): string[] {
+  const fields: string[] = []
+  let field = ''
+  let inQuote = false
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]
+    if (inQuote) {
+      if (ch === '"' && line[i + 1] === '"') {
+        field += '"'
+        i++
+      } else if (ch === '"') {
+        inQuote = false
+      } else {
+        field += ch
+      }
+    } else if (ch === '"') {
+      inQuote = true
+    } else if (ch === ',') {
+      fields.push(field)
+      field = ''
+    } else {
+      field += ch
+    }
+  }
+  fields.push(field)
+  return fields
+}
+
+function parsePalbyProductCsv(buf: Buffer): PalbyProduct[] {
+  // Palby CSV er Windows-1252 encoded
+  const text  = new TextDecoder('windows-1252').decode(buf)
+  const lines = text.split('\n').map(l => l.replace(/\r$/, ''))
+
+  if (lines.length < 2) return []
+
+  const headers = parseCsvRow(lines[0])
+  const fieldMap: CsvFieldMap = {}
+  headers.forEach((h, i) => { fieldMap[h.trim()] = i })
+
+  const get = (row: string[], field: string): string =>
+    row[fieldMap[field] ?? -1]?.trim() ?? ''
+
+  const products: PalbyProduct[] = []
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim()
+    if (!line) continue
+
+    const row = parseCsvRow(lines[i])
+
+    const p: PalbyProduct = {
+      ItemId:                  get(row, 'ItemId'),
+      SalesPrice:              get(row, 'SalesPrice'),
+      RecommendedRetailPrice:  get(row, 'RecommendedRetailPrice'),
+      Currency:                get(row, 'Currency'),
+      Productname:             get(row, 'Productname'),
+      ImageUrls:               get(row, 'ImageUrls'),
+      Barcode:                 get(row, 'Barcode'),
+      Caption:                 get(row, 'Caption'),
+      ShortDescription:        get(row, 'ShortDescription'),
+      LongDescription:         get(row, 'LongDescription'),
+      GrossWeight:             get(row, 'GrossWeight'),
+      GrossHeight:             get(row, 'GrossHeight'),
+      GrossWidth:              get(row, 'GrossWidth'),
+      GrossDepth:              get(row, 'GrossDepth'),
+      CatalogElementType:      get(row, 'CatalogElementType'),
+      MasterItemId:            get(row, 'MasterItemId'),
+      VariantName:             get(row, 'VariantName'),
+      DropshippingNotPossible: get(row, 'DropshippingNotPossible'),
+      CatalogNodeIds:          get(row, 'CatalogNodeIds'),
+    }
+
+    if (p.ItemId) products.push(p)
+  }
+
+  return products
+}
+
+function parseImages(p: PalbyProduct): Array<{ url: string; alt: string; is_primary: boolean }> {
+  if (!p.ImageUrls) return []
+  const urls = p.ImageUrls.split(' ').map(u => u.trim()).filter(Boolean)
+  return urls.map((url, idx) => ({
+    url,
+    alt:        p.Caption || p.Productname,
+    is_primary: idx === 0,
+  }))
+}
+
+function parseNumber(val: string): number | null {
+  if (!val) return null
+  const n = parseFloat(val.replace(',', '.'))
+  return isNaN(n) ? null : n
+}
+
+// ── XML parser (bruges til lager-XML) ────────────────────────
 
 const XML_PARSER = new XMLParser({
   ignoreAttributes:    false,
   parseTagValue:       true,
   parseAttributeValue: true,
-  isArray: (name) => ['InventTable', 'Img', 'Category', 'CatalogNode', 'AccessoryItem', 'RelatedItem', 'Li'].includes(name),
+  isArray: (name) => ['InventTable'].includes(name),
 })
-
-function parseProductXml(buf: Buffer): PalbyProduct[] {
-  const parsed = XML_PARSER.parse(buf.toString('utf-8'))
-  return parsed?.Export?.Service?.Body?.InventTable ?? []
-}
 
 function parseStockXml(buf: Buffer): StockRow[] {
   const parsed = XML_PARSER.parse(buf.toString('utf-8'))
   return parsed?.Export?.Service?.Body?.InventTable ?? []
-}
-
-function parseImages(p: PalbyProduct): Array<{ url: string; alt: string; is_primary: boolean }> {
-  const images: Array<{ url: string; alt: string; is_primary: boolean }> = []
-  if (p.ItemImageLargeUrl) {
-    images.push({ url: p.ItemImageLargeUrl, alt: p.ItemCaption || p.ItemName, is_primary: true })
-  }
-  const alt = p.AlternateItemImages
-  if (alt?.Img) {
-    const imgs = Array.isArray(alt.Img) ? alt.Img : [alt.Img]
-    for (const img of imgs) {
-      if (img.Url) images.push({ url: img.Url, alt: p.ItemCaption || p.ItemName, is_primary: false })
-    }
-  }
-  return images
-}
-
-function parseCategories(p: PalbyProduct): string[] {
-  if (!p.CatalogCategories?.Category) return []
-  const cats = Array.isArray(p.CatalogCategories.Category)
-    ? p.CatalogCategories.Category
-    : [p.CatalogCategories.Category]
-  const result = new Set<string>()
-  for (const cat of cats) {
-    cat.split('>').map((c: string) => c.trim()).filter(Boolean).forEach((c: string) => result.add(c))
-  }
-  return [...result]
-}
-
-function isWebPublished(p: PalbyProduct): boolean {
-  if (!p.Catalog) return false
-  const nodes = Array.isArray(p.Catalog.CatalogNode)
-    ? p.Catalog.CatalogNode
-    : p.Catalog.CatalogNode ? [p.Catalog.CatalogNode] : []
-  return nodes.some(n => n.CatalogId === CATALOG_FILTER)
 }
 
 // ── Produktimport ────────────────────────────────────────────
@@ -183,17 +231,13 @@ export async function importPalby(
   if (supErr || !supplier) throw new Error(`Palby ikke fundet: ${supErr?.message}`)
   if (!supplier.ftp_host) throw new Error('Palby FTP-legitimationsoplysninger mangler')
 
-  const s = supplier as SupplierRow
+  const s           = supplier as SupplierRow
   const SUPPLIER_ID = s.id
-
-  // Brug delta-fil hvis vi har synkroniseret før og delta=true
-  const hasPreviousSync = !!(s.sync_state?.last_full_product_sync)
-  const useDelta = options.delta && hasPreviousSync
 
   onProgress({
     stage: 'connecting', total: 0, processed: 0, matched: 0,
     staged: 0, updated: 0, skipped: 0, errors: 0,
-    message: `Forbinder til Palby FTP (${useDelta ? 'delta' : 'fuld'} import)...`,
+    message: 'Forbinder til Palby FTP...',
   })
 
   const client = await ftpConnect(s)
@@ -202,21 +246,20 @@ export async function importPalby(
     onProgress({
       stage: 'downloading', total: 0, processed: 0, matched: 0,
       staged: 0, updated: 0, skipped: 0, errors: 0,
-      message: 'Henter produktfil fra Palby FTP...',
+      message: `Henter produktfil fra Palby FTP (${FILES.productFull})...`,
     })
 
-    const filePath = useDelta ? FILES.productDelta : FILES.productFull
-    const xmlBuf   = await downloadFile(client, filePath)
+    const csvBuf = await downloadFile(client, FILES.productFull)
 
     onProgress({
       stage: 'parsing', total: 0, processed: 0, matched: 0,
       staged: 0, updated: 0, skipped: 0, errors: 0,
-      message: 'Parser XML...',
+      message: 'Parser CSV...',
     })
 
-    let products = parseProductXml(xmlBuf).filter(p =>
-      p.HeaderItem !== 'Yes' && isWebPublished(p)
-    )
+    // Filtrer: kun Single-produkter (ikke Master/variant-grupperinger)
+    let products = parsePalbyProductCsv(csvBuf)
+      .filter(p => p.CatalogElementType === 'Single')
 
     if (options.limit) products = products.slice(0, options.limit)
 
@@ -225,7 +268,7 @@ export async function importPalby(
     onProgress({
       stage: 'importing', total, processed: 0, matched: 0,
       staged: 0, updated: 0, skipped: 0, errors: 0,
-      message: `${total.toLocaleString('da-DK')} produkter — starter matching...`,
+      message: `${total.toLocaleString('da-DK')} Single-produkter — starter matching...`,
     })
 
     // Hent eksisterende product_suppliers og staging
@@ -243,45 +286,43 @@ export async function importPalby(
     for (let i = 0; i < products.length; i += BATCH) {
       const batch = products.slice(i, i + BATCH)
 
-      const eans = batch.map(p => String(p.ItemEan || '')).filter(Boolean)
+      const eans = batch.map(p => p.Barcode).filter(Boolean)
       const { data: byEan } = eans.length > 0
         ? await supabase.from('products').select('id, name, ean').in('ean', eans)
         : { data: [] }
       const productByEan = Object.fromEntries((byEan ?? []).filter(p => p.ean).map(p => [String(p.ean), p]))
 
       for (const p of batch) {
-        const ean      = p.ItemEan ? String(p.ItemEan) : null
-        const images   = parseImages(p)
-        const cats     = parseCategories(p)
-        const skuStr   = String(p.ItemId)
+        const ean    = p.Barcode || null
+        const images = parseImages(p)
+        const skuStr = p.ItemId
 
         const supplierData = {
           supplier_id:             SUPPLIER_ID,
           supplier_sku:            skuStr,
-          supplier_product_name:   p.ItemCaption || p.ItemName,
-          purchase_price:          p.SalesPrice      > 0 ? p.SalesPrice      : null,
-          recommended_sales_price: p.GrossSalesPrice > 0 ? p.GrossSalesPrice : null,
-          supplier_stock_quantity: Number(p.OnHandAvailPhysical) || 0,
+          supplier_product_name:   p.Caption || p.Productname,
+          purchase_price:          parseNumber(p.SalesPrice),
+          recommended_sales_price: parseNumber(p.RecommendedRetailPrice),
+          supplier_stock_quantity: 0,   // lager opdateres separat via syncPalbyStock
           supplier_stock_reserved: 0,
-          item_status:             (Number(p.OnHandAvailPhysical) || 0) > 0 ? 'active' : 'out_of_stock',
-          moq:                     Number(p.LowestQty) || 1,
+          item_status:             'active',
+          moq:                     1,
           supplier_images:         images,
           extra_data: {
-            item_name:           p.ItemName,
-            short_description:   p.ShortTxt          || null,
-            description:         p.DescriptionTxt    || null,
-            specifications:      p.SpecificationsTxt || null,
+            productname:              p.Productname,
+            short_description:        p.ShortDescription || null,
+            description:              p.LongDescription  || null,
             ean,
-            weight:              p.GrossWeight        || null,
-            brand:               p.ItemBrand          || null,
-            categories:          cats,
-            origin_country:      p.OrigCountryRegionId || null,
-            hs_code:             p.Intracode          || null,
-            main_item_id:        p.MainItemId         || null,
-            in_stock_confirmed:  p.InStockConfirmed   || null,
-            in_stock_best_guess: p.InStockBestGuess   || null,
-            multiple_qty:        Number(p.MultipleQty) || null,
-            on_hand_avail_more:  p.OnHandAvailMore === 'Yes',
+            weight:                   parseNumber(p.GrossWeight),
+            height:                   parseNumber(p.GrossHeight),
+            width:                    parseNumber(p.GrossWidth),
+            depth:                    parseNumber(p.GrossDepth),
+            currency:                 p.Currency         || null,
+            catalog_element_type:     p.CatalogElementType,
+            master_item_id:           p.MasterItemId     || null,
+            variant_name:             p.VariantName      || null,
+            dropshipping_not_possible: p.DropshippingNotPossible === 'true',
+            catalog_node_ids:         p.CatalogNodeIds   || null,
           },
           variant_id: null,
           is_active:  true,
@@ -304,8 +345,9 @@ export async function importPalby(
           const stagingRow = existingStaging[skuStr]
           if (stagingRow && stagingRow.status !== 'pending_review') {
             await supabase.from('supplier_product_staging')
-              .update({ raw_data: supplierData.extra_data, updated_at: new Date().toISOString() })
+              .update({ raw_data: { ...supplierData.extra_data, supplier_sku: skuStr, supplier_product_name: supplierData.supplier_product_name, purchase_price: supplierData.purchase_price, recommended_sales_price: supplierData.recommended_sales_price, supplier_images: images }, updated_at: new Date().toISOString() })
               .eq('id', stagingRow.id)
+            skipped++
             processed++
             continue
           }
@@ -318,23 +360,22 @@ export async function importPalby(
               supplier_product_name:   supplierData.supplier_product_name,
               purchase_price:          supplierData.purchase_price,
               recommended_sales_price: supplierData.recommended_sales_price,
-              supplier_stock_quantity: supplierData.supplier_stock_quantity,
               supplier_images:         images,
             },
-            normalized_name:      p.ItemCaption || p.ItemName,
+            normalized_name:      p.Caption || p.Productname,
             normalized_ean:       ean,
             normalized_sku:       skuStr,
             normalized_unit:      null,
             normalized_unit_size: null,
             match_suggestions:    [],
-            status:               stagingRow ? stagingRow.status : 'pending_review',
+            status:               'pending_review',
             updated_at:           new Date().toISOString(),
           }
 
           const { error } = stagingRow
             ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
             : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-          if (error) errors++; else staged++
+          if (error) { console.error('Staging insert error:', error); errors++ } else staged++
         }
 
         processed++
@@ -346,7 +387,6 @@ export async function importPalby(
       })
     }
 
-    // Opdater last_synced_at + sync_state
     const newSyncState = {
       ...(s.sync_state ?? {}),
       last_full_product_sync: new Date().toISOString(),
@@ -367,9 +407,10 @@ export async function importPalby(
 
 // ── Lagersync via delta-filer ────────────────────────────────
 //
-// Palby opdaterer delta-lagerfiler hvert 15. min med timestampet filnavn:
+// Palby opdaterer delta-lagerfiler med timestampet filnavn:
 //   web_stockstatus_newitemid_delta_<YYYYMMDDHHMMSS>.xml
-// Vi henter kun filer nyere end sidst behandlede timestamp.
+// Fuld lagerfil: web_stockstatus_newitemid.xml (i roden)
+// Delta-filer: /delta/web_stockstatus_newitemid_delta_*.xml
 
 export async function syncPalbyStock(
   onProgress: ProgressCallback,
@@ -386,9 +427,9 @@ export async function syncPalbyStock(
   if (supErr || !supplier) throw new Error(`Palby ikke fundet: ${supErr?.message}`)
   if (!supplier.ftp_host) throw new Error('Palby FTP-legitimationsoplysninger mangler')
 
-  const s          = supplier as SupplierRow
+  const s           = supplier as SupplierRow
   const SUPPLIER_ID = s.id
-  const syncState  = s.sync_state ?? {}
+  const syncState   = s.sync_state ?? {}
 
   onProgress({
     stage: 'connecting', total: 0, processed: 0, matched: 0,
@@ -399,22 +440,20 @@ export async function syncPalbyStock(
   const client = await ftpConnect(s)
 
   try {
-    let filesToProcess: string[] = []
-    let lastDeltaTs = syncState.last_stock_delta_ts ?? ''
+    const lastDeltaTs = syncState.last_stock_delta_ts ?? ''
 
     if (options.full || !lastDeltaTs) {
-      // Første kørsel eller fuld sync — brug den komplette lagerfil
       onProgress({
         stage: 'downloading', total: 0, processed: 0, matched: 0,
         staged: 0, updated: 0, skipped: 0, errors: 0,
-        message: 'Henter komplet lagerstatus (første kørsel)...',
+        message: 'Henter komplet lagerfil (fuld sync)...',
       })
 
-      const buf   = await downloadFile(client, FILES.stockFull)
-      const rows  = parseStockXml(buf)
-      const count = await applyStockRows(rows, SUPPLIER_ID, supabase, onProgress)
+      const buf  = await downloadFile(client, FILES.stockFull)
+      const rows = parseStockXml(buf)
+      const res  = await applyStockRows(rows, SUPPLIER_ID, supabase, onProgress)
 
-      // Gem den seneste delta-timestamp som baseline
+      // Gem nyeste delta-timestamp som baseline
       const allDeltas = await listDeltaFiles(client, FILES.stockDeltaDir, FILES.stockDeltaPrefix)
       const newestTs  = allDeltas.length > 0
         ? parseDeltaTimestamp(allDeltas[allDeltas.length - 1], FILES.stockDeltaPrefix)
@@ -427,21 +466,21 @@ export async function syncPalbyStock(
 
       onProgress({
         stage: 'done', total: rows.length, processed: rows.length,
-        matched: 0, staged: 0, updated: count.updated, skipped: count.skipped, errors: count.errors,
-        message: `Lagersync færdig! ${count.updated} opdateret · ${count.errors} fejl`,
+        matched: 0, staged: 0, updated: res.updated, skipped: res.skipped, errors: res.errors,
+        message: `Fuld lagersync færdig! ${res.updated} opdateret · ${res.errors} fejl`,
       })
       return
     }
 
-    // Delta-kørsel — find filer nyere end lastDeltaTs
+    // Delta-kørsel
     onProgress({
       stage: 'downloading', total: 0, processed: 0, matched: 0,
       staged: 0, updated: 0, skipped: 0, errors: 0,
-      message: 'Finder nye delta-filer på FTP...',
+      message: 'Finder nye delta-lagerfiler på FTP...',
     })
 
-    const allDeltas = await listDeltaFiles(client, FILES.stockDeltaDir, FILES.stockDeltaPrefix)
-    filesToProcess  = allDeltas.filter(f => {
+    const allDeltas    = await listDeltaFiles(client, FILES.stockDeltaDir, FILES.stockDeltaPrefix)
+    const filesToProcess = allDeltas.filter(f => {
       const ts = parseDeltaTimestamp(f, FILES.stockDeltaPrefix)
       return ts > lastDeltaTs
     })
@@ -461,8 +500,7 @@ export async function syncPalbyStock(
       message: `${filesToProcess.length} nye delta-filer fundet — behandler...`,
     })
 
-    let totalUpdated = 0, totalErrors = 0
-    let processedFiles = 0
+    let totalUpdated = 0, totalErrors = 0, processedFiles = 0
 
     for (const filename of filesToProcess) {
       const buf  = await downloadFile(client, `${FILES.stockDeltaDir}${filename}`)
@@ -473,7 +511,6 @@ export async function syncPalbyStock(
       totalErrors  += res.errors
       processedFiles++
 
-      // Gem løbende fremskridt
       const ts = parseDeltaTimestamp(filename, FILES.stockDeltaPrefix)
       await supabase.from('suppliers').update({
         last_synced_at: new Date().toISOString(),
