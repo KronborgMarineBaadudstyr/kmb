@@ -33,6 +33,7 @@ const IMPORT_CONFIG: Record<string, { endpoint: string; needsFtp?: boolean; need
   Palby:                { endpoint: '/api/import/palby',      needsFtp: true },
   Scanmarine:           { endpoint: '/api/import/scanmarine' },
   'HF Industri Marine': { endpoint: '/api/import/hf-industri', needsFile: true },
+  'Columbus Marine':    { endpoint: '/api/import/columbus' },
 }
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -299,6 +300,8 @@ export default function SuppliersPage() {
                               ? 'Henter alle produkter fra Engholm API, matcher via EAN/GTIN og opdaterer data. Ukendte produkter sendes til gennemgang.'
                               : s.name === 'Scanmarine'
                               ? 'Henter CSV-fil fra Scanmarine, matcher via EAN og opdaterer data. Ukendte produkter sendes til gennemgang.'
+                              : s.name === 'Columbus Marine'
+                              ? 'Henter ColumbusStock.xml fra Columbus Marine FTP, matcher via EAN og opdaterer data. Ukendte produkter sendes til gennemgang.'
                               : 'Importér produktdata fra leverandøren og match mod eksisterende produkter'
                           }
                           className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
