@@ -93,9 +93,9 @@ function parseColumbusXml(buf: Buffer): ColumbusProduct[] {
 }
 
 // Konverter pipe-separeret tekst til beskrivelse
-function formatDescription(piped: string): string | null {
+function formatDescription(piped: unknown): string | null {
   if (!piped) return null
-  return piped.split('|').map(s => s.trim()).filter(Boolean).join('\n')
+  return String(piped).split('|').map(s => s.trim()).filter(Boolean).join('\n')
 }
 
 // ── Produktimport ────────────────────────────────────────────
@@ -229,13 +229,13 @@ export async function importColumbus(
                   supplier_stock_updated_at: new Date().toISOString(),
                 })
                 .eq('id', existing.id)
-            ).then(({ error }) => { if (error) { errors++; updated-- } }))
+            ).then(({ error }) => { if (error) { console.error(`[columbus] update product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; updated-- } }))
           } else {
             matched++
             ops.push(Promise.resolve(
               supabase.from('product_suppliers')
                 .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-            ).then(({ error }) => { if (error) { console.error('product_suppliers insert error:', error); errors++; matched-- } }))
+            ).then(({ error }) => { if (error) { console.error(`[columbus] insert product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; matched-- } }))
           }
         } else {
           const stagingRow = existingStaging[skuStr]
@@ -255,7 +255,7 @@ export async function importColumbus(
               supabase.from('supplier_product_staging')
                 .update({ raw_data: rawData, updated_at: new Date().toISOString() })
                 .eq('id', stagingRow.id)
-            ).then(({ error }) => { if (error) { errors++; skipped-- } }))
+            ).then(({ error }) => { if (error) { console.error(`[columbus] update staging sku=${skuStr}:`, error.message, error.details); errors++; skipped-- } }))
           } else {
             const stagingUpsertRow = {
               supplier_id:          SUPPLIER_ID,
@@ -274,7 +274,7 @@ export async function importColumbus(
               stagingRow
                 ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
                 : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-            ).then(({ error }) => { if (error) { console.error('Staging error:', error); errors++; staged-- } }))
+            ).then(({ error }) => { if (error) { console.error(`[columbus] upsert staging sku=${skuStr}:`, error.message, error.details); errors++; staged-- } }))
           }
         }
       }
