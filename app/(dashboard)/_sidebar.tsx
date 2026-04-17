@@ -9,6 +9,7 @@ const navItems = [
   { href: '/suppliers', label: 'Leverandører',    icon: '🏭' },
   { href: '/staging',   label: 'Til gennemgang',  icon: '🔍' },
   { href: '/inventory', label: 'Lagerbeholdning', icon: '📊' },
+  { href: '/matching',  label: 'Matching',         icon: '🔗' },
   { href: '/sync',      label: 'Sync & Logs',     icon: '🔄' },
 ]
 

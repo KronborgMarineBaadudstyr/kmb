@@ -41,7 +41,7 @@ export async function flagRecentlyImportedForReview(
       .gt('updated_at', since.toISOString())
       .range(p * 1000, p * 1000 + 999)
     if (!data || data.length === 0) break
-    allRows.push(...(data as typeof allRows))
+    allRows.push(...(data as unknown as typeof allRows))
     if (data.length < 1000) break
   }
 
