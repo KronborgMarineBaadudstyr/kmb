@@ -117,6 +117,7 @@ const PRODUCT_PARSER = new XMLParser({
   ignoreAttributes:    false,
   parseTagValue:       true,
   parseAttributeValue: true,
+  processEntities:     false,
   isArray: (name) => name === 'products',
 })
 
