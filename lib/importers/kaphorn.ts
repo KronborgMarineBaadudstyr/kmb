@@ -237,23 +237,30 @@ export async function importKapHorn(
     })
 
     // Preload existing product_suppliers and staging rows
-    const { data: existingSpRows } = await supabase
-      .from('product_suppliers')
-      .select('id, supplier_sku, product_id, priority, supplier_files')
-      .eq('supplier_id', SUPPLIER_ID)
+    // Pagineret preload — undgår Supabase's 1000-rækkegrænse
+    const existingSpRows: { id: string; supplier_sku: string; product_id: string; priority: number; supplier_files: unknown }[] = []
+    for (let p = 0; ; p++) {
+      const { data } = await supabase.from('product_suppliers')
+        .select('id, supplier_sku, product_id, priority, supplier_files')
+        .eq('supplier_id', SUPPLIER_ID)
+        .range(p * 1000, p * 1000 + 999)
+      if (!data || data.length === 0) break
+      existingSpRows.push(...data)
+      if (data.length < 1000) break
+    }
+    const existingBySku = Object.fromEntries(existingSpRows.map(r => [r.supplier_sku, r]))
 
-    const existingBySku = Object.fromEntries(
-      (existingSpRows ?? []).map(r => [r.supplier_sku, r])
-    )
-
-    const { data: existingStagingRows } = await supabase
-      .from('supplier_product_staging')
-      .select('id, normalized_sku, status')
-      .eq('supplier_id', SUPPLIER_ID)
-
-    const existingStaging = Object.fromEntries(
-      (existingStagingRows ?? []).map(r => [r.normalized_sku, r])
-    )
+    const existingStagingRows: { id: string; normalized_sku: string; status: string }[] = []
+    for (let p = 0; ; p++) {
+      const { data } = await supabase.from('supplier_product_staging')
+        .select('id, normalized_sku, status')
+        .eq('supplier_id', SUPPLIER_ID)
+        .range(p * 1000, p * 1000 + 999)
+      if (!data || data.length === 0) break
+      existingStagingRows.push(...data)
+      if (data.length < 1000) break
+    }
+    const existingStaging = Object.fromEntries(existingStagingRows.map(r => [r.normalized_sku, r]))
 
     const BATCH = 50  // Smaller batches due to PDF downloads
     let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0

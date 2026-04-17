@@ -272,13 +272,29 @@ export async function importPalby(
     })
 
     // Hent eksisterende product_suppliers og staging
-    const { data: existingSpRows } = await supabase
-      .from('product_suppliers').select('id, supplier_sku, product_id, priority').eq('supplier_id', SUPPLIER_ID)
-    const existingBySku = Object.fromEntries((existingSpRows ?? []).map(r => [r.supplier_sku, r]))
+    const existingSpRows: { id: string; supplier_sku: string; product_id: string; priority: number }[] = []
+    for (let p = 0; ; p++) {
+      const { data } = await supabase.from('product_suppliers')
+        .select('id, supplier_sku, product_id, priority')
+        .eq('supplier_id', SUPPLIER_ID)
+        .range(p * 1000, p * 1000 + 999)
+      if (!data || data.length === 0) break
+      existingSpRows.push(...data)
+      if (data.length < 1000) break
+    }
+    const existingBySku = Object.fromEntries(existingSpRows.map(r => [r.supplier_sku, r]))
 
-    const { data: existingStagingRows } = await supabase
-      .from('supplier_product_staging').select('id, normalized_sku, status').eq('supplier_id', SUPPLIER_ID)
-    const existingStaging = Object.fromEntries((existingStagingRows ?? []).map(r => [r.normalized_sku, r]))
+    const existingStagingRows: { id: string; normalized_sku: string; status: string }[] = []
+    for (let p = 0; ; p++) {
+      const { data } = await supabase.from('supplier_product_staging')
+        .select('id, normalized_sku, status')
+        .eq('supplier_id', SUPPLIER_ID)
+        .range(p * 1000, p * 1000 + 999)
+      if (!data || data.length === 0) break
+      existingStagingRows.push(...data)
+      if (data.length < 1000) break
+    }
+    const existingStaging = Object.fromEntries(existingStagingRows.map(r => [r.normalized_sku, r]))
 
     const BATCH = 100
     let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0
