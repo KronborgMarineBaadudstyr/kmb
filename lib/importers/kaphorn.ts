@@ -231,7 +231,7 @@ async function buildSupplierFiles(
 
 export async function importKapHorn(
   onProgress: ProgressCallback,
-  options: { limit?: number } = {}
+  options: { limit?: number; skipPdfs?: boolean } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -333,11 +333,10 @@ export async function importKapHorn(
         const related = [p['Related1BAL'], p['Related2BAL'], p['Related3BAL']]
           .map(v => strOrNull(v)).filter(Boolean)
 
-        // Build supplier_files from PDF1-3URL
-        const supplierFiles = await buildSupplierFiles(
-          supabase, p, sku,
-          existing?.supplier_files ?? null
-        )
+        // Build supplier_files from PDF1-3URL (skip on first run or when skipPdfs=true)
+        const supplierFiles = options.skipPdfs
+          ? (existing?.supplier_files ?? [])
+          : await buildSupplierFiles(supabase, p, sku, existing?.supplier_files ?? null)
 
         // Build supplier_images
         const imageUrl = String(p.ImageURL ?? '').trim()
