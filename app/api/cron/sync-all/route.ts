@@ -36,7 +36,7 @@ export async function GET(request: Request) {
   await run('palby',         () => importPalby(noop))
   await run('palby-stock',   () => syncPalbyStock(noop, { full: true }))
   await run('columbus',      () => importColumbus(noop))
-  await run('kaphorn',       () => importKapHorn(noop, { skipPdfs: true }))
+  await run('kaphorn',       () => importKapHorn(noop))
   await run('kaphorn-stock', () => syncKapHornStock(noop))
 
   const allOk = Object.values(results).every(v => v === 'ok')

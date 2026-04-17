@@ -166,72 +166,26 @@ function vejlExclVat(val: unknown): number | null {
   return n != null && n > 0 ? Math.round((n / 1.25) * 100) / 100 : null
 }
 
-// ── PDF → Supabase Storage ───────────────────────────────────
+// ── PDF-links (direkte URL — ingen upload til Storage) ───────
 
-async function uploadPdf(
-  supabase: ReturnType<typeof createServiceClient>,
-  url: string,
-  sku: string
-): Promise<string | null> {
-  try {
-    const resp = await fetch(url, { signal: AbortSignal.timeout(30_000) })
-    if (!resp.ok) return null
-    const buf    = Buffer.from(await resp.arrayBuffer())
-    const fname  = url.split('/').pop()?.split('?')[0] ?? 'document.pdf'
-    const path   = `kaphorn/${sku}/${fname}`
-    const { error } = await supabase.storage
-      .from('supplier-files')
-      .upload(path, buf, { contentType: 'application/pdf', upsert: true })
-    if (error) return null
-    const { data } = supabase.storage.from('supplier-files').getPublicUrl(path)
-    return data.publicUrl
-  } catch {
-    return null
-  }
-}
-
-async function buildSupplierFiles(
-  supabase: ReturnType<typeof createServiceClient>,
-  p: KapHornProduct,
-  sku: string,
-  existingFiles: Array<{ url: string; name: string; type: string; source_url?: string }> | null
-): Promise<Array<{ url: string; name: string; type: string; source_url: string }>> {
-  const sourceUrls = [p.PDF1URL, p.PDF2URL, p.PDF3URL]
+function buildSupplierFiles(
+  p: KapHornProduct
+): Array<{ url: string; name: string; type: string }> {
+  return [p.PDF1URL, p.PDF2URL, p.PDF3URL]
     .map(u => String(u ?? '').trim())
     .filter(Boolean)
-
-  if (sourceUrls.length === 0) return []
-
-  // Build lookup of already-stored files by source_url to avoid re-downloading
-  const storedBySource = Object.fromEntries(
-    (existingFiles ?? [])
-      .filter(f => f.source_url)
-      .map(f => [f.source_url!, f])
-  )
-
-  const files: Array<{ url: string; name: string; type: string; source_url: string }> = []
-
-  for (const srcUrl of sourceUrls) {
-    if (storedBySource[srcUrl]) {
-      // Already in Storage — keep existing entry
-      files.push(storedBySource[srcUrl] as typeof files[0])
-      continue
-    }
-    const storageUrl = await uploadPdf(supabase, srcUrl, sku)
-    if (storageUrl) {
-      const fname = srcUrl.split('/').pop()?.split('?')[0] ?? 'Dokument'
-      files.push({ url: storageUrl, name: fname, type: 'spec', source_url: srcUrl })
-    }
-  }
-
-  return files
+    .map(url => ({
+      url,
+      name: url.split('/').pop()?.split('?')[0] ?? 'Dokument.pdf',
+      type: 'spec',
+    }))
 }
 
 // ── Product import ───────────────────────────────────────────
 
 export async function importKapHorn(
   onProgress: ProgressCallback,
-  options: { limit?: number; skipPdfs?: boolean } = {}
+  options: { limit?: number } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -333,10 +287,8 @@ export async function importKapHorn(
         const related = [p['Related1BAL'], p['Related2BAL'], p['Related3BAL']]
           .map(v => strOrNull(v)).filter(Boolean)
 
-        // Build supplier_files from PDF1-3URL (skip on first run or when skipPdfs=true)
-        const supplierFiles = options.skipPdfs
-          ? (existing?.supplier_files ?? [])
-          : await buildSupplierFiles(supabase, p, sku, existing?.supplier_files ?? null)
+        // Build supplier_files — direkte links til PDFs på khsport2.dk (offentlige)
+        const supplierFiles = buildSupplierFiles(p)
 
         // Build supplier_images
         const imageUrl = String(p.ImageURL ?? '').trim()
