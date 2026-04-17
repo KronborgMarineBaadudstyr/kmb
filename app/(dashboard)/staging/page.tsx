@@ -527,15 +527,27 @@ export default function StagingPage() {
                   <button
                     onClick={() => doAction('reject')}
                     disabled={actionLoading}
+                    title="Markerer at du har set og håndteret dette — produktet fjernes fra 'Mangler data' listen. Næste import vil flage det igen hvis data stadig mangler."
                     className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                   >
                     Marker som set
+                  </button>
+                )}
+                {selected.status === 'pending_review' && (
+                  <button
+                    onClick={() => doAction('reject')}
+                    disabled={actionLoading}
+                    title="Afvis dette produkt — det er f.eks. et duplikat, udgået vare eller ikke relevant for sortimentet. Produktet fjernes fra listen og importeres ikke igen."
+                    className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Afvis
                   </button>
                 )}
                 {(selected.status === 'matched' || selected.status === 'new_product' || selected.status === 'rejected') && (
                   <button
                     onClick={() => doAction('reopen')}
                     disabled={actionLoading}
+                    title="Genåbn til manuel gennemgang — sætter status tilbage til 'Afventer' så produktet kan matches eller behandles på ny."
                     className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                   >
                     Genåbn til gennemgang
