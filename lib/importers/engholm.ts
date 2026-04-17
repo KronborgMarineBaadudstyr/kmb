@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizeUnit, resolveUnit } from './unit-normalizer'
+import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 
 const SUPPLIER_ID = '37d879e5-c0f7-48ae-b514-168264c80f9f'
 const API_URL     = 'https://www.engholm.dk/api/products'
@@ -160,6 +161,7 @@ export async function importEngholm(
 
   // ── 4. Importer i batches ──
   const BATCH = 100
+  const importStart = new Date()
   let processed = 0, matched = 0, staged = 0, updated = 0, errors = 0
 
   for (let i = 0; i < products.length; i += BATCH) {
@@ -288,6 +290,8 @@ export async function importEngholm(
       message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} — ${matched} matchet, ${updated} opdateret, ${staged} til gennemgang`,
     })
   }
+
+  await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 
   onProgress({
     stage: 'done', total, processed, matched, staged, updated, errors,

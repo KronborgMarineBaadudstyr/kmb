@@ -15,12 +15,18 @@ type StagingRow = {
   normalized_sku:       string
   normalized_unit:      string | null
   normalized_unit_size: number | null
-  status:               'pending_review' | 'matched' | 'new_product' | 'rejected'
+  status:               'pending_review' | 'matched' | 'new_product' | 'rejected' | 'needs_review'
   matched_product_id:   string | null
   created_at:           string
   updated_at:           string
   suppliers:            { name: string }
   raw_data:             Record<string, unknown>
+}
+
+const REVIEW_REASON_LABELS: Record<string, string> = {
+  ikke_i_salg:          'Ikke i salg (ingen Woo/POS tilknytning)',
+  mangler_beskrivelse:  'Mangler beskrivelse',
+  mangler_salgspris:    'Mangler salgspris',
 }
 
 type Suggestion = {
@@ -40,10 +46,11 @@ type SuggestionsResult = {
 type Supplier = { id: string; name: string }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  pending_review: { label: 'Afventer',   color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  matched:        { label: 'Matchet',    color: 'bg-green-50 text-green-700 border-green-200'   },
-  new_product:    { label: 'Nyt produkt',color: 'bg-blue-50 text-blue-700 border-blue-200'      },
-  rejected:       { label: 'Afvist',     color: 'bg-gray-100 text-gray-500 border-gray-200'     },
+  pending_review: { label: 'Afventer',      color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  needs_review:   { label: 'Mangler data',  color: 'bg-orange-50 text-orange-700 border-orange-200' },
+  matched:        { label: 'Matchet',       color: 'bg-green-50 text-green-700 border-green-200'    },
+  new_product:    { label: 'Nyt produkt',   color: 'bg-blue-50 text-blue-700 border-blue-200'       },
+  rejected:       { label: 'Afvist',        color: 'bg-gray-100 text-gray-500 border-gray-200'      },
 }
 
 export default function StagingPage() {
@@ -189,7 +196,7 @@ export default function StagingPage() {
           <div className="flex items-center gap-2 flex-wrap">
             {/* Status filter */}
             <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-              {(['pending_review', 'matched', 'new_product', 'rejected', 'all'] as const).map(s => (
+              {(['pending_review', 'needs_review', 'matched', 'new_product', 'rejected', 'all'] as const).map(s => (
                 <button
                   key={s}
                   onClick={() => { setStatusFilter(s); setPage(1) }}
@@ -199,10 +206,11 @@ export default function StagingPage() {
                       : 'text-gray-600 hover:bg-gray-50'
                   }`}
                 >
-                  {s === 'pending_review' ? 'Afventer' :
-                   s === 'matched'        ? 'Matchet'  :
-                   s === 'new_product'    ? 'Nye'      :
-                   s === 'rejected'       ? 'Afvist'   : 'Alle'}
+                  {s === 'pending_review' ? 'Afventer'     :
+                   s === 'needs_review'   ? 'Mangler data' :
+                   s === 'matched'        ? 'Matchet'      :
+                   s === 'new_product'    ? 'Nye'          :
+                   s === 'rejected'       ? 'Afvist'       : 'Alle'}
                 </button>
               ))}
             </div>
@@ -392,6 +400,34 @@ export default function StagingPage() {
               )}
             </section>
 
+            {/* Needs-review sektion — vis årsager og link til produkt */}
+            {selected.status === 'needs_review' && (
+              <section>
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                  Hvorfor skal dette gennemgås?
+                </h4>
+                <div className="space-y-2 mb-4">
+                  {((selected.raw_data?.review_reasons ?? []) as string[]).map(reason => (
+                    <div key={reason} className="flex items-center gap-2 text-sm text-orange-700 bg-orange-50 rounded-lg px-3 py-2">
+                      <span className="text-orange-400">⚠</span>
+                      {REVIEW_REASON_LABELS[reason] ?? reason}
+                    </div>
+                  ))}
+                  {((selected.raw_data?.review_reasons ?? []) as string[]).length === 0 && (
+                    <p className="text-sm text-gray-400">Ingen årsager registreret</p>
+                  )}
+                </div>
+                {selected.matched_product_id && (
+                  <a
+                    href={`/products?id=${selected.matched_product_id}`}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    Åbn produkt →
+                  </a>
+                )}
+              </section>
+            )}
+
             {/* Match-sektion */}
             {(selected.status === 'pending_review' || selected.status === 'matched') && (
               <section>
@@ -486,6 +522,15 @@ export default function StagingPage() {
                       Afvis
                     </button>
                   </>
+                )}
+                {selected.status === 'needs_review' && (
+                  <button
+                    onClick={() => doAction('reject')}
+                    disabled={actionLoading}
+                    className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Marker som set
+                  </button>
                 )}
                 {(selected.status === 'matched' || selected.status === 'new_product' || selected.status === 'rejected') && (
                   <button

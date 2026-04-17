@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx'
 import { createServiceClient } from '@/lib/supabase/server'
+import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 
 export type HfIndustriImportProgress = {
   stage:     'parsing' | 'importing' | 'done' | 'error'
@@ -191,6 +192,7 @@ export async function importHfIndustri(
   )
 
   const BATCH = 100
+  const importStart = new Date()
   let processed = 0, matched = 0, staged = 0, updated = 0, errors = 0
 
   for (let i = 0; i < allRows.length; i += BATCH) {
@@ -309,6 +311,8 @@ export async function importHfIndustri(
       message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} — ${matched} matchet, ${updated} opdateret, ${staged} til gennemgang`,
     })
   }
+
+  await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 
   onProgress({
     stage: 'done', total, processed, matched, staged, updated, errors,

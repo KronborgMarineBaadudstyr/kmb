@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { XMLParser } from 'fast-xml-parser'
 import * as ftp from 'basic-ftp'
 import { Writable } from 'stream'
+import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 
 // Columbus Marine bruger to XML-filer:
 //   ColumbusCommonStock.xml — fælles sortiment (alle kunder)
@@ -178,6 +179,7 @@ export async function importColumbus(
     const existingStaging = Object.fromEntries(existingStagingRows.map(r => [r.normalized_sku, r]))
 
     const BATCH = 200
+    const importStart = new Date()
     let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0
 
     for (let i = 0; i < products.length; i += BATCH) {
@@ -310,6 +312,8 @@ export async function importColumbus(
         sync_state:     { ...(s.sync_state ?? {}), last_full_sync: new Date().toISOString() },
       })
       .eq('id', SUPPLIER_ID)
+
+    await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 
     onProgress({
       stage: 'done', total, processed, matched, staged, updated, skipped, errors,
