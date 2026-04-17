@@ -50,7 +50,7 @@ async function runEanPhase(
 ): Promise<{ groupsCreated: number; rowsAssigned: number }> {
   onProgress({ stage: 'ean_phase', message: 'EAN-gruppering kører (SQL)...' })
 
-  const { data, error } = await supabase.rpc('create_ean_match_groups')
+  const { data, error } = await supabase.rpc('create_ean_match_groups', {})
   if (error) throw new Error(`EAN RPC fejl: ${error.message}`)
 
   const result = data as { groups_created: number; rows_assigned: number }
@@ -186,7 +186,7 @@ async function runSinglesPhase(
 ): Promise<{ groupsCreated: number; rowsAssigned: number }> {
   onProgress({ stage: 'singles_phase', message: 'Enkelt-leverandør gruppering kører (SQL)...' })
 
-  const { data, error } = await supabase.rpc('create_single_supplier_groups')
+  const { data, error } = await supabase.rpc('create_single_supplier_groups', {})
   if (error) throw new Error(`Singles RPC fejl: ${error.message}`)
 
   const result = data as { groups_created: number; rows_assigned: number }
