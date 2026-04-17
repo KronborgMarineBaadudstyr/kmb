@@ -53,19 +53,33 @@ export async function GET(request: Request) {
     membersByGroup.get(gid)!.push(m)
   }
 
-  // Fetch stats (total counts by status and confidence)
-  const { data: statRows } = await supabase
-    .from('staging_match_groups')
-    .select('status, match_confidence, match_method')
+  // Fetch stats via individual count queries (avoids 1000-row Supabase default limit)
+  const [
+    { count: totalCount },
+    { count: highCount },
+    { count: mediumCount },
+    { count: singleCount },
+    { count: confirmedCount },
+    { count: rejectedCount },
+    { count: createdCount },
+  ] = await Promise.all([
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'high').neq('match_method', 'single'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'medium'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'single'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'rejected'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'product_created'),
+  ])
 
   const stats = {
-    total:        statRows?.length ?? 0,
-    high:         statRows?.filter(r => r.match_confidence === 'high' && r.match_method !== 'single').length ?? 0,
-    medium:       statRows?.filter(r => r.match_confidence === 'medium').length ?? 0,
-    single:       statRows?.filter(r => r.match_method === 'single').length ?? 0,
-    confirmed:    statRows?.filter(r => r.status === 'confirmed').length ?? 0,
-    rejected:     statRows?.filter(r => r.status === 'rejected').length ?? 0,
-    created:      statRows?.filter(r => r.status === 'product_created').length ?? 0,
+    total:     totalCount     ?? 0,
+    high:      highCount      ?? 0,
+    medium:    mediumCount    ?? 0,
+    single:    singleCount    ?? 0,
+    confirmed: confirmedCount ?? 0,
+    rejected:  rejectedCount  ?? 0,
+    created:   createdCount   ?? 0,
   }
 
   const enriched = (groups as Array<{
