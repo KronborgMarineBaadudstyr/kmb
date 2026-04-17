@@ -223,13 +223,13 @@ export async function importEngholm(
           updated++
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
-          ).then(({ error }) => { if (error) { errors++; updated-- } }))
+          ).then(({ error }) => { if (error) { console.error(`[engholm] update ps sku=${p.sku}:`, error.message, error.details); errors++; updated-- } }))
         } else {
           // Ny tilknytning — sæt priority til 1 som default
           matched++
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          ).then(({ error }) => { if (error) { errors++; matched-- } }))
+          ).then(({ error }) => { if (error) { console.error(`[engholm] insert ps sku=${p.sku}:`, error.message, error.details); errors++; matched-- } }))
         }
       } else {
         // INGEN HÅRD MATCH — send til staging
@@ -240,7 +240,7 @@ export async function importEngholm(
             supabase.from('supplier_product_staging')
               .update({ raw_data: supplierData.extra_data, normalized_unit: unit, normalized_unit_size: unit_size })
               .eq('id', stagingRow.id)
-          ).then(({ error }) => { if (error) errors++ }))
+          ).then(({ error }) => { if (error) { console.error(`[engholm] update staging (skipped) sku=${p.sku}:`, error.message, error.details); errors++ } }))
         } else {
           // Fuzzy match-forslag (simpel variant — fuld pg_trgm bruges i API-ruten)
           // Her gemmer vi bare raw_data og lader UI'en kalde fuzzy search bagefter
@@ -270,7 +270,7 @@ export async function importEngholm(
             stagingRow
               ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
               : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-          ).then(({ error }) => { if (error) { errors++; staged-- } }))
+          ).then(({ error }) => { if (error) { console.error(`[engholm] upsert staging sku=${p.sku}:`, error.message, error.details); errors++; staged-- } }))
         }
       }
     }
