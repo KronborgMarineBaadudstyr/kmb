@@ -351,6 +351,11 @@ export default function SuppliersPage() {
                   ✓ {progress.message}
                 </div>
               )}
+              {lastImported === s.id && progress && progress.stage === 'error' && (
+                <div className="mt-4 border-t border-gray-100 pt-3 text-sm text-red-700 bg-red-50 rounded px-3 py-2">
+                  ✗ Fejl: {progress.message}
+                </div>
+              )}
             </div>
           ))}
 

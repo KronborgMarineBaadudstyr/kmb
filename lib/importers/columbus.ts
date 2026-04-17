@@ -161,7 +161,7 @@ export async function importColumbus(
       .from('supplier_product_staging').select('id, normalized_sku, status').eq('supplier_id', SUPPLIER_ID)
     const existingStaging = Object.fromEntries((existingStagingRows ?? []).map(r => [r.normalized_sku, r]))
 
-    const BATCH = 100
+    const BATCH = 200
     let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0
 
     for (let i = 0; i < products.length; i += BATCH) {
@@ -172,6 +172,9 @@ export async function importColumbus(
         ? await supabase.from('products').select('id, name, ean').in('ean', eans)
         : { data: [] }
       const productByEan = Object.fromEntries((byEan ?? []).filter(p => p.ean).map(p => [String(p.ean), p]))
+
+      // Byg alle DB-operationer for batchen parallelt
+      const ops: Promise<void>[] = []
 
       for (const p of batch) {
         const ean    = (p.EAN && String(p.EAN) !== '0') ? String(p.EAN) : null
@@ -212,67 +215,76 @@ export async function importColumbus(
         }
 
         const matchedProduct = ean ? (productByEan[ean] ?? null) : null
+        processed++
 
         if (matchedProduct) {
           const existing = existingBySku[skuStr]
           if (existing) {
-            await supabase.from('product_suppliers')
-              .update({
-                ...supplierData,
-                priority:                  existing.priority,
-                supplier_stock_updated_at: new Date().toISOString(),
-              })
-              .eq('id', existing.id)
             updated++
+            ops.push(
+              supabase.from('product_suppliers')
+                .update({
+                  ...supplierData,
+                  priority:                  existing.priority,
+                  supplier_stock_updated_at: new Date().toISOString(),
+                })
+                .eq('id', existing.id)
+                .then(({ error }) => { if (error) { errors++; updated-- } })
+            )
           } else {
-            const { error } = await supabase.from('product_suppliers')
-              .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-            if (error) { console.error('product_suppliers insert error:', error); errors++ }
-            else matched++
+            matched++
+            ops.push(
+              supabase.from('product_suppliers')
+                .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
+                .then(({ error }) => { if (error) { console.error('product_suppliers insert error:', error); errors++; matched-- } })
+            )
           }
         } else {
           const stagingRow = existingStaging[skuStr]
+
+          const rawData = {
+            ...supplierData.extra_data,
+            supplier_sku:            skuStr,
+            supplier_product_name:   supplierData.supplier_product_name,
+            purchase_price:          supplierData.purchase_price,
+            recommended_sales_price: supplierData.recommended_sales_price,
+            supplier_stock_quantity: qty,
+          }
+
           if (stagingRow && stagingRow.status !== 'pending_review') {
-            await supabase.from('supplier_product_staging')
-              .update({
-                raw_data:   { ...supplierData.extra_data, supplier_sku: skuStr, supplier_product_name: supplierData.supplier_product_name, purchase_price: supplierData.purchase_price, recommended_sales_price: supplierData.recommended_sales_price, supplier_stock_quantity: qty },
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', stagingRow.id)
             skipped++
-            processed++
-            continue
+            ops.push(
+              supabase.from('supplier_product_staging')
+                .update({ raw_data: rawData, updated_at: new Date().toISOString() })
+                .eq('id', stagingRow.id)
+                .then(({ error }) => { if (error) { errors++; skipped-- } })
+            )
+          } else {
+            const stagingUpsertRow = {
+              supplier_id:          SUPPLIER_ID,
+              raw_data:             rawData,
+              normalized_name:      p.Text || skuStr,
+              normalized_ean:       ean,
+              normalized_sku:       skuStr,
+              normalized_unit:      null,
+              normalized_unit_size: null,
+              match_suggestions:    [],
+              status:               stagingRow ? stagingRow.status : 'pending_review',
+              updated_at:           new Date().toISOString(),
+            }
+            staged++
+            ops.push(
+              (stagingRow
+                ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
+                : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
+              ).then(({ error }) => { if (error) { console.error('Staging error:', error); errors++; staged-- } })
+            )
           }
-
-          const stagingUpsertRow = {
-            supplier_id:          SUPPLIER_ID,
-            raw_data: {
-              ...supplierData.extra_data,
-              supplier_sku:            skuStr,
-              supplier_product_name:   supplierData.supplier_product_name,
-              purchase_price:          supplierData.purchase_price,
-              recommended_sales_price: supplierData.recommended_sales_price,
-              supplier_stock_quantity: qty,
-            },
-            normalized_name:      p.Text || skuStr,
-            normalized_ean:       ean,
-            normalized_sku:       skuStr,
-            normalized_unit:      null,
-            normalized_unit_size: null,
-            match_suggestions:    [],
-            status:               'pending_review',
-            updated_at:           new Date().toISOString(),
-          }
-
-          const { error } = stagingRow
-            ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
-            : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-          if (error) { console.error('Staging insert error:', error); errors++ }
-          else staged++
         }
-
-        processed++
       }
+
+      // Vent på alle DB-operationer i batchen parallelt
+      await Promise.all(ops)
 
       onProgress({
         stage: 'importing', total, processed, matched, staged, updated, skipped, errors,
