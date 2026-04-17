@@ -200,7 +200,7 @@ export default function SuppliersPage() {
                     {s.api_url && (
                       <div><span className="text-gray-400 w-28 inline-block">API URL</span>{s.api_url}</div>
                     )}
-                    <div><span className="text-gray-400 w-28 inline-block">Sync interval</span>Hver {s.sync_interval_hours} timer</div>
+                    <div><span className="text-gray-400 w-28 inline-block">Sync interval</span>{s.sync_interval_hours >= 8760 ? 'Manuel filupload' : `Hver ${s.sync_interval_hours} timer`}</div>
                     <div>
                       <span className="text-gray-400 w-28 inline-block">Sidst synkret</span>
                       {s.last_synced_at
