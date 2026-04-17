@@ -45,6 +45,7 @@ export default function SuppliersPage() {
   const [suppliers,    setSuppliers]    = useState<Supplier[]>([])
   const [loading,      setLoading]      = useState(true)
   const [importing,    setImporting]    = useState<string | null>(null) // supplier id under import
+  const [lastImported, setLastImported] = useState<string | null>(null) // supplier id der sidst færdiggjorde
   const [progress,     setProgress]     = useState<ImportProgress | null>(null)
   const [testMode,     setTestMode]     = useState(false)
   const [selectedFile, setSelectedFile] = useState<Record<string, File>>({}) // supplierId → File
@@ -89,6 +90,7 @@ export default function SuppliersPage() {
       setProgress(data)
       if (data.stage === 'done' || data.stage === 'error') {
         es.close()
+        setLastImported(supplier.id)
         setImporting(null)
         // Genindlæs leverandørliste for at opdatere last_synced_at
         fetch('/api/suppliers').then(r => r.json()).then(j => setSuppliers(j.data ?? []))
@@ -144,6 +146,7 @@ export default function SuppliersPage() {
           const data: ImportProgress = JSON.parse(line.slice(5).trim())
           setProgress(data)
           if (data.stage === 'done' || data.stage === 'error') {
+            setLastImported(supplier.id)
             setImporting(null)
             fetch('/api/suppliers').then(r => r.json()).then(j => setSuppliers(j.data ?? []))
           }
@@ -343,7 +346,7 @@ export default function SuppliersPage() {
               )}
 
               {/* Resultat efter færdig import */}
-              {importing !== s.id && progress && progress.stage === 'done' && (
+              {lastImported === s.id && progress && progress.stage === 'done' && (
                 <div className="mt-4 border-t border-gray-100 pt-3 text-sm text-green-700 bg-green-50 rounded px-3 py-2">
                   ✓ {progress.message}
                 </div>
