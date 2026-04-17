@@ -206,6 +206,8 @@ export async function importHfIndustri(
       (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
     )
 
+    const ops: Promise<void>[] = []
+
     for (const p of batch) {
       const supplierData = {
         supplier_id:             SUPPLIER_ID,
@@ -224,31 +226,29 @@ export async function importHfIndustri(
 
       const matchedProduct = p.ean ? (productByEan[p.ean] ?? null) : null
 
+      processed++
+
       if (matchedProduct) {
         const existing = existingBySku[p.varenummer]
 
         if (existing) {
-          const { error } = await supabase
-            .from('product_suppliers')
-            .update({ ...supplierData, priority: existing.priority })
-            .eq('id', existing.id)
-          if (error) { errors++; processed++; continue }
           updated++
+          ops.push(Promise.resolve(
+            supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
+          ).then(({ error }) => { if (error) { errors++; updated-- } }))
         } else {
-          const { error } = await supabase
-            .from('product_suppliers')
-            .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          if (error) { errors++; processed++; continue }
           matched++
+          ops.push(Promise.resolve(
+            supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
+          ).then(({ error }) => { if (error) { errors++; matched-- } }))
         }
 
         // Tilføj sheet-navn som kategori på produktet hvis det ikke allerede er der
         const existingCats: string[] = matchedProduct.categories ?? []
         if (!existingCats.includes(p.category)) {
-          await supabase
-            .from('products')
-            .update({ categories: [...existingCats, p.category] })
-            .eq('id', matchedProduct.id)
+          ops.push(Promise.resolve(
+            supabase.from('products').update({ categories: [...existingCats, p.category] }).eq('id', matchedProduct.id)
+          ).then(({ error }) => { if (error) errors++ }))
         }
       } else {
         // Ingen match → staging
@@ -256,47 +256,47 @@ export async function importHfIndustri(
 
         if (stagingRow && stagingRow.status !== 'pending_review') {
           // Allerede behandlet — opdater kun rådata
-          await supabase
-            .from('supplier_product_staging')
-            .update({
-              raw_data:   { ...supplierData.extra_data, supplier_sku: p.varenummer, supplier_product_name: p.varenavn, purchase_price: p.indkoeb, recommended_sales_price: p.vejlPris },
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', stagingRow.id)
-          processed++
-          continue
+          ops.push(Promise.resolve(
+            supabase.from('supplier_product_staging')
+              .update({
+                raw_data:   { ...supplierData.extra_data, supplier_sku: p.varenummer, supplier_product_name: p.varenavn, purchase_price: p.indkoeb, recommended_sales_price: p.vejlPris },
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', stagingRow.id)
+          ).then(({ error }) => { if (error) errors++ }))
+        } else {
+          const stagingUpsertRow = {
+            supplier_id: SUPPLIER_ID,
+            raw_data: {
+              supplier_sku:            p.varenummer,
+              supplier_product_name:   p.varenavn,
+              purchase_price:          p.indkoeb,
+              recommended_sales_price: p.vejlPris,
+              enhed:                   p.enhed,
+              ean:                     p.ean,
+              categories:              [p.category],
+            },
+            normalized_name:      p.varenavn,
+            normalized_ean:       p.ean,
+            normalized_sku:       p.varenummer,
+            normalized_unit:      p.enhed,
+            normalized_unit_size: null,
+            match_suggestions:    [],
+            status:               stagingRow ? stagingRow.status : 'pending_review',
+            updated_at:           new Date().toISOString(),
+          }
+
+          staged++
+          ops.push(Promise.resolve(
+            stagingRow
+              ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
+              : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
+          ).then(({ error }) => { if (error) { errors++; staged-- } }))
         }
-
-        const stagingUpsertRow = {
-          supplier_id: SUPPLIER_ID,
-          raw_data: {
-            supplier_sku:            p.varenummer,
-            supplier_product_name:   p.varenavn,
-            purchase_price:          p.indkoeb,
-            recommended_sales_price: p.vejlPris,
-            enhed:                   p.enhed,
-            ean:                     p.ean,
-            categories:              [p.category],
-          },
-          normalized_name:      p.varenavn,
-          normalized_ean:       p.ean,
-          normalized_sku:       p.varenummer,
-          normalized_unit:      p.enhed,
-          normalized_unit_size: null,
-          match_suggestions:    [],
-          status:               stagingRow ? stagingRow.status : 'pending_review',
-          updated_at:           new Date().toISOString(),
-        }
-
-        const { error } = stagingRow
-          ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
-          : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-
-        if (error) errors++; else staged++
       }
-
-      processed++
     }
+
+    await Promise.all(ops)
 
     // Opdater last_synced_at løbende
     await supabase

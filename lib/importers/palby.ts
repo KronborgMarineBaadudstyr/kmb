@@ -308,6 +308,8 @@ export async function importPalby(
         : { data: [] }
       const productByEan = Object.fromEntries((byEan ?? []).filter(p => p.ean).map(p => [String(p.ean), p]))
 
+      const ops: Promise<void>[] = []
+
       for (const p of batch) {
         const ean    = p.Barcode || null
         const images = parseImages(p)
@@ -319,7 +321,7 @@ export async function importPalby(
           supplier_product_name:   p.Caption || p.Productname,
           purchase_price:          parseNumber(p.SalesPrice),
           recommended_sales_price: parseNumber(p.RecommendedRetailPrice),
-          supplier_stock_quantity: 0,   // lager opdateres separat via syncPalbyStock
+          supplier_stock_quantity: 0,
           supplier_stock_reserved: 0,
           item_status:             'active',
           moq:                     1,
@@ -345,57 +347,66 @@ export async function importPalby(
         }
 
         const matchedProduct = ean ? (productByEan[ean] ?? null) : null
+        processed++
 
         if (matchedProduct) {
           const existing = existingBySku[skuStr]
           if (existing) {
-            await supabase.from('product_suppliers')
-              .update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
             updated++
+            ops.push(Promise.resolve(
+              supabase.from('product_suppliers')
+                .update({ ...supplierData, priority: existing.priority })
+                .eq('id', existing.id)
+            ).then(({ error }) => { if (error) { errors++; updated-- } }))
           } else {
-            const { error } = await supabase.from('product_suppliers')
-              .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-            if (error) errors++; else matched++
+            matched++
+            ops.push(Promise.resolve(
+              supabase.from('product_suppliers')
+                .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
+            ).then(({ error }) => { if (error) { errors++; matched-- } }))
           }
         } else {
           const stagingRow = existingStaging[skuStr]
+          const rawData = {
+            ...supplierData.extra_data,
+            supplier_sku:            skuStr,
+            supplier_product_name:   supplierData.supplier_product_name,
+            purchase_price:          supplierData.purchase_price,
+            recommended_sales_price: supplierData.recommended_sales_price,
+            supplier_images:         images,
+          }
+
           if (stagingRow && stagingRow.status !== 'pending_review') {
-            await supabase.from('supplier_product_staging')
-              .update({ raw_data: { ...supplierData.extra_data, supplier_sku: skuStr, supplier_product_name: supplierData.supplier_product_name, purchase_price: supplierData.purchase_price, recommended_sales_price: supplierData.recommended_sales_price, supplier_images: images }, updated_at: new Date().toISOString() })
-              .eq('id', stagingRow.id)
             skipped++
-            processed++
-            continue
+            ops.push(Promise.resolve(
+              supabase.from('supplier_product_staging')
+                .update({ raw_data: rawData, updated_at: new Date().toISOString() })
+                .eq('id', stagingRow.id)
+            ).then(({ error }) => { if (error) { errors++; skipped-- } }))
+          } else {
+            const stagingUpsertRow = {
+              supplier_id:          SUPPLIER_ID,
+              raw_data:             rawData,
+              normalized_name:      p.Caption || p.Productname,
+              normalized_ean:       ean,
+              normalized_sku:       skuStr,
+              normalized_unit:      null,
+              normalized_unit_size: null,
+              match_suggestions:    [],
+              status:               stagingRow ? stagingRow.status : 'pending_review',
+              updated_at:           new Date().toISOString(),
+            }
+            staged++
+            ops.push(Promise.resolve(
+              stagingRow
+                ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
+                : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
+            ).then(({ error }) => { if (error) { console.error(`[palby] staging sku=${skuStr}:`, error.message); errors++; staged-- } }))
           }
-
-          const stagingUpsertRow = {
-            supplier_id:          SUPPLIER_ID,
-            raw_data: {
-              ...supplierData.extra_data,
-              supplier_sku:            skuStr,
-              supplier_product_name:   supplierData.supplier_product_name,
-              purchase_price:          supplierData.purchase_price,
-              recommended_sales_price: supplierData.recommended_sales_price,
-              supplier_images:         images,
-            },
-            normalized_name:      p.Caption || p.Productname,
-            normalized_ean:       ean,
-            normalized_sku:       skuStr,
-            normalized_unit:      null,
-            normalized_unit_size: null,
-            match_suggestions:    [],
-            status:               'pending_review',
-            updated_at:           new Date().toISOString(),
-          }
-
-          const { error } = stagingRow
-            ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
-            : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-          if (error) { console.error('Staging insert error:', error); errors++ } else staged++
         }
-
-        processed++
       }
+
+      await Promise.all(ops)
 
       onProgress({
         stage: 'importing', total, processed, matched, staged, updated, skipped, errors,

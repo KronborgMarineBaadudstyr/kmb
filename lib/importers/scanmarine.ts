@@ -228,6 +228,8 @@ export async function importScanmarine(
       (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
     )
 
+    const ops: Promise<void>[] = []
+
     for (const p of batch) {
       const ean    = p.ean_number || null
       const images = p.product_photo
@@ -257,20 +259,21 @@ export async function importScanmarine(
 
       const matchedProduct = ean ? (productByEan[ean] ?? null) : null
 
+      processed++
+
       if (matchedProduct) {
         const existing = existingBySku[p.product_number]
 
         if (existing) {
-          await supabase
-            .from('product_suppliers')
-            .update({ ...supplierData, priority: existing.priority })
-            .eq('id', existing.id)
           updated++
+          ops.push(Promise.resolve(
+            supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
+          ).then(({ error }) => { if (error) { errors++; updated-- } }))
         } else {
-          const { error } = await supabase
-            .from('product_suppliers')
-            .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          if (error) errors++; else matched++
+          matched++
+          ops.push(Promise.resolve(
+            supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
+          ).then(({ error }) => { if (error) { errors++; matched-- } }))
         }
       } else {
         // Ingen match → staging
@@ -278,44 +281,44 @@ export async function importScanmarine(
 
         if (stagingRow && stagingRow.status !== 'pending_review') {
           // Allerede behandlet — opdater kun rådata
-          await supabase
-            .from('supplier_product_staging')
-            .update({ raw_data: supplierData.extra_data, updated_at: new Date().toISOString() })
-            .eq('id', stagingRow.id)
-          processed++
-          continue
+          ops.push(Promise.resolve(
+            supabase.from('supplier_product_staging')
+              .update({ raw_data: supplierData.extra_data, updated_at: new Date().toISOString() })
+              .eq('id', stagingRow.id)
+          ).then(({ error }) => { if (error) errors++ }))
+        } else {
+          const stagingUpsertRow = {
+            supplier_id:          SUPPLIER_ID,
+            raw_data: {
+              ...supplierData.extra_data,
+              supplier_sku:            p.product_number,
+              supplier_product_name:   p.product_name,
+              purchase_price:          null,
+              recommended_sales_price: p.product_price,
+              supplier_stock_quantity: p.stock,
+              supplier_images:         images,
+            },
+            normalized_name:      p.product_name,
+            normalized_ean:       ean,
+            normalized_sku:       p.product_number,
+            normalized_unit:      null,
+            normalized_unit_size: null,
+            match_suggestions:    [],
+            status:               stagingRow ? stagingRow.status : 'pending_review',
+            updated_at:           new Date().toISOString(),
+          }
+
+          staged++
+          ops.push(Promise.resolve(
+            stagingRow
+              ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
+              : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
+          ).then(({ error }) => { if (error) { errors++; staged-- } }))
         }
-
-        const stagingUpsertRow = {
-          supplier_id:          SUPPLIER_ID,
-          raw_data: {
-            ...supplierData.extra_data,
-            supplier_sku:            p.product_number,
-            supplier_product_name:   p.product_name,
-            purchase_price:          null,
-            recommended_sales_price: p.product_price,
-            supplier_stock_quantity: p.stock,
-            supplier_images:         images,
-          },
-          normalized_name:      p.product_name,
-          normalized_ean:       ean,
-          normalized_sku:       p.product_number,
-          normalized_unit:      null,
-          normalized_unit_size: null,
-          match_suggestions:    [],
-          status:               stagingRow ? stagingRow.status : 'pending_review',
-          updated_at:           new Date().toISOString(),
-        }
-
-        const { error } = stagingRow
-          ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
-          : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-
-        if (error) errors++; else staged++
       }
-
-      processed++
     }
+
+    await Promise.all(ops)
 
     // Opdater last_synced_at løbende
     await supabase

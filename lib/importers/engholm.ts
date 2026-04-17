@@ -175,6 +175,8 @@ export async function importEngholm(
       (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
     )
 
+    const ops: Promise<void>[] = []
+
     for (const p of batch) {
       const decodedTitle   = decode(p.title)
       const decodedDetails = decodeDetails(p.details)
@@ -210,72 +212,70 @@ export async function importEngholm(
       // ── Forsøg hård EAN-match ──
       const matchedProduct = productByEan[p.gtin] ?? null
 
+      processed++
+
       if (matchedProduct) {
         // MATCH FUNDET — opdater/opret product_suppliers
         const existing = existingBySku[p.sku]
 
         if (existing) {
           // Bevar priority (intern indstilling) — overskriv ALT andet
-          await supabase
-            .from('product_suppliers')
-            .update({ ...supplierData, priority: existing.priority })
-            .eq('id', existing.id)
           updated++
+          ops.push(Promise.resolve(
+            supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
+          ).then(({ error }) => { if (error) { errors++; updated-- } }))
         } else {
           // Ny tilknytning — sæt priority til 1 som default
-          const { error } = await supabase
-            .from('product_suppliers')
-            .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          if (error) errors++
-          else matched++
+          matched++
+          ops.push(Promise.resolve(
+            supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
+          ).then(({ error }) => { if (error) { errors++; matched-- } }))
         }
       } else {
         // INGEN HÅRD MATCH — send til staging
-        // Springer over produkter der allerede er i staging og er manuelt behandlet
         const stagingRow = existingStaging[p.sku]
         if (stagingRow && stagingRow.status !== 'pending_review') {
           // Allerede behandlet manuelt — opdater kun rådata, rør ikke status
-          await supabase
-            .from('supplier_product_staging')
-            .update({ raw_data: supplierData.extra_data, normalized_unit: unit, normalized_unit_size: unit_size })
-            .eq('id', stagingRow.id)
-          processed++
-          continue
+          ops.push(Promise.resolve(
+            supabase.from('supplier_product_staging')
+              .update({ raw_data: supplierData.extra_data, normalized_unit: unit, normalized_unit_size: unit_size })
+              .eq('id', stagingRow.id)
+          ).then(({ error }) => { if (error) errors++ }))
+        } else {
+          // Fuzzy match-forslag (simpel variant — fuld pg_trgm bruges i API-ruten)
+          // Her gemmer vi bare raw_data og lader UI'en kalde fuzzy search bagefter
+          const stagingUpsertRow = {
+            supplier_id:         SUPPLIER_ID,
+            raw_data: {
+              ...supplierData.extra_data,
+              supplier_sku:            p.sku,
+              supplier_product_name:   decodedTitle,
+              purchase_price:          supplierData.purchase_price,
+              recommended_sales_price: supplierData.recommended_sales_price,
+              supplier_stock_quantity: supplierData.supplier_stock_quantity,
+              supplier_images:         supplierData.supplier_images,
+            },
+            normalized_name:      decodedTitle,
+            normalized_ean:       p.gtin  || null,
+            normalized_sku:       p.sku,
+            normalized_unit:      unit,
+            normalized_unit_size: unit_size,
+            match_suggestions:    [],  // udfyldes af baggrundsjob / on-demand
+            status:               stagingRow ? stagingRow.status : 'pending_review',
+            updated_at:           new Date().toISOString(),
+          }
+
+          staged++
+          ops.push(Promise.resolve(
+            stagingRow
+              ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
+              : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
+          ).then(({ error }) => { if (error) { errors++; staged-- } }))
         }
-
-        // Fuzzy match-forslag (simpel variant — fuld pg_trgm bruges i API-ruten)
-        // Her gemmer vi bare raw_data og lader UI'en kalde fuzzy search bagefter
-        const stagingUpsertRow = {
-          supplier_id:         SUPPLIER_ID,
-          raw_data: {
-            ...supplierData.extra_data,
-            supplier_sku:            p.sku,
-            supplier_product_name:   decodedTitle,
-            purchase_price:          supplierData.purchase_price,
-            recommended_sales_price: supplierData.recommended_sales_price,
-            supplier_stock_quantity: supplierData.supplier_stock_quantity,
-            supplier_images:         supplierData.supplier_images,
-          },
-          normalized_name:      decodedTitle,
-          normalized_ean:       p.gtin  || null,
-          normalized_sku:       p.sku,
-          normalized_unit:      unit,
-          normalized_unit_size: unit_size,
-          match_suggestions:    [],  // udfyldes af baggrundsjob / on-demand
-          status:               stagingRow ? stagingRow.status : 'pending_review',
-          updated_at:           new Date().toISOString(),
-        }
-
-        const { error } = stagingRow
-          ? await supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
-          : await supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-
-        if (error) errors++
-        else staged++
       }
-
-      processed++
     }
+
+    await Promise.all(ops)
 
     // Opdater last_synced_at for leverandøren
     await supabase
