@@ -221,7 +221,7 @@ export async function importColumbus(
           const existing = existingBySku[skuStr]
           if (existing) {
             updated++
-            ops.push(
+            ops.push(Promise.resolve(
               supabase.from('product_suppliers')
                 .update({
                   ...supplierData,
@@ -229,15 +229,13 @@ export async function importColumbus(
                   supplier_stock_updated_at: new Date().toISOString(),
                 })
                 .eq('id', existing.id)
-                .then(({ error }) => { if (error) { errors++; updated-- } })
-            )
+            ).then(({ error }) => { if (error) { errors++; updated-- } }))
           } else {
             matched++
-            ops.push(
+            ops.push(Promise.resolve(
               supabase.from('product_suppliers')
                 .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-                .then(({ error }) => { if (error) { console.error('product_suppliers insert error:', error); errors++; matched-- } })
-            )
+            ).then(({ error }) => { if (error) { console.error('product_suppliers insert error:', error); errors++; matched-- } }))
           }
         } else {
           const stagingRow = existingStaging[skuStr]
@@ -253,12 +251,11 @@ export async function importColumbus(
 
           if (stagingRow && stagingRow.status !== 'pending_review') {
             skipped++
-            ops.push(
+            ops.push(Promise.resolve(
               supabase.from('supplier_product_staging')
                 .update({ raw_data: rawData, updated_at: new Date().toISOString() })
                 .eq('id', stagingRow.id)
-                .then(({ error }) => { if (error) { errors++; skipped-- } })
-            )
+            ).then(({ error }) => { if (error) { errors++; skipped-- } }))
           } else {
             const stagingUpsertRow = {
               supplier_id:          SUPPLIER_ID,
@@ -273,12 +270,11 @@ export async function importColumbus(
               updated_at:           new Date().toISOString(),
             }
             staged++
-            ops.push(
-              (stagingRow
+            ops.push(Promise.resolve(
+              stagingRow
                 ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
                 : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-              ).then(({ error }) => { if (error) { console.error('Staging error:', error); errors++; staged-- } })
-            )
+            ).then(({ error }) => { if (error) { console.error('Staging error:', error); errors++; staged-- } }))
           }
         }
       }
