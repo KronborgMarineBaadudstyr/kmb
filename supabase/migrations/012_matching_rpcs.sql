@@ -12,6 +12,8 @@ LANGUAGE plpgsql AS $$
 DECLARE
   result jsonb;
 BEGIN
+  SET LOCAL statement_timeout = '0';
+
   WITH ean_summary AS (
     SELECT
       normalized_ean,
@@ -66,6 +68,8 @@ LANGUAGE plpgsql AS $$
 DECLARE
   result jsonb;
 BEGIN
+  SET LOCAL statement_timeout = '0';
+
   WITH to_group AS (
     SELECT id, normalized_name, normalized_ean
     FROM supplier_product_staging
