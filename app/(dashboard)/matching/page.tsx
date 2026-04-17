@@ -282,7 +282,7 @@ function GroupCard({
                     disabled={loading}
                     className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
                   >
-                    Bekræft gruppe
+                    Bekræft produkt gruppering
                   </button>
                   <button
                     onClick={handleCreateProduct}
