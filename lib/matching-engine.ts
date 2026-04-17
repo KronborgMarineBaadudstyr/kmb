@@ -11,13 +11,6 @@ export type MatchingProgressEvent = {
 
 type ProgressCallback = (e: MatchingProgressEvent) => void
 
-type StagingRow = {
-  id:             string
-  supplier_id:    string
-  normalized_ean: string | null
-  normalized_name: string
-}
-
 // ── Union-Find (Disjoint Set) for fuzzy cluster grouping ──
 class UnionFind {
   private parent: Map<string, string> = new Map()
@@ -50,119 +43,18 @@ class UnionFind {
   }
 }
 
-// ── Phase 1: EAN grouping ──
+// ── Phase 1: EAN grouping — single bulk SQL via RPC ──
 async function runEanPhase(
   supabase: SupabaseClient,
   onProgress: ProgressCallback,
 ): Promise<{ groupsCreated: number; rowsAssigned: number }> {
-  onProgress({ stage: 'ean_phase', message: 'Henter staging-rækker med EAN...' })
+  onProgress({ stage: 'ean_phase', message: 'EAN-gruppering kører (SQL)...' })
 
-  // Load all staging rows with EAN that aren't yet in a group
-  const allRows: StagingRow[] = []
-  const PAGE = 1000
-  for (let p = 0; ; p++) {
-    const { data, error } = await supabase
-      .from('supplier_product_staging')
-      .select('id, supplier_id, normalized_ean, normalized_name')
-      .not('normalized_ean', 'is', null)
-      .not('normalized_ean', 'eq', '')
-      .is('match_group_id', null)
-      .not('status', 'in', '("rejected","matched","new_product")')
-      .range(p * PAGE, p * PAGE + PAGE - 1)
+  const { data, error } = await supabase.rpc('create_ean_match_groups')
+  if (error) throw new Error(`EAN RPC fejl: ${error.message}`)
 
-    if (error) throw new Error(`EAN fetch fejl: ${error.message}`)
-    if (!data || data.length === 0) break
-    allRows.push(...(data as StagingRow[]))
-    if (data.length < PAGE) break
-  }
-
-  onProgress({
-    stage: 'ean_phase',
-    message: `${allRows.length.toLocaleString('da-DK')} rækker med EAN indlæst — grupperer...`,
-    total: allRows.length,
-  })
-
-  // Group by EAN
-  const byEan = new Map<string, StagingRow[]>()
-  for (const row of allRows) {
-    const ean = row.normalized_ean!
-    if (!byEan.has(ean)) byEan.set(ean, [])
-    byEan.get(ean)!.push(row)
-  }
-
-  let groupsCreated = 0
-  let rowsAssigned  = 0
-
-  // Process EAN groups in batches to avoid too many individual DB calls
-  const BATCH = 50
-  const eanEntries = [...byEan.entries()]
-
-  for (let i = 0; i < eanEntries.length; i += BATCH) {
-    const slice = eanEntries.slice(i, i + BATCH)
-    const insertOps: Promise<void>[] = []
-
-    for (const [ean, rows] of slice) {
-      const distinctSuppliers = new Set(rows.map(r => r.supplier_id))
-      const supplierCount = distinctSuppliers.size
-
-      // Pick longest name as suggested_name
-      const suggestedName = rows.reduce((best, r) =>
-        r.normalized_name.length > best.length ? r.normalized_name : best,
-        ''
-      )
-
-      const method = supplierCount >= 2 ? 'ean' : 'single'
-      const confidence = 'high'
-
-      const op = (async () => {
-        const { data: group, error: gErr } = await supabase
-          .from('staging_match_groups')
-          .insert({
-            match_confidence: confidence,
-            match_method:     method,
-            supplier_count:   supplierCount,
-            suggested_name:   suggestedName,
-            suggested_ean:    ean,
-            status:           'pending_review',
-          })
-          .select('id')
-          .single()
-
-        if (gErr || !group) {
-          console.error('[matching-engine] insert group EAN error:', gErr?.message)
-          return
-        }
-
-        groupsCreated++
-
-        const ids = rows.map(r => r.id)
-        const { error: uErr } = await supabase
-          .from('supplier_product_staging')
-          .update({ match_group_id: group.id })
-          .in('id', ids)
-
-        if (uErr) {
-          console.error('[matching-engine] update staging match_group_id:', uErr.message)
-        } else {
-          rowsAssigned += ids.length
-        }
-      })()
-
-      insertOps.push(op)
-    }
-
-    await Promise.all(insertOps)
-
-    onProgress({
-      stage:          'ean_phase',
-      message:        `EAN-fase: ${groupsCreated} grupper oprettet, ${rowsAssigned} rækker tildelt...`,
-      groups_created: groupsCreated,
-      rows_assigned:  rowsAssigned,
-      total:          allRows.length,
-    })
-  }
-
-  return { groupsCreated, rowsAssigned }
+  const result = data as { groups_created: number; rows_assigned: number }
+  return { groupsCreated: result.groups_created, rowsAssigned: result.rows_assigned }
 }
 
 // ── Phase 2: Fuzzy name grouping (cross-supplier only) ──
@@ -287,93 +179,18 @@ async function runFuzzyPhase(
   return { groupsCreated, rowsAssigned }
 }
 
-// ── Phase 3: Singles — create single-supplier groups for remaining rows ──
+// ── Phase 3: Singles — single bulk SQL via RPC ──
 async function runSinglesPhase(
   supabase: SupabaseClient,
   onProgress: ProgressCallback,
 ): Promise<{ groupsCreated: number; rowsAssigned: number }> {
-  onProgress({ stage: 'singles_phase', message: 'Henter resterende rækker uden gruppe...' })
+  onProgress({ stage: 'singles_phase', message: 'Enkelt-leverandør gruppering kører (SQL)...' })
 
-  const remaining: { id: string; supplier_id: string; normalized_name: string; normalized_ean: string | null }[] = []
-  const PAGE = 1000
-  for (let p = 0; ; p++) {
-    const { data, error } = await supabase
-      .from('supplier_product_staging')
-      .select('id, supplier_id, normalized_name, normalized_ean')
-      .is('match_group_id', null)
-      .not('status', 'in', '("rejected","matched","new_product")')
-      .range(p * PAGE, p * PAGE + PAGE - 1)
+  const { data, error } = await supabase.rpc('create_single_supplier_groups')
+  if (error) throw new Error(`Singles RPC fejl: ${error.message}`)
 
-    if (error) throw new Error(`Singles fetch fejl: ${error.message}`)
-    if (!data || data.length === 0) break
-    remaining.push(...(data as typeof remaining))
-    if (data.length < PAGE) break
-  }
-
-  onProgress({
-    stage:   'singles_phase',
-    message: `${remaining.length.toLocaleString('da-DK')} rækker oprettes som enkelt-leverandør grupper...`,
-    total:   remaining.length,
-  })
-
-  let groupsCreated = 0
-  let rowsAssigned  = 0
-  const BATCH = 100
-
-  for (let i = 0; i < remaining.length; i += BATCH) {
-    const slice = remaining.slice(i, i + BATCH)
-    const ops: Promise<void>[] = []
-
-    for (const row of slice) {
-      const op = (async () => {
-        const { data: group, error: gErr } = await supabase
-          .from('staging_match_groups')
-          .insert({
-            match_confidence: row.normalized_ean ? 'high' : 'low',
-            match_method:     'single',
-            supplier_count:   1,
-            suggested_name:   row.normalized_name,
-            suggested_ean:    row.normalized_ean ?? null,
-            status:           'pending_review',
-          })
-          .select('id')
-          .single()
-
-        if (gErr || !group) {
-          console.error('[matching-engine] insert single group error:', gErr?.message)
-          return
-        }
-
-        groupsCreated++
-
-        const { error: uErr } = await supabase
-          .from('supplier_product_staging')
-          .update({ match_group_id: group.id })
-          .eq('id', row.id)
-
-        if (uErr) {
-          console.error('[matching-engine] update single staging:', uErr.message)
-        } else {
-          rowsAssigned++
-        }
-      })()
-      ops.push(op)
-    }
-
-    await Promise.all(ops)
-
-    if (i % (BATCH * 5) === 0) {
-      onProgress({
-        stage:          'singles_phase',
-        message:        `Enkelt-leverandør fase: ${groupsCreated} grupper oprettet...`,
-        groups_created: groupsCreated,
-        rows_assigned:  rowsAssigned,
-        total:          remaining.length,
-      })
-    }
-  }
-
-  return { groupsCreated, rowsAssigned }
+  const result = data as { groups_created: number; rows_assigned: number }
+  return { groupsCreated: result.groups_created, rowsAssigned: result.rows_assigned }
 }
 
 // ── Main entry point ──
