@@ -5,8 +5,9 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id }   = await params
   const supabase = createServiceClient()
   const body     = await request.json()
 
@@ -14,7 +15,7 @@ export async function PATCH(
   const { data: supplier } = await supabase
     .from('suppliers')
     .select('sync_state')
-    .eq('id', params.id)
+    .eq('id', id)
     .single()
 
   const existing = (supplier?.sync_state ?? {}) as Record<string, unknown>
@@ -22,7 +23,7 @@ export async function PATCH(
   const { error } = await supabase
     .from('suppliers')
     .update({ sync_state: { ...existing, ...body.sync_state } })
-    .eq('id', params.id)
+    .eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ ok: true })

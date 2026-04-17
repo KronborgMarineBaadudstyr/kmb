@@ -574,6 +574,7 @@ async function applyStockRows(
 
     const idBySku = Object.fromEntries((existing ?? []).map(r => [r.supplier_sku, r.id]))
 
+    const ops: Promise<void>[] = []
     for (const row of batch) {
       const sku = String(row.ItemId)
       const id  = idBySku[sku]
@@ -581,17 +582,18 @@ async function applyStockRows(
 
       if (!id) { skipped++; continue }
 
-      const { error } = await supabase
-        .from('product_suppliers')
-        .update({
-          supplier_stock_quantity:   qty,
-          item_status:               qty > 0 ? 'active' : 'out_of_stock',
-          supplier_stock_updated_at: new Date().toISOString(),
-        })
-        .eq('id', id)
-
-      if (error) errors++; else updated++
+      updated++
+      ops.push(Promise.resolve(
+        supabase.from('product_suppliers')
+          .update({
+            supplier_stock_quantity:   qty,
+            item_status:               qty > 0 ? 'active' : 'out_of_stock',
+            supplier_stock_updated_at: new Date().toISOString(),
+          })
+          .eq('id', id)
+      ).then(({ error }) => { if (error) { errors++; updated-- } }))
     }
+    await Promise.all(ops)
 
     onProgress?.({
       stage: 'importing', total: rows.length, processed: Math.min(i + BATCH, rows.length),
