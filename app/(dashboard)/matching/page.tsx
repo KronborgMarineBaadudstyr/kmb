@@ -305,7 +305,7 @@ function GroupCard({
 
           {group.product_id && (
             <a
-              href={`/products?id=${group.product_id}`}
+              href={`/products/${group.product_id}`}
               className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
             >
               Åbn produkt →

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
-import Link from 'next/link'
 
 type Supplier = { id: string; name: string; contact_email: string | null; data_format: string | null }
 type ProductSupplier = {
@@ -83,7 +82,9 @@ const ITEM_STATUS_COLORS: Record<string, string> = {
   out_of_stock:  'bg-orange-50 text-orange-700',
 }
 
-// Always-visible row — shows "—" when value is null/empty
+const INPUT_CLS = 'w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400'
+const TEXTAREA_CLS = 'w-full px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 resize-y'
+
 function Row({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   const isEmpty = value === null || value === undefined || value === ''
   return (
@@ -96,6 +97,15 @@ function Row({ label, value, mono = false }: { label: string; value: React.React
   )
 }
 
+function EditRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3 py-1.5 border-b border-gray-50 last:border-0">
+      <dt className="w-36 shrink-0 text-xs text-gray-400 pt-2">{label}</dt>
+      <dd className="flex-1">{children}</dd>
+    </div>
+  )
+}
+
 function SectionHeader({ title }: { title: string }) {
   return (
     <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 mt-1">{title}</h3>
@@ -103,12 +113,15 @@ function SectionHeader({ title }: { title: string }) {
 }
 
 export default function ProductDetailPage() {
-  const { id }                  = useParams<{ id: string }>()
-  const router                  = useRouter()
-  const [product, setProduct]   = useState<Product | null>(null)
-  const [loading, setLoading]   = useState(true)
+  const { id }                    = useParams<{ id: string }>()
+  const router                    = useRouter()
+  const [product, setProduct]     = useState<Product | null>(null)
+  const [loading, setLoading]     = useState(true)
   const [activeImg, setActiveImg] = useState(0)
-  const [error, setError]       = useState<string | null>(null)
+  const [error, setError]         = useState<string | null>(null)
+  const [editing, setEditing]     = useState(false)
+  const [saving, setSaving]       = useState(false)
+  const [form, setForm]           = useState<Partial<Product>>({})
 
   useEffect(() => {
     fetch(`/api/products/${id}`)
@@ -119,6 +132,60 @@ export default function ProductDetailPage() {
       })
       .finally(() => setLoading(false))
   }, [id])
+
+  function startEdit() {
+    if (!product) return
+    setForm({
+      name: product.name,
+      description: product.description,
+      short_description: product.short_description,
+      sales_price: product.sales_price,
+      sale_price: product.sale_price,
+      tax_class: product.tax_class,
+      ean: product.ean,
+      manufacturer_sku: product.manufacturer_sku,
+      brand: product.brand,
+      slug: product.slug,
+      weight: product.weight,
+      length: product.length,
+      width: product.width,
+      height: product.height,
+      video_url: product.video_url,
+      meta_title: product.meta_title,
+      meta_description: product.meta_description,
+      status: product.status,
+      categories: product.categories,
+      tags: product.tags,
+    })
+    setEditing(true)
+  }
+
+  async function saveProduct() {
+    if (!product) return
+    setSaving(true)
+    const res = await fetch(`/api/products/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(form),
+    })
+    const json = await res.json()
+    if (json.error) { alert('Fejl: ' + json.error); setSaving(false); return }
+    // Re-fetch full product with relations
+    const full = await fetch(`/api/products/${id}`).then(r => r.json())
+    if (full.data) setProduct(full.data)
+    else setProduct(json.data)
+    setEditing(false)
+    setSaving(false)
+  }
+
+  function cancelEdit() {
+    setEditing(false)
+    setForm({})
+  }
+
+  function setField<K extends keyof Product>(key: K, value: Product[K]) {
+    setForm(f => ({ ...f, [key]: value }))
+  }
 
   if (loading) return <div className="p-8 text-gray-400">Henter produkt...</div>
   if (error || !product) return <div className="p-8 text-red-500">{error ?? 'Produkt ikke fundet'}</div>
@@ -134,18 +201,67 @@ export default function ProductDetailPage() {
 
   const ownAvailable = product.own_stock_quantity - product.own_stock_reserved
 
+  const currentStatus = editing ? (form.status ?? product.status) : product.status
+
   return (
     <div className="min-h-full bg-gray-50">
       {/* Topbar */}
       <div className="bg-white border-b border-gray-200 px-8 py-4 flex items-center gap-4">
         <button onClick={() => router.back()} className="text-gray-400 hover:text-gray-600 text-sm">← Tilbage</button>
         <div className="flex-1">
-          <h2 className="text-lg font-bold text-gray-900 leading-tight">{product.name}</h2>
-          <p className="text-xs text-gray-400 font-mono">{product.internal_sku}</p>
+          {editing ? (
+            <input
+              className={INPUT_CLS + ' text-base font-bold'}
+              value={form.name ?? ''}
+              onChange={e => setField('name', e.target.value)}
+            />
+          ) : (
+            <>
+              <h2 className="text-lg font-bold text-gray-900 leading-tight">{product.name}</h2>
+              <p className="text-xs text-gray-400 font-mono">{product.internal_sku}</p>
+            </>
+          )}
         </div>
-        <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_COLORS[product.status] ?? 'bg-gray-100 text-gray-600'}`}>
-          {STATUS_LABELS[product.status] ?? product.status}
-        </span>
+        {editing ? (
+          <select
+            className="text-xs px-2.5 py-1 rounded-full font-medium border border-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            value={form.status ?? product.status}
+            onChange={e => setField('status', e.target.value)}
+          >
+            <option value="draft">Kladde</option>
+            <option value="validated">Valideret</option>
+            <option value="published">Publiceret</option>
+          </select>
+        ) : (
+          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STATUS_COLORS[currentStatus] ?? 'bg-gray-100 text-gray-600'}`}>
+            {STATUS_LABELS[currentStatus] ?? currentStatus}
+          </span>
+        )}
+        {editing ? (
+          <>
+            <button
+              onClick={saveProduct}
+              disabled={saving}
+              className="text-xs px-3 py-1.5 rounded bg-blue-600 text-white font-medium hover:bg-blue-700 disabled:opacity-60"
+            >
+              {saving ? 'Gemmer...' : 'Gem'}
+            </button>
+            <button
+              onClick={cancelEdit}
+              disabled={saving}
+              className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-60"
+            >
+              Annuller
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={startEdit}
+            className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+          >
+            Rediger
+          </button>
+        )}
         {product.woo_product_id && (
           <a
             href={`https://kronborgmarinebaadudstyr.dk/wp-admin/post.php?post=${product.woo_product_id}&action=edit`}
@@ -198,17 +314,40 @@ export default function ProductDetailPage() {
           {/* Beskrivelse */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Beskrivelse</h3>
-            {product.short_description ? (
-              <div className="text-sm text-gray-700 font-medium mb-3"
-                dangerouslySetInnerHTML={{ __html: product.short_description }} />
+            {editing ? (
+              <dl>
+                <EditRow label="Kort beskrivelse">
+                  <textarea
+                    className={TEXTAREA_CLS}
+                    rows={3}
+                    value={form.short_description ?? ''}
+                    onChange={e => setField('short_description', e.target.value || null)}
+                  />
+                </EditRow>
+                <EditRow label="Beskrivelse">
+                  <textarea
+                    className={TEXTAREA_CLS}
+                    rows={6}
+                    value={form.description ?? ''}
+                    onChange={e => setField('description', e.target.value || null)}
+                  />
+                </EditRow>
+              </dl>
             ) : (
-              <p className="text-sm text-gray-300 mb-3">Ingen kort beskrivelse</p>
-            )}
-            {product.description ? (
-              <div className="text-sm text-gray-600 prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{ __html: product.description }} />
-            ) : (
-              <p className="text-sm text-gray-300">Ingen beskrivelse</p>
+              <>
+                {product.short_description ? (
+                  <div className="text-sm text-gray-700 font-medium mb-3"
+                    dangerouslySetInnerHTML={{ __html: product.short_description }} />
+                ) : (
+                  <p className="text-sm text-gray-300 mb-3">Ingen kort beskrivelse</p>
+                )}
+                {product.description ? (
+                  <div className="text-sm text-gray-600 prose prose-sm max-w-none"
+                    dangerouslySetInnerHTML={{ __html: product.description }} />
+                ) : (
+                  <p className="text-sm text-gray-300">Ingen beskrivelse</p>
+                )}
+              </>
             )}
           </div>
 
@@ -387,24 +526,72 @@ export default function ProductDetailPage() {
           {/* Priser */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <SectionHeader title="Priser" />
-            <dl>
-              <Row label="Salgspris"   value={product.sales_price != null ? `${product.sales_price.toLocaleString('da-DK')} kr` : null} />
-              <Row label="Tilbudspris" value={product.sale_price  != null ? `${product.sale_price.toLocaleString('da-DK')} kr`  : null} />
-              <Row label="Moms-klasse" value={product.tax_class} />
-            </dl>
+            {editing ? (
+              <dl>
+                <EditRow label="Salgspris">
+                  <input
+                    type="number"
+                    className={INPUT_CLS}
+                    value={form.sales_price ?? ''}
+                    onChange={e => setField('sales_price', e.target.value === '' ? null : Number(e.target.value))}
+                  />
+                </EditRow>
+                <EditRow label="Tilbudspris">
+                  <input
+                    type="number"
+                    className={INPUT_CLS}
+                    value={form.sale_price ?? ''}
+                    onChange={e => setField('sale_price', e.target.value === '' ? null : Number(e.target.value))}
+                  />
+                </EditRow>
+                <EditRow label="Moms-klasse">
+                  <input
+                    type="text"
+                    className={INPUT_CLS}
+                    value={form.tax_class ?? ''}
+                    onChange={e => setField('tax_class', e.target.value || null)}
+                  />
+                </EditRow>
+              </dl>
+            ) : (
+              <dl>
+                <Row label="Salgspris"   value={product.sales_price != null ? `${product.sales_price.toLocaleString('da-DK')} kr` : null} />
+                <Row label="Tilbudspris" value={product.sale_price  != null ? `${product.sale_price.toLocaleString('da-DK')} kr`  : null} />
+                <Row label="Moms-klasse" value={product.tax_class} />
+              </dl>
+            )}
           </div>
 
           {/* Identifikation */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <SectionHeader title="Identifikation" />
-            <dl>
-              <Row label="Internt varenr."  value={product.internal_sku} mono />
-              <Row label="Bestillingsnr."   value={product.woo_bestillingsnummer} mono />
-              <Row label="EAN / Stregkode"  value={product.ean} mono />
-              <Row label="Producent SKU"    value={product.manufacturer_sku} mono />
-              <Row label="Brand"            value={product.brand} />
-              <Row label="Slug"             value={product.slug} mono />
-            </dl>
+            {editing ? (
+              <dl>
+                <Row label="Internt varenr."  value={product.internal_sku} mono />
+                <Row label="Bestillingsnr."   value={product.woo_bestillingsnummer} mono />
+                <EditRow label="EAN / Stregkode">
+                  <input type="text" className={INPUT_CLS} value={form.ean ?? ''} onChange={e => setField('ean', e.target.value || null)} />
+                </EditRow>
+                <EditRow label="Producent SKU">
+                  <input type="text" className={INPUT_CLS} value={form.manufacturer_sku ?? ''} onChange={e => setField('manufacturer_sku', e.target.value || null)} />
+                </EditRow>
+                <EditRow label="Brand">
+                  <input type="text" className={INPUT_CLS} value={form.brand ?? ''} onChange={e => setField('brand', e.target.value || null)} />
+                </EditRow>
+                <EditRow label="Slug">
+                  <input type="text" className={INPUT_CLS} value={form.slug ?? ''} onChange={e => setField('slug', e.target.value || null)} />
+                </EditRow>
+              </dl>
+            ) : (
+              <dl>
+                <Row label="Internt varenr."  value={product.internal_sku} mono />
+                <Row label="Bestillingsnr."   value={product.woo_bestillingsnummer} mono />
+                <Row label="EAN / Stregkode"  value={product.ean} mono />
+                <Row label="Producent SKU"    value={product.manufacturer_sku} mono />
+                <Row label="Brand"            value={product.brand} />
+                <Row label="Slug"             value={product.slug} mono />
+              </dl>
+            )}
           </div>
 
           {/* Producent */}
@@ -423,30 +610,75 @@ export default function ProductDetailPage() {
           {/* Mål & fragt */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <SectionHeader title="Mål & fragt" />
-            <dl>
-              <Row label="Vægt"      value={product.weight  != null ? `${product.weight} kg`  : null} />
-              <Row label="Længde"    value={product.length  != null ? `${product.length} cm`  : null} />
-              <Row label="Bredde"    value={product.width   != null ? `${product.width} cm`   : null} />
-              <Row label="Højde"     value={product.height  != null ? `${product.height} cm`  : null} />
-              <Row label="Video URL" value={product.video_url
-                ? <a href={product.video_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs truncate block max-w-full">{product.video_url}</a>
-                : null} />
-            </dl>
+            {editing ? (
+              <dl>
+                <EditRow label="Vægt (kg)">
+                  <input type="number" className={INPUT_CLS} value={form.weight ?? ''} onChange={e => setField('weight', e.target.value === '' ? null : Number(e.target.value))} />
+                </EditRow>
+                <EditRow label="Længde (cm)">
+                  <input type="number" className={INPUT_CLS} value={form.length ?? ''} onChange={e => setField('length', e.target.value === '' ? null : Number(e.target.value))} />
+                </EditRow>
+                <EditRow label="Bredde (cm)">
+                  <input type="number" className={INPUT_CLS} value={form.width ?? ''} onChange={e => setField('width', e.target.value === '' ? null : Number(e.target.value))} />
+                </EditRow>
+                <EditRow label="Højde (cm)">
+                  <input type="number" className={INPUT_CLS} value={form.height ?? ''} onChange={e => setField('height', e.target.value === '' ? null : Number(e.target.value))} />
+                </EditRow>
+                <EditRow label="Video URL">
+                  <input type="text" className={INPUT_CLS} value={form.video_url ?? ''} onChange={e => setField('video_url', e.target.value || null)} />
+                </EditRow>
+              </dl>
+            ) : (
+              <dl>
+                <Row label="Vægt"      value={product.weight  != null ? `${product.weight} kg`  : null} />
+                <Row label="Længde"    value={product.length  != null ? `${product.length} cm`  : null} />
+                <Row label="Bredde"    value={product.width   != null ? `${product.width} cm`   : null} />
+                <Row label="Højde"     value={product.height  != null ? `${product.height} cm`  : null} />
+                <Row label="Video URL" value={product.video_url
+                  ? <a href={product.video_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline text-xs truncate block max-w-full">{product.video_url}</a>
+                  : null} />
+              </dl>
+            )}
           </div>
 
           {/* Kategorier & tags */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <SectionHeader title="Kategorier & tags" />
-            <Row label="Kategorier" value={
-              product.categories?.length > 0
-                ? <div className="flex flex-wrap gap-1">{product.categories.map(c => <span key={c} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{c}</span>)}</div>
-                : null
-            } />
-            <Row label="Tags" value={
-              product.tags?.length > 0
-                ? <div className="flex flex-wrap gap-1">{product.tags.map(t => <span key={t} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{t}</span>)}</div>
-                : null
-            } />
+            {editing ? (
+              <dl>
+                <EditRow label="Kategorier">
+                  <input
+                    type="text"
+                    className={INPUT_CLS}
+                    placeholder="Kommasepareret"
+                    value={(form.categories ?? []).join(', ')}
+                    onChange={e => setField('categories', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  />
+                </EditRow>
+                <EditRow label="Tags">
+                  <input
+                    type="text"
+                    className={INPUT_CLS}
+                    placeholder="Kommasepareret"
+                    value={(form.tags ?? []).join(', ')}
+                    onChange={e => setField('tags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                  />
+                </EditRow>
+              </dl>
+            ) : (
+              <>
+                <Row label="Kategorier" value={
+                  product.categories?.length > 0
+                    ? <div className="flex flex-wrap gap-1">{product.categories.map(c => <span key={c} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{c}</span>)}</div>
+                    : null
+                } />
+                <Row label="Tags" value={
+                  product.tags?.length > 0
+                    ? <div className="flex flex-wrap gap-1">{product.tags.map(t => <span key={t} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{t}</span>)}</div>
+                    : null
+                } />
+              </>
+            )}
             {product.attributes?.length > 0 && (
               <div className="mt-2">
                 <p className="text-xs text-gray-400 mb-1">Attributter</p>
@@ -477,10 +709,21 @@ export default function ProductDetailPage() {
           {/* SEO */}
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <SectionHeader title="SEO" />
-            <dl>
-              <Row label="Meta-titel"       value={product.meta_title} />
-              <Row label="Meta-beskrivelse" value={product.meta_description} />
-            </dl>
+            {editing ? (
+              <dl>
+                <EditRow label="Meta-titel">
+                  <input type="text" className={INPUT_CLS} value={form.meta_title ?? ''} onChange={e => setField('meta_title', e.target.value || null)} />
+                </EditRow>
+                <EditRow label="Meta-beskrivelse">
+                  <textarea className={TEXTAREA_CLS} rows={3} value={form.meta_description ?? ''} onChange={e => setField('meta_description', e.target.value || null)} />
+                </EditRow>
+              </dl>
+            ) : (
+              <dl>
+                <Row label="Meta-titel"       value={product.meta_title} />
+                <Row label="Meta-beskrivelse" value={product.meta_description} />
+              </dl>
+            )}
           </div>
 
           {/* WooCommerce */}

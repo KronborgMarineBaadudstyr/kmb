@@ -49,3 +49,45 @@ export async function GET(
 
   return NextResponse.json({ data: sorted })
 }
+
+const ALLOWED_FIELDS = [
+  'name', 'description', 'short_description', 'sales_price', 'sale_price',
+  'tax_class', 'ean', 'manufacturer_sku', 'brand', 'slug', 'weight',
+  'length', 'width', 'height', 'categories', 'tags', 'attributes',
+  'specifications', 'video_url', 'meta_title', 'meta_description', 'status',
+]
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params
+  const supabase = createServiceClient()
+
+  let body: Record<string, unknown>
+  try {
+    body = await request.json()
+  } catch {
+    return NextResponse.json({ error: 'Ugyldig JSON' }, { status: 400 })
+  }
+
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  for (const field of ALLOWED_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(body, field)) {
+      updates[field] = body[field]
+    }
+  }
+
+  const { data: updatedProduct, error } = await supabase
+    .from('products')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
+
+  return NextResponse.json({ data: updatedProduct })
+}
