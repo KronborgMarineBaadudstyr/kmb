@@ -90,15 +90,9 @@ const TABS: { key: TabKey; label: string; status?: string; method?: string; conf
 function GroupCard({
   group,
   onUpdate,
-  onCreateProduct,
-  selected,
-  onSelect,
 }: {
-  group:           MatchGroup
-  onUpdate:        (id: string, patch: { suggested_name?: string; status?: string }) => Promise<void>
-  onCreateProduct: (id: string, name: string) => Promise<void>
-  selected:        boolean
-  onSelect:        (id: string, checked: boolean) => void
+  group:    MatchGroup
+  onUpdate: (id: string, patch: { suggested_name?: string; status?: string }) => Promise<void>
 }) {
   const [editName,    setEditName]    = useState(group.suggested_name ?? '')
   const [loading,     setLoading]     = useState(false)
@@ -124,30 +118,11 @@ function GroupCard({
     setLoading(false)
   }
 
-  async function handleCreateProduct() {
-    if (!editName.trim()) { setMsg('Produktnavn er påkrævet'); return }
-    setLoading(true)
-    setMsg(null)
-    await onCreateProduct(group.id, editName.trim())
-    setMsg('Produkt oprettet!')
-    setLoading(false)
-  }
-
   const isActioned = group.status === 'rejected' || group.status === 'product_created' || group.status === 'confirmed'
 
   return (
-    <div className={`border rounded-lg bg-white overflow-hidden ${selected ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-200'}`}>
+    <div className="border rounded-lg bg-white overflow-hidden border-gray-200">
       <div className="px-4 py-3 flex items-start gap-3">
-        {/* Checkbox */}
-        {!isActioned && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={e => onSelect(group.id, e.target.checked)}
-            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-        )}
-
         <div className="flex-1 min-w-0">
           {/* Header row */}
           <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -267,32 +242,13 @@ function GroupCard({
           {/* Action buttons */}
           {!isActioned && (
             <div className="flex gap-2 mt-3 flex-wrap">
-              {isSingle ? (
-                <button
-                  onClick={handleCreateProduct}
-                  disabled={loading}
-                  className="px-4 py-1.5 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
-                >
-                  Opret produkt
-                </button>
-              ) : (
-                <>
-                  <button
-                    onClick={handleConfirm}
-                    disabled={loading}
-                    className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
-                  >
-                    Bekræft produkt gruppering
-                  </button>
-                  <button
-                    onClick={handleCreateProduct}
-                    disabled={loading}
-                    className="px-4 py-1.5 text-xs bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
-                  >
-                    Opret produkt
-                  </button>
-                </>
-              )}
+              <button
+                onClick={handleConfirm}
+                disabled={loading}
+                className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+              >
+                Bekræft produkt gruppering
+              </button>
               <button
                 onClick={handleReject}
                 disabled={loading}
@@ -300,6 +256,12 @@ function GroupCard({
               >
                 Afvis
               </button>
+            </div>
+          )}
+
+          {group.status === 'confirmed' && (
+            <div className="mt-3 text-xs text-blue-600 bg-blue-50 rounded px-3 py-2">
+              Gå til <a href="/staging" className="font-medium underline">Til gennemgang</a> for at oprette produktet
             </div>
           )}
 
@@ -326,7 +288,6 @@ export default function MatchingPage() {
   const [page,        setPage]        = useState(1)
   const [loading,     setLoading]     = useState(true)
   const [activeTab,   setActiveTab]   = useState<TabKey>('high')
-  const [selected,    setSelected]    = useState<Set<string>>(new Set())
 
   // SSE state
   const [running,     setRunning]     = useState(false)
@@ -393,43 +354,6 @@ export default function MatchingPage() {
     setGroups(prev => prev.map(g => g.id === id ? { ...g, ...patch } as MatchGroup : g))
   }
 
-  async function handleCreateProduct(id: string, name: string) {
-    const res  = await fetch(`/api/matching/${id}/create-product`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ chosen_name: name }),
-    })
-    const json = await res.json() as { ok?: boolean; product_id?: string; error?: string }
-    if (!json.ok) throw new Error(json.error ?? 'Ukendt fejl')
-    setGroups(prev => prev.map(g =>
-      g.id === id ? { ...g, status: 'product_created', product_id: json.product_id ?? null } : g
-    ))
-  }
-
-  function toggleSelect(id: string, checked: boolean) {
-    setSelected(prev => {
-      const next = new Set(prev)
-      if (checked) next.add(id); else next.delete(id)
-      return next
-    })
-  }
-
-  async function bulkCreateProducts() {
-    const ids = [...selected]
-    for (const id of ids) {
-      const group = groups.find(g => g.id === id)
-      if (!group) continue
-      const name = group.suggested_name?.trim() ?? ''
-      if (!name) continue
-      try {
-        await handleCreateProduct(id, name)
-      } catch {
-        // continue with others
-      }
-    }
-    setSelected(new Set())
-  }
-
   const stageLabel: Record<string, string> = {
     ean_phase:    'EAN-fase',
     fuzzy_phase:  'Fuzzy-fase',
@@ -444,7 +368,7 @@ export default function MatchingPage() {
       <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
         <div className="flex items-start justify-between mb-4">
           <div>
-            <h2 className="text-xl font-bold text-gray-900">Produkt-matching</h2>
+            <h2 className="text-xl font-bold text-gray-900">Leverandør-match</h2>
             <p className="text-sm text-gray-500 mt-0.5">
               Kryds-leverandør matching af staging-produkter
             </p>
@@ -504,7 +428,7 @@ export default function MatchingPage() {
           {TABS.map(tab => (
             <button
               key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setPage(1); setSelected(new Set()) }}
+              onClick={() => { setActiveTab(tab.key); setPage(1) }}
               className={`px-4 py-1.5 transition-colors whitespace-nowrap ${
                 activeTab === tab.key ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'
               }`}
@@ -514,25 +438,6 @@ export default function MatchingPage() {
           ))}
         </div>
       </div>
-
-      {/* ── Bulk actions bar ── */}
-      {selected.size > 0 && (
-        <div className="border-b border-gray-200 bg-blue-50 px-6 py-2 flex items-center gap-3 shrink-0">
-          <span className="text-sm text-blue-700 font-medium">{selected.size} grupper valgt</span>
-          <button
-            onClick={bulkCreateProducts}
-            className="px-4 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700"
-          >
-            Opret {selected.size} produkter
-          </button>
-          <button
-            onClick={() => setSelected(new Set())}
-            className="text-sm text-gray-500 hover:text-gray-700"
-          >
-            Ryd valg
-          </button>
-        </div>
-      )}
 
       {/* ── List ── */}
       <div className="flex-1 overflow-auto px-6 py-4">
@@ -555,9 +460,6 @@ export default function MatchingPage() {
                 key={g.id}
                 group={g}
                 onUpdate={handleUpdate}
-                onCreateProduct={handleCreateProduct}
-                selected={selected.has(g.id)}
-                onSelect={toggleSelect}
               />
             ))}
           </div>

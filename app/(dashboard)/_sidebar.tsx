@@ -4,13 +4,13 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 
 const navItems = [
-  { href: '/',          label: 'Dashboard',      icon: '⊞' },
-  { href: '/products',  label: 'Produkter',       icon: '📦' },
-  { href: '/suppliers', label: 'Leverandører',    icon: '🏭' },
-  { href: '/staging',   label: 'Til gennemgang',  icon: '🔍' },
-  { href: '/inventory', label: 'Lagerbeholdning', icon: '📊' },
-  { href: '/matching',  label: 'Matching',         icon: '🔗' },
-  { href: '/sync',      label: 'Sync & Logs',     icon: '🔄' },
+  { href: '/',          label: 'Dashboard',         icon: '⊞' },
+  { href: '/suppliers', label: 'Leverandører',       icon: '🏭' },
+  { href: '/matching',  label: 'Leverandør-match',   icon: '🔗' },
+  { href: '/staging',   label: 'Til gennemgang',     icon: '🔍' },
+  { href: '/products',  label: 'Produkter',          icon: '📦' },
+  { href: '/inventory', label: 'Lagerbeholdning',    icon: '📊' },
+  { href: '/sync',      label: 'Sync & Logs',        icon: '🔄' },
 ]
 
 export default function SidebarClient() {

@@ -7,6 +7,27 @@ function str(val: unknown, fallback = '—'): string {
   return String(val) || fallback
 }
 
+type MatchGroup = {
+  id: string
+  suggested_name: string | null
+  suggested_ean: string | null
+  supplier_count: number
+  match_method: string
+  match_confidence: string
+  status: string
+  product_id: string | null
+  created_at: string
+  members: Array<{
+    id: string
+    supplier_id: string
+    normalized_name: string
+    normalized_sku: string
+    normalized_ean: string | null
+    raw_data: Record<string, unknown>
+    suppliers: { name: string } | null
+  }>
+}
+
 type StagingRow = {
   id:                   string
   supplier_id:          string
@@ -72,6 +93,15 @@ export default function StagingPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [actionMsg,   setActionMsg]   = useState<string | null>(null)
 
+  // Bekræftede grupper tab
+  const [groupsTab, setGroupsTab] = useState(false)
+  const [groups, setGroups] = useState<MatchGroup[]>([])
+  const [groupsLoading, setGroupsLoading] = useState(false)
+  const [groupsTotal, setGroupsTotal] = useState(0)
+  const [groupsPage, setGroupsPage] = useState(1)
+  const [groupEditNames, setGroupEditNames] = useState<Record<string, string>>({})
+  const [groupActionMsg, setGroupActionMsg] = useState<Record<string, string>>({})
+
   // Search input til fuzzy-søgning i match-panel
   const [matchSearch, setMatchSearch] = useState('')
   const [matchResults, setMatchResults] = useState<Suggestion[]>([])
@@ -104,6 +134,47 @@ export default function StagingPage() {
   }, [statusFilter, supplierFilter, search, page])
 
   useEffect(() => { fetchRows() }, [fetchRows])
+
+  const fetchGroups = useCallback(async () => {
+    setGroupsLoading(true)
+    const res = await fetch(`/api/matching/groups?status=confirmed&page=${groupsPage}&per_page=50`)
+    const json = await res.json()
+    setGroups(json.data ?? [])
+    setGroupsTotal(json.total ?? 0)
+    setGroupsLoading(false)
+  }, [groupsPage])
+
+  useEffect(() => { if (groupsTab) fetchGroups() }, [groupsTab, fetchGroups])
+
+  async function createProductFromGroup(groupId: string) {
+    const name = groupEditNames[groupId] ?? groups.find(g => g.id === groupId)?.suggested_name ?? ''
+    if (!name.trim()) { alert('Vælg et produktnavn'); return }
+    const res = await fetch(`/api/matching/${groupId}/create-product`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chosen_name: name }),
+    })
+    const json = await res.json()
+    if (json.error) {
+      setGroupActionMsg(m => ({ ...m, [groupId]: '✗ Fejl: ' + json.error }))
+    } else {
+      setGroupActionMsg(m => ({ ...m, [groupId]: '✓ Produkt oprettet!' }))
+      setTimeout(() => fetchGroups(), 1000)
+    }
+  }
+
+  async function rejectGroup(groupId: string) {
+    const res = await fetch(`/api/matching/${groupId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected' }),
+    })
+    const json = await res.json()
+    if (json.ok) {
+      setGroupActionMsg(m => ({ ...m, [groupId]: '✓ Afvist' }))
+      setTimeout(() => fetchGroups(), 800)
+    }
+  }
 
   // Debounce søgning
   useEffect(() => {
@@ -190,9 +261,26 @@ export default function StagingPage() {
                 Leverandørprodukter der ikke er matchet automatisk
               </p>
             </div>
-            <span className="text-sm text-gray-400">{total.toLocaleString('da-DK')} rækker</span>
+            <span className="text-sm text-gray-400">{groupsTab ? groupsTotal.toLocaleString('da-DK') + ' grupper' : total.toLocaleString('da-DK') + ' rækker'}</span>
           </div>
 
+          {/* Top-level tab switcher */}
+          <div className="flex gap-2 mb-4">
+            <button
+              onClick={() => setGroupsTab(false)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${!groupsTab ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Leverandørprodukter
+            </button>
+            <button
+              onClick={() => setGroupsTab(true)}
+              className={`px-4 py-2 text-sm font-medium rounded-lg ${groupsTab ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+            >
+              Bekræftede grupper {groupsTotal > 0 && <span className="ml-1.5 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">{groupsTotal}</span>}
+            </button>
+          </div>
+
+          {!groupsTab && (
           <div className="flex items-center gap-2 flex-wrap">
             {/* Status filter */}
             <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
@@ -236,10 +324,100 @@ export default function StagingPage() {
               className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
             />
           </div>
+          )}
         </div>
 
+        {/* Bekræftede grupper panel */}
+        {groupsTab && (
+          <div className="flex-1 overflow-auto px-6 py-4">
+            {groupsLoading ? (
+              <div className="p-12 text-center text-gray-400">Henter grupper...</div>
+            ) : groups.length === 0 ? (
+              <div className="p-12 text-center text-gray-400">Ingen bekræftede grupper afventer produktoprettelse</div>
+            ) : (
+              <div className="space-y-3 max-w-4xl">
+                {groups.map(g => {
+                  const editName = groupEditNames[g.id] ?? g.suggested_name ?? ''
+                  const actionMsg = groupActionMsg[g.id]
+                  return (
+                    <div key={g.id} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+                      <div className="px-4 py-3">
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200 font-medium">
+                            Bekræftet
+                          </span>
+                          <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
+                            {g.supplier_count} {g.supplier_count === 1 ? 'leverandør' : 'leverandører'}
+                          </span>
+                          {g.suggested_ean && (
+                            <span className="text-xs font-mono text-gray-400">EAN: {g.suggested_ean}</span>
+                          )}
+                        </div>
+                        <div className="mb-3">
+                          <label className="block text-xs text-gray-500 mb-1">Produktnavn</label>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={e => setGroupEditNames(m => ({ ...m, [g.id]: e.target.value }))}
+                            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div className="space-y-2 mb-3">
+                          {g.members.map(m => {
+                            const pp = m.raw_data.purchase_price
+                            const qty = Number(m.raw_data.supplier_stock_quantity ?? 0)
+                            return (
+                              <div key={m.id} className="bg-gray-50 rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-1">
+                                <div>
+                                  <span className="text-gray-400 block">Leverandør</span>
+                                  <span className="font-medium text-gray-800">{m.suppliers?.name ?? '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400 block">SKU</span>
+                                  <span className="font-mono text-gray-700">{m.normalized_sku}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400 block">Indkøbspris</span>
+                                  <span className="text-gray-700">{pp != null ? `${Number(pp).toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr` : '—'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-gray-400 block">Lager</span>
+                                  <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>{qty}</span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        {actionMsg && (
+                          <div className={`mb-2 text-xs px-2 py-1 rounded ${actionMsg.startsWith('✗') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+                            {actionMsg}
+                          </div>
+                        )}
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => createProductFromGroup(g.id)}
+                            className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                          >
+                            Opret produkt
+                          </button>
+                          <button
+                            onClick={() => rejectGroup(g.id)}
+                            className="px-4 py-1.5 text-xs border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50"
+                          >
+                            Afvis gruppe
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Tabel */}
-        <div className="flex-1 overflow-auto">
+        {!groupsTab && <div className="flex-1 overflow-auto">
           {loading ? (
             <div className="p-12 text-center text-gray-400">Henter...</div>
           ) : rows.length === 0 ? (
@@ -306,10 +484,10 @@ export default function StagingPage() {
               </tbody>
             </table>
           )}
-        </div>
+        </div>}
 
         {/* Pagination */}
-        {totalPages > 1 && (
+        {!groupsTab && totalPages > 1 && (
           <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-between shrink-0">
             <p className="text-sm text-gray-500">
               Side {page} / {totalPages} — {total.toLocaleString('da-DK')} rækker
