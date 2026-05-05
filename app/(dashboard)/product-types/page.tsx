@@ -463,11 +463,32 @@ export default function ProductTypesPage() {
   const NO_CAT = '(Ingen kategori)'
   const NO_SUB = '(Ingen underkategori)'
 
+  // Normalize: trim, collapse spaces, title-case first letter
+  function normCat(s: string | null | undefined): string {
+    if (!s) return ''
+    return s.trim().replace(/\s+/g, ' ').replace(/^./, c => c.toUpperCase())
+  }
+
+  // Case-insensitive dedup: keep the first-seen canonical form
   const catTree = (() => {
+    // Maps lower-case key → canonical display name
+    const catCanon  = new Map<string, string>()
+    const subCanon  = new Map<string, string>() // key: `${catKey}||${subLower}`
+
     const tree = new Map<string, Map<string, ProductTypeRow[]>>()
+
     for (const row of rows) {
-      const cat = row.our_category || NO_CAT
-      const sub = row.our_subcategory || NO_SUB
+      const rawCat = normCat(row.our_category) || NO_CAT
+      const rawSub = normCat(row.our_subcategory) || NO_SUB
+
+      const catKey = rawCat.toLowerCase()
+      if (!catCanon.has(catKey)) catCanon.set(catKey, rawCat)
+      const cat = catCanon.get(catKey)!
+
+      const subKey = `${catKey}||${rawSub.toLowerCase()}`
+      if (!subCanon.has(subKey)) subCanon.set(subKey, rawSub)
+      const sub = subCanon.get(subKey)!
+
       if (!tree.has(cat)) tree.set(cat, new Map())
       if (!tree.get(cat)!.has(sub)) tree.get(cat)!.set(sub, [])
       tree.get(cat)!.get(sub)!.push(row)
