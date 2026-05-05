@@ -222,7 +222,7 @@ function GroupCard({
   const [editName,      setEditName]      = useState(group.suggested_name ?? '')
   const [loading,       setLoading]       = useState(false)
   const [msg,           setMsg]           = useState<string | null>(null)
-  const [showMembers,   setShowMembers]   = useState(false)
+  const [showMembers,   setShowMembers]   = useState(group.status === 'pending_review')
   const [detailMember,  setDetailMember]  = useState<MatchMember | null>(null)
 
   const conf     = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
@@ -233,6 +233,7 @@ function GroupCard({
     setMsg(null)
     await onUpdate(group.id, { status: 'confirmed', suggested_name: editName })
     setMsg('Bekræftet')
+    setShowMembers(false)
     setLoading(false)
   }
 
@@ -241,6 +242,7 @@ function GroupCard({
     setMsg(null)
     await onUpdate(group.id, { status: 'rejected' })
     setMsg('Afvist')
+    setShowMembers(false)
     setLoading(false)
   }
 
