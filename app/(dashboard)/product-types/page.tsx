@@ -348,6 +348,7 @@ export default function ProductTypesPage() {
       const res  = await fetch('/api/product-types/suggest', { method: 'POST' })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Ukendt fejl')
+      if (json.message) { setAiError('ℹ️ ' + json.message); return }
       setSuggestions(json.suggestions ?? [])
       setSampleSize(json.sample_size ?? 0)
     } catch (e) { setAiError(String(e)) }
@@ -363,18 +364,20 @@ export default function ProductTypesPage() {
       setFullLog(prev => [...prev, { round, added: 0, msg: `Runde ${round} — analyserer…` }])
 
       let suggestions: AiSuggestion[] = []
+      let allCovered = false
       try {
         const res  = await fetch('/api/product-types/suggest', { method: 'POST' })
         const json = await res.json()
         if (!res.ok) throw new Error(json.error ?? 'Ukendt fejl')
-        suggestions = json.suggestions ?? []
+        suggestions  = json.suggestions ?? []
+        allCovered   = !!(json.message && suggestions.length === 0)
       } catch (e) {
         setFullLog(prev => prev.map((l, i) => i === prev.length - 1 ? { ...l, msg: `Runde ${round} — fejl: ${String(e)}` } : l))
         break
       }
 
-      if (suggestions.length === 0) {
-        setFullLog(prev => prev.map((l, i) => i === prev.length - 1 ? { ...l, added: 0, msg: `Runde ${round} — ingen nye forslag. Analyse færdig!` } : l))
+      if (allCovered || suggestions.length === 0) {
+        setFullLog(prev => prev.map((l, i) => i === prev.length - 1 ? { ...l, added: 0, msg: `Runde ${round} — alle produkter er nu dækket af en produkttype 🎉` } : l))
         break
       }
 
