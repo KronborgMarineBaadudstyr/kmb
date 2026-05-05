@@ -391,7 +391,7 @@ export default function ProductTypesPage() {
             className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
             {aiRunning
               ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Analyserer…</>
-              : '✨ AI-forslag fra staging'}
+              : '✨ Analyser leverandørprodukter'}
           </button>
           {!showNew && (
             <button onClick={() => { setShowNew(true); setEditId(null) }}
@@ -457,7 +457,7 @@ export default function ProductTypesPage() {
           <div className="flex gap-3 justify-center">
             <button onClick={runAiAnalysis} disabled={aiRunning}
               className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50">
-              ✨ AI-forslag fra staging
+              ✨ Analyser leverandørprodukter
             </button>
             <button onClick={() => setShowNew(true)}
               className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
