@@ -619,17 +619,40 @@ export default function MatchingPage() {
 
         {/* Filter tabs */}
         <div className="flex gap-0 rounded-lg border border-gray-200 overflow-hidden w-fit text-sm">
-          {TABS.map(tab => (
-            <button
-              key={tab.key}
-              onClick={() => { setActiveTab(tab.key); setPage(1) }}
-              className={`px-4 py-1.5 transition-colors whitespace-nowrap ${
-                activeTab === tab.key ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
+          {TABS.map(tab => {
+            const count = stats ? (
+              tab.key === 'all'       ? stats.total - stats.confirmed - stats.rejected - stats.created :
+              tab.key === 'high'      ? stats.high :
+              tab.key === 'medium'    ? stats.medium :
+              tab.key === 'single'    ? stats.single :
+              tab.key === 'confirmed' ? stats.confirmed :
+              tab.key === 'rejected'  ? stats.rejected :
+              null
+            ) : null
+            const isActive = activeTab === tab.key
+            return (
+              <button
+                key={tab.key}
+                onClick={() => { setActiveTab(tab.key); setPage(1) }}
+                className={`px-4 py-1.5 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                  isActive ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {tab.label}
+                {count != null && count > 0 && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium tabular-nums ${
+                    isActive
+                      ? 'bg-white/20 text-white'
+                      : tab.key === 'all' || tab.key === 'high' || tab.key === 'medium' || tab.key === 'single'
+                        ? 'bg-orange-100 text-orange-700'
+                        : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {count.toLocaleString('da-DK')}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
