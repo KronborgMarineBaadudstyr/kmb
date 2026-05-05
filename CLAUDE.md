@@ -16,21 +16,26 @@ app/
   (dashboard)/          # Admin UI
     page.tsx            # Dashboard
     suppliers/          # Leverandøroversigt + manuel import-trigger
-    staging/            # Gennemgang af ukendte leverandørprodukter
+    staging/            # Gennemgang af ukendte leverandørprodukter (needs_review + pending_review)
+    matching/           # Cross-supplier produktmatch + oprettelse af draft-produkter
     products/           # Produktkatalog
     inventory/          # Lagerbeholdning
   api/
-    import/             # SSE-streams til manuel import (engholm, palby, scanmarine)
-    cron/               # Vercel cron endpoints (sync-engholm, sync-palby-products, sync-palby-stock, sync-scanmarine)
-    suppliers/          # CRUD leverandører
+    import/             # SSE-streams til manuel import (engholm, palby, scanmarine, columbus, kaphorn)
+    cron/               # Vercel cron endpoints
+    suppliers/          # CRUD leverandører + PATCH sync_state
     staging/            # GET list, [id]/suggestions, [id]/action
+    matching/           # run (SSE), groups (GET), [id] (PATCH), [id]/create-product (POST)
     products/           # Produkter
 lib/
-  importers/            # columbus.ts, engholm.ts, palby.ts, scanmarine.ts
+  importers/            # columbus.ts, engholm.ts, palby.ts, scanmarine.ts, kaphorn.ts, hf-industri.ts
+  matching-engine.ts    # runMatchingEngine() — EAN + fuzzy navn gruppering
+  product-creator.ts    # createProductFromGroup() — draft produkt + product_suppliers
+  review-checker.ts     # flagRecentlyImportedForReview() — needs_review efter import
   supabase/             # client.ts, server.ts
   cron-auth.ts          # verifyCronRequest() — Bearer CRON_SECRET
 supabase/
-  migrations/           # 001–006 SQL filer (køres manuelt i Supabase SQL Editor)
+  migrations/           # 001–011 SQL filer (køres manuelt i Supabase SQL Editor)
   local/                # gitignored — credentials SQL filer
 vercel.json             # Cron job schedules
 ```
@@ -42,7 +47,9 @@ vercel.json             # Cron job schedules
 | Engholm | API (JSON) | ✅ Implementeret |
 | Palby | FTP CSV + XML lager | ✅ Implementeret |
 | Scanmarine | CSV download (URL) | ✅ Implementeret |
-| Columbus Marine | FTP XML | ✅ Importer skrevet, mangler migration + cron |
+| Columbus Marine | FTP XML | ✅ Implementeret |
+| Kap-Horn | FTP XML | ✅ Implementeret |
+| HF Industri | FTP CSV | ✅ Implementeret |
 
 ### Palby FTP detaljer
 - Host: `52.149.120.1`, Port: 21
@@ -71,9 +78,11 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `004_palby_supplier.sql` — Palby leverandør-række
 - `005_supplier_sync_state.sql` — `sync_state jsonb` kolonne på suppliers
 - `006_scanmarine_supplier.sql` — Scanmarine leverandør-række
-
-**Mangler endnu (ikke kørt):**
-- `007_columbus_supplier.sql` — Columbus Marine leverandør-række (skal oprettes)
+- `007_columbus_supplier.sql` — Columbus Marine leverandør-række ✅ kørt
+- `008_hf_industri_supplier.sql` — HF Industri leverandør-række ✅ kørt
+- `009_kaphorn_supplier.sql` — Kap-Horn leverandør-række ✅ kørt
+- `010_needs_review_status.sql` — `needs_review` status på staging ✅ kørt
+- `011_staging_match_groups.sql` — `staging_match_groups` tabel + `normalize_for_matching()` + `find_fuzzy_staging_matches()` RPC ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -82,16 +91,31 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 | `/api/cron/sync-scanmarine` | 06:00 dagligt | Scanmarine produktimport |
 | `/api/cron/sync-palby-products` | 23:00 dagligt | Palby produktimport (fuld CSV) |
 | `/api/cron/sync-palby-stock` | 07, 12, 17, 22 dagligt | Palby lager delta-sync |
-
-**Mangler:** Columbus cron + Columbus i vercel.json
+| `/api/cron/sync-columbus` | 23:00 dagligt | Columbus Marine produktimport |
+| `/api/cron/sync-kaphorn` | 23:00 dagligt | Kap-Horn produktimport |
 
 ## Staging-flow
 1. Import matcher på EAN mod `products` tabellen
-2. Match → opdaterer `product_suppliers`
+2. Match → opdaterer `product_suppliers`; `review-checker` flagger matchede produkter med manglende data som `needs_review`
 3. Ingen match → indsætter i `supplier_product_staging` med `status = 'pending_review'`
 4. Admin reviewer i `/staging` UI:
    - Fuzzy navn-søgning via `fuzzy_product_search()` RPC
-   - Actions: match til eksisterende produkt / opret nyt / afvis / genåbn
+   - Actions: match til eksisterende produkt / opret nyt / afvis / genåbn / marker som set (needs_review)
+
+## Matching-flow (cross-supplier produktoprettelse)
+1. Kør `/matching` → "Kør matching" → `runMatchingEngine()` kører tre faser:
+   - **EAN-fase**: Grupper staging-rækker med samme EAN på tværs af leverandører (høj konfidens)
+   - **Fuzzy-fase**: `find_fuzzy_staging_matches()` RPC + union-find clustering (medium konfidens, ≥0.65 på normaliseret navn)
+   - **Singles-fase**: Resterende rækker uden gruppe → enkelt-leverandør grupper
+2. Admin gennemgår grupper i `/matching` UI:
+   - Vælger navn (manuelt fra dropdown af leverandørnavne)
+   - Sætter leverandørprioritet (priority 1 = tages fra først)
+   - Bekræfter → "Opret produkt" → `createProductFromGroup()`
+3. `createProductFromGroup()` opretter `products` (status: draft) + `product_suppliers` med priority
+4. Staging-rækker sættes til `matched`
+
+### normalize_for_matching()
+SQL-funktion der stripper farver (rød/blå/sort/etc.) og retningsord inden fuzzy-sammenligning, så `"Rød ankerkæde 10mm"` og `"Sort ankerkæde 10mm"` matches korrekt, mens `"10mm"` vs `"12mm"` ikke giver falsk match.
 
 ## Env Variables (.env.local)
 ```
@@ -107,24 +131,19 @@ CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel da
 
 ## TODO — Udestående opgaver
 
-### Kritiske / næste skridt
-- [ ] **Columbus Marine migration** — opret `supabase/migrations/007_columbus_supplier.sql` og kør i Supabase
-- [ ] **Columbus credentials SQL** — opret `supabase/local/columbus_credentials.sql` (gitignored) og kør
-- [ ] **Columbus cron** — tilføj `/api/cron/sync-columbus/route.ts` + entry i `vercel.json`
-- [ ] **Columbus i IMPORT_CONFIG** — tilføj Columbus i `app/(dashboard)/suppliers/page.tsx`
-- [ ] **CRON_SECRET** — tilføj env-variabel i Vercel dashboard
-
-### Verification / test
-- [ ] **Migration 003** (fuzzy_product_search RPC) — bekræft kørt i Supabase
-- [ ] **Staging UI** — test i browser, verificer fuzzy match virker
-- [ ] **Palby produktimport** — kør igen efter CSV-rewrite og verificer produkter dukker op i staging
-- [ ] **Palby 'Lager fuld'** — kør som baseline efter produktimport virker
+### I gang / næste skridt
+- [ ] **Kør matching** — åbn `/matching`, tryk "Kør matching", vurder grupperingskvalitet
+- [ ] **Gennemgå match-grupper** — bekræft høj-konfidens grupper, opret draft-produkter
+- [ ] **Sync interval** — Kap-Horn viser "Hver 8760 timer". Juster så alle leverandører viser samme daglige interval.
 
 ### Fremtidige features
-- [ ] Woo → Supabase løbende lagersync (webhook)
-- [ ] Staging batch-behandling (godkend/afvis mange ad gangen)
-- [ ] Supabase → WooCommerce produkt-sync (push validerede produkter til Woo)
-- [ ] admind POS integration (venter på API docs)
+- [ ] **Produktredigering** — `/products/[id]` side til at redigere navn, beskrivelse, pris, billeder inden Woo-push
+- [ ] **Supabase → WooCommerce** produkt-sync (push validerede draft-produkter til Woo)
+- [ ] **Woo → Supabase** løbende lagersync (webhook fra Woo ved salg)
+- [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook
+- [ ] **Staging batch-behandling** — godkend/afvis mange ad gangen
+- [ ] **admind POS integration** — venter på API docs
+- [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
 
 ## Vigtige kodningsmønstre
 
