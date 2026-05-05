@@ -342,12 +342,21 @@ export default function ProductTypesPage() {
     finally { setSaving(false) }
   }
 
+  async function fetchSuggestions(): Promise<{ suggestions: AiSuggestion[]; sample_size: number; message?: string } | null> {
+    const res  = await fetch('/api/product-types/suggest', { method: 'POST' })
+    const text = await res.text()
+    let json: Record<string, unknown>
+    try { json = JSON.parse(text) }
+    catch { throw new Error(res.ok ? `Ugyldigt svar fra server: ${text.slice(0, 120)}` : `Server fejl ${res.status}: ${text.slice(0, 120)}`) }
+    if (!res.ok) throw new Error((json.error as string) ?? `Server fejl ${res.status}`)
+    return json as { suggestions: AiSuggestion[]; sample_size: number; message?: string }
+  }
+
   async function runAiAnalysis() {
     setAiRunning(true); setAiError(null); setSuggestions([]); setDismissedIdxs(new Set())
     try {
-      const res  = await fetch('/api/product-types/suggest', { method: 'POST' })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error ?? 'Ukendt fejl')
+      const json = await fetchSuggestions()
+      if (!json) return
       if (json.message) { setAiError('ℹ️ ' + json.message); return }
       setSuggestions(json.suggestions ?? [])
       setSampleSize(json.sample_size ?? 0)
@@ -366,15 +375,13 @@ export default function ProductTypesPage() {
       let suggestions: AiSuggestion[] = []
       let allCovered = false
       try {
-        const res  = await fetch('/api/product-types/suggest', { method: 'POST' })
-        const json = await res.json()
-        if (!res.ok) throw new Error(json.error ?? 'Ukendt fejl')
-        suggestions  = json.suggestions ?? []
-        allCovered   = !!(json.message && suggestions.length === 0)
+        const json   = await fetchSuggestions()
+        suggestions  = json?.suggestions ?? []
+        allCovered   = !!(json?.message && suggestions.length === 0)
       } catch (e) {
-        // JSON parse / network error — log and retry next round instead of stopping
+        // JSON parse / network / timeout error — log and retry next round
         setFullLog(prev => prev.map((l, i) => i === prev.length - 1
-          ? { ...l, msg: `Runde ${round} — forbigået (${String(e).slice(0, 80)})` }
+          ? { ...l, msg: `Runde ${round} — forbigået (${String(e).slice(0, 100)})` }
           : l
         ))
         continue
