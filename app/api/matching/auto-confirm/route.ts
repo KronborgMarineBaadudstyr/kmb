@@ -43,6 +43,7 @@ function wordOverlap(a: string, b: string): number {
 // POST /api/matching/auto-confirm
 // Finds all pending EAN groups, checks name overlap across members,
 // auto-confirms those with ≥2 common meaningful words across ALL member pairs.
+// Sets notes on groups that need manual review explaining why.
 export async function POST() {
   const supabase = createServiceClient()
 
@@ -74,7 +75,7 @@ export async function POST() {
   }
 
   const toConfirm: string[] = []
-  const toReview:  string[] = []
+  const toReview:  { id: string; reason: string }[] = []
 
   for (const group of allGroups) {
     const names = group.members
@@ -82,24 +83,41 @@ export async function POST() {
       .filter(Boolean)
 
     if (names.length < 2) {
-      // Only one member name — can't compare, send to manual
-      toReview.push(group.id)
+      toReview.push({
+        id:     group.id,
+        reason: 'Kun ét leverandørprodukt — ingen sammenligning mulig',
+      })
       continue
     }
 
     // Check every pair — ALL pairs must have ≥2 word overlap
     let allPairsMatch = true
+    let worstOverlap  = Infinity
+    let worstPair: [string, string] = ['', '']
+
     outer: for (let i = 0; i < names.length; i++) {
       for (let j = i + 1; j < names.length; j++) {
-        if (wordOverlap(names[i], names[j]) < 2) {
+        const overlap = wordOverlap(names[i], names[j])
+        if (overlap < worstOverlap) {
+          worstOverlap = overlap
+          worstPair    = [names[i], names[j]]
+        }
+        if (overlap < 2) {
           allPairsMatch = false
           break outer
         }
       }
     }
 
-    if (allPairsMatch) toConfirm.push(group.id)
-    else toReview.push(group.id)
+    if (allPairsMatch) {
+      toConfirm.push(group.id)
+    } else {
+      const short = (s: string) => s.length > 40 ? s.slice(0, 38) + '…' : s
+      toReview.push({
+        id:     group.id,
+        reason: `Navnene deler kun ${worstOverlap} meningsfuldt ord — "${short(worstPair[0])}" vs "${short(worstPair[1])}"`,
+      })
+    }
   }
 
   // Batch-confirm in chunks of 200
@@ -109,9 +127,26 @@ export async function POST() {
     const chunk = toConfirm.slice(i, i + BATCH)
     const { error } = await supabase
       .from('staging_match_groups')
-      .update({ status: 'confirmed' })
+      .update({ status: 'confirmed', notes: null })
       .in('id', chunk)
     if (!error) confirmed += chunk.length
+  }
+
+  // Batch-update notes on needs_review groups
+  for (let i = 0; i < toReview.length; i += BATCH) {
+    const chunk = toReview.slice(i, i + BATCH)
+    // Update each with its specific reason — do in parallel batches grouped by reason
+    const byReason = new Map<string, string[]>()
+    for (const { id, reason } of chunk) {
+      if (!byReason.has(reason)) byReason.set(reason, [])
+      byReason.get(reason)!.push(id)
+    }
+    for (const [reason, ids] of byReason) {
+      await supabase
+        .from('staging_match_groups')
+        .update({ notes: reason })
+        .in('id', ids)
+    }
   }
 
   return NextResponse.json({

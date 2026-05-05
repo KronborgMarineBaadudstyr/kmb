@@ -4,6 +4,12 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 
 // ── Types ──
 
+type SupplierImage = {
+  url:        string
+  alt?:       string
+  is_primary?: boolean
+}
+
 type MatchMember = {
   id:              string
   supplier_id:     string
@@ -55,10 +61,10 @@ const CONFIDENCE_LABELS: Record<string, { label: string; color: string }> = {
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  pending_review:  { label: 'Afventer',      color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  confirmed:       { label: 'Bekræftet',     color: 'bg-blue-50 text-blue-700 border-blue-200'       },
-  rejected:        { label: 'Afvist',        color: 'bg-gray-100 text-gray-500 border-gray-200'      },
-  product_created: { label: 'Produkt oprettet', color: 'bg-green-50 text-green-700 border-green-200' },
+  pending_review:  { label: 'Afventer',         color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  confirmed:       { label: 'Bekræftet',        color: 'bg-blue-50 text-blue-700 border-blue-200'       },
+  rejected:        { label: 'Afvist',           color: 'bg-gray-100 text-gray-500 border-gray-200'      },
+  product_created: { label: 'Produkt oprettet', color: 'bg-green-50 text-green-700 border-green-200'    },
 }
 
 function fmt(val: unknown, fallback = '—'): string {
@@ -74,16 +80,135 @@ function fmtPrice(val: unknown): string {
   return `${n.toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr`
 }
 
+// ── Product detail slide-over ──
+function MemberDetailPanel({
+  member,
+  onClose,
+}: {
+  member: MatchMember
+  onClose: () => void
+}) {
+  const rd      = member.raw_data
+  const images  = (rd.supplier_images as SupplierImage[] | undefined) ?? []
+  const primary = images.find(i => i.is_primary) ?? images[0]
+  const rest    = images.filter(i => i !== primary)
+
+  // Fields to display (label, key or value)
+  const fields: { label: string; value: unknown }[] = [
+    { label: 'Leverandør',        value: member.suppliers?.name },
+    { label: 'SKU',               value: member.normalized_sku },
+    { label: 'EAN',               value: member.normalized_ean },
+    { label: 'Navn (normaliseret)', value: member.normalized_name },
+    { label: 'Navn (rådata)',     value: rd.name ?? rd.product_name ?? rd.HeadLinePlain ?? rd.Text },
+    { label: 'Beskrivelse',       value: rd.description ?? rd.product_description ?? rd.PipedItemDetailsText },
+    { label: 'Indkøbspris',       value: fmtPrice(rd.purchase_price) },
+    { label: 'Vejl. pris',        value: fmtPrice(rd.sales_price ?? rd.SalesPrice ?? rd.GrossSalesPrice) },
+    { label: 'Lager',             value: rd.supplier_stock_quantity ?? rd.InStock },
+    { label: 'Vægt (kg)',         value: rd.weight ?? rd.NetWeight },
+    { label: 'H × B × D (cm)',   value: [rd.height ?? rd.Height, rd.width ?? rd.Width, rd.length ?? rd.Length].every(v => v != null) ? `${rd.height ?? rd.Height} × ${rd.width ?? rd.Width} × ${rd.length ?? rd.Length}` : null },
+    { label: 'Mærke / Brand',     value: rd.brand ?? rd.manufacturer ?? rd.Brand },
+    { label: 'Prod.nr.',          value: rd.manufacturer_sku ?? rd.manufacturer_article_number },
+    { label: 'Kategori (lev.)',   value: rd.supplier_category ?? rd.category ?? rd.CatParent },
+    { label: 'Underkategori',     value: rd.CatChild },
+  ]
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 bg-black/30 z-40"
+        onClick={onClose}
+      />
+
+      {/* Panel */}
+      <div className="fixed right-0 top-0 h-full w-[480px] max-w-full bg-white shadow-2xl z-50 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 shrink-0">
+          <div>
+            <div className="text-xs text-gray-400 uppercase tracking-wide mb-0.5">{member.suppliers?.name}</div>
+            <h3 className="text-base font-semibold text-gray-900 leading-tight">{member.normalized_name}</h3>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-md hover:bg-gray-100 text-gray-400 hover:text-gray-700 text-xl leading-none"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Scrollable content */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Primary image */}
+          {primary && (
+            <div className="w-full bg-gray-50 flex items-center justify-center" style={{ minHeight: 220 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={primary.url}
+                alt={primary.alt ?? member.normalized_name}
+                className="max-h-64 max-w-full object-contain p-4"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+          )}
+
+          {/* Thumbnail strip */}
+          {rest.length > 0 && (
+            <div className="flex gap-2 px-5 py-3 overflow-x-auto border-b border-gray-100">
+              {rest.map((img, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={img.url}
+                  alt={img.alt ?? ''}
+                  className="h-16 w-16 object-contain rounded border border-gray-200 bg-gray-50 shrink-0"
+                  onError={e => { (e.target as HTMLImageElement).parentElement?.remove() }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Fields */}
+          <div className="px-5 py-4 space-y-3">
+            {fields.map(({ label, value }) => {
+              if (value == null || value === '' || value === '—') return null
+              const str = String(value)
+              const isLong = str.length > 80
+              return (
+                <div key={label} className={isLong ? '' : 'flex gap-4 items-baseline'}>
+                  <span className="text-xs text-gray-400 shrink-0 w-36">{label}</span>
+                  <span className={`text-sm text-gray-800 ${isLong ? 'mt-1 block whitespace-pre-wrap' : ''}`}>
+                    {str}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Raw data accordion */}
+          <details className="px-5 pb-6">
+            <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 select-none py-2">
+              Vis rå leverandørdata
+            </summary>
+            <pre className="mt-2 text-xs bg-gray-50 rounded p-3 overflow-x-auto text-gray-600 leading-relaxed">
+              {JSON.stringify(rd, null, 2)}
+            </pre>
+          </details>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ── Tab config ──
 type TabKey = 'all' | 'high' | 'medium' | 'single' | 'confirmed' | 'rejected'
 
 const TABS: { key: TabKey; label: string; status?: string; method?: string; confidence?: string }[] = [
-  { key: 'all',       label: 'Alle',             status: 'pending_review' },
-  { key: 'high',      label: 'Høj konfidens',    status: 'pending_review', confidence: 'high'   },
-  { key: 'medium',    label: 'Lav konfidens',    status: 'pending_review', confidence: 'medium' },
-  { key: 'single',    label: 'Enkelt leverandør', status: 'pending_review', method: 'single'    },
-  { key: 'confirmed', label: 'Bekræftet',        status: 'confirmed'      },
-  { key: 'rejected',  label: 'Afvist',           status: 'rejected'       },
+  { key: 'all',       label: 'Alle',              status: 'pending_review' },
+  { key: 'high',      label: 'Høj konfidens',     status: 'pending_review', confidence: 'high'   },
+  { key: 'medium',    label: 'Lav konfidens',     status: 'pending_review', confidence: 'medium' },
+  { key: 'single',    label: 'Enkelt leverandør', status: 'pending_review', method: 'single'     },
+  { key: 'confirmed', label: 'Bekræftet',         status: 'confirmed'      },
+  { key: 'rejected',  label: 'Afvist',            status: 'rejected'       },
 ]
 
 // ── Group Card ──
@@ -94,12 +219,13 @@ function GroupCard({
   group:    MatchGroup
   onUpdate: (id: string, patch: { suggested_name?: string; status?: string }) => Promise<void>
 }) {
-  const [editName,    setEditName]    = useState(group.suggested_name ?? '')
-  const [loading,     setLoading]     = useState(false)
-  const [msg,         setMsg]         = useState<string | null>(null)
-  const [showMembers, setShowMembers] = useState(false)
+  const [editName,      setEditName]      = useState(group.suggested_name ?? '')
+  const [loading,       setLoading]       = useState(false)
+  const [msg,           setMsg]           = useState<string | null>(null)
+  const [showMembers,   setShowMembers]   = useState(false)
+  const [detailMember,  setDetailMember]  = useState<MatchMember | null>(null)
 
-  const conf = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
+  const conf     = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
   const isSingle = group.match_method === 'single'
 
   async function handleConfirm() {
@@ -121,161 +247,190 @@ function GroupCard({
   const isActioned = group.status === 'rejected' || group.status === 'product_created' || group.status === 'confirmed'
 
   return (
-    <div className="border rounded-lg bg-white overflow-hidden border-gray-200">
-      <div className="px-4 py-3 flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          {/* Header row */}
-          <div className="flex items-center gap-2 flex-wrap mb-2">
-            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${conf.color}`}>
-              {conf.label}
-            </span>
-            {group.match_method === 'ean' && (
-              <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-                EAN match
-              </span>
-            )}
-            {group.match_method === 'fuzzy_name' && (
-              <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-200">
-                Fuzzy navn
-              </span>
-            )}
-            {isSingle && (
-              <span className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">
-                Enkelt leverandør
-              </span>
-            )}
-            <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
-              {group.supplier_count} {group.supplier_count === 1 ? 'leverandør' : 'leverandører'}
-            </span>
-            {group.suggested_ean && (
-              <span className="text-xs font-mono text-gray-400">EAN: {group.suggested_ean}</span>
-            )}
-            <span className={`ml-auto text-xs px-2 py-0.5 rounded-full border ${STATUS_LABELS[group.status]?.color}`}>
-              {STATUS_LABELS[group.status]?.label}
-            </span>
-          </div>
+    <>
+      {detailMember && (
+        <MemberDetailPanel
+          member={detailMember}
+          onClose={() => setDetailMember(null)}
+        />
+      )}
 
-          {/* Foreslået navn — editable */}
-          {!isActioned && (
-            <div className="mb-3">
-              <label className="block text-xs text-gray-500 mb-1">Foreslået produktnavn</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={editName}
-                  onChange={e => setEditName(e.target.value)}
-                  list={`names-${group.id}`}
-                  placeholder="Vælg eller skriv produktnavn..."
-                  className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <datalist id={`names-${group.id}`}>
-                  {group.members.map(m => (
-                    <option key={m.id} value={m.normalized_name} />
-                  ))}
-                </datalist>
+      <div className="border rounded-lg bg-white overflow-hidden border-gray-200">
+        <div className="px-4 py-3 flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            {/* Header row */}
+            <div className="flex items-center gap-2 flex-wrap mb-2">
+              <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${conf.color}`}>
+                {conf.label}
+              </span>
+              {group.match_method === 'ean' && (
+                <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
+                  EAN match
+                </span>
+              )}
+              {group.match_method === 'fuzzy_name' && (
+                <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-200">
+                  Fuzzy navn
+                </span>
+              )}
+              {isSingle && (
+                <span className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">
+                  Enkelt leverandør
+                </span>
+              )}
+              <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
+                {group.supplier_count} {group.supplier_count === 1 ? 'leverandør' : 'leverandører'}
+              </span>
+              {group.suggested_ean && (
+                <span className="text-xs font-mono text-gray-400">EAN: {group.suggested_ean}</span>
+              )}
+              <span className={`ml-auto text-xs px-2 py-0.5 rounded-full border ${STATUS_LABELS[group.status]?.color}`}>
+                {STATUS_LABELS[group.status]?.label}
+              </span>
+            </div>
+
+            {/* Auto-confirm failure reason */}
+            {group.notes && group.status === 'pending_review' && group.match_method === 'ean' && (
+              <div className="mb-2 flex items-start gap-1.5 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+                <span className="shrink-0 mt-0.5">⚠️</span>
+                <span><span className="font-medium">Ikke auto-bekræftet:</span> {group.notes}</span>
               </div>
-            </div>
-          )}
+            )}
 
-          {isActioned && (
-            <div className="mb-2 text-sm font-medium text-gray-700">
-              {group.suggested_name ?? '—'}
-            </div>
-          )}
+            {/* Foreslået navn — editable */}
+            {!isActioned && (
+              <div className="mb-3">
+                <label className="block text-xs text-gray-500 mb-1">Foreslået produktnavn</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={e => setEditName(e.target.value)}
+                    list={`names-${group.id}`}
+                    placeholder="Vælg eller skriv produktnavn..."
+                    className="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <datalist id={`names-${group.id}`}>
+                    {group.members.map(m => (
+                      <option key={m.id} value={m.normalized_name} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+            )}
 
-          {/* Members toggle */}
-          <button
-            onClick={() => setShowMembers(v => !v)}
-            className="text-xs text-blue-600 hover:underline mb-2"
-          >
-            {showMembers ? '▲ Skjul' : `▼ Vis`} {group.members.length} leverandørlinjer
-          </button>
+            {isActioned && (
+              <div className="mb-2 text-sm font-medium text-gray-700">
+                {group.suggested_name ?? '—'}
+              </div>
+            )}
 
-          {showMembers && (
-            <div className="mt-2 space-y-2">
-              {group.members.map(m => {
-                const pp  = m.raw_data.purchase_price
-                const qty = Number(m.raw_data.supplier_stock_quantity ?? 0)
-                return (
-                  <div key={m.id} className="bg-gray-50 rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-1">
-                    <div>
-                      <span className="text-gray-400 block">Leverandør</span>
-                      <span className="font-medium text-gray-800">{m.suppliers?.name ?? '—'}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 block">SKU</span>
-                      <span className="font-mono text-gray-700">{m.normalized_sku}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 block">Navn</span>
-                      <span className="text-gray-700">{m.normalized_name}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 block">Indkøbspris</span>
-                      <span className="text-gray-700">{fmtPrice(pp)}</span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400 block">Lager</span>
-                      <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>{qty}</span>
-                    </div>
-                    {m.normalized_ean && (
-                      <div>
-                        <span className="text-gray-400 block">EAN</span>
-                        <span className="font-mono text-gray-600">{m.normalized_ean}</span>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          )}
-
-          {/* Action feedback */}
-          {msg && (
-            <div className={`mt-2 text-xs px-2 py-1 rounded ${
-              msg.startsWith('Fejl') || msg.includes('påkrævet') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
-            }`}>
-              {msg}
-            </div>
-          )}
-
-          {/* Action buttons */}
-          {!isActioned && (
-            <div className="flex gap-2 mt-3 flex-wrap">
-              <button
-                onClick={handleConfirm}
-                disabled={loading}
-                className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
-              >
-                Bekræft produkt gruppering
-              </button>
-              <button
-                onClick={handleReject}
-                disabled={loading}
-                className="px-4 py-1.5 text-xs border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
-              >
-                Afvis
-              </button>
-            </div>
-          )}
-
-          {group.status === 'confirmed' && (
-            <div className="mt-3 text-xs text-blue-600 bg-blue-50 rounded px-3 py-2">
-              Gå til <a href="/staging" className="font-medium underline">Til gennemgang</a> for at oprette produktet
-            </div>
-          )}
-
-          {group.product_id && (
-            <a
-              href={`/products/${group.product_id}`}
-              className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+            {/* Members toggle */}
+            <button
+              onClick={() => setShowMembers(v => !v)}
+              className="text-xs text-blue-600 hover:underline mb-2"
             >
-              Åbn produkt →
-            </a>
-          )}
+              {showMembers ? '▲ Skjul' : '▼ Vis'} {group.members.length} leverandørlinjer
+            </button>
+
+            {showMembers && (
+              <div className="mt-2 space-y-2">
+                {group.members.map(m => {
+                  const pp  = m.raw_data.purchase_price
+                  const qty = Number(m.raw_data.supplier_stock_quantity ?? 0)
+                  const hasImages = ((m.raw_data.supplier_images as SupplierImage[] | undefined) ?? []).length > 0
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => setDetailMember(m)}
+                      className="w-full text-left bg-gray-50 hover:bg-blue-50 hover:border-blue-200 border border-transparent rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-1 transition-colors group cursor-pointer"
+                      title="Klik for at se produktdetaljer"
+                    >
+                      <div>
+                        <span className="text-gray-400 block">Leverandør</span>
+                        <span className="font-medium text-gray-800 group-hover:text-blue-700">{m.suppliers?.name ?? '—'}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block">SKU</span>
+                        <span className="font-mono text-gray-700">{m.normalized_sku}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block">Navn</span>
+                        <span className="text-gray-700">{m.normalized_name}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block">Indkøbspris</span>
+                        <span className="text-gray-700">{fmtPrice(pp)}</span>
+                      </div>
+                      <div>
+                        <span className="text-gray-400 block">Lager</span>
+                        <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>{qty}</span>
+                      </div>
+                      <div className="flex items-end justify-between col-span-1">
+                        {m.normalized_ean ? (
+                          <div>
+                            <span className="text-gray-400 block">EAN</span>
+                            <span className="font-mono text-gray-600">{m.normalized_ean}</span>
+                          </div>
+                        ) : <div />}
+                        <div className="flex items-center gap-1 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs">
+                          {hasImages && <span>🖼</span>}
+                          <span>Detaljer →</span>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Action feedback */}
+            {msg && (
+              <div className={`mt-2 text-xs px-2 py-1 rounded ${
+                msg.startsWith('Fejl') || msg.includes('påkrævet') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
+              }`}>
+                {msg}
+              </div>
+            )}
+
+            {/* Action buttons */}
+            {!isActioned && (
+              <div className="flex gap-2 mt-3 flex-wrap">
+                <button
+                  onClick={handleConfirm}
+                  disabled={loading}
+                  className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+                >
+                  Bekræft produkt gruppering
+                </button>
+                <button
+                  onClick={handleReject}
+                  disabled={loading}
+                  className="px-4 py-1.5 text-xs border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+                >
+                  Afvis
+                </button>
+              </div>
+            )}
+
+            {group.status === 'confirmed' && (
+              <div className="mt-3 text-xs text-blue-600 bg-blue-50 rounded px-3 py-2">
+                Gå til <a href="/staging" className="font-medium underline">Til gennemgang</a> for at oprette produktet
+              </div>
+            )}
+
+            {group.product_id && (
+              <a
+                href={`/products/${group.product_id}`}
+                className="mt-2 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+              >
+                Åbn produkt →
+              </a>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -290,13 +445,13 @@ export default function MatchingPage() {
   const [activeTab,   setActiveTab]   = useState<TabKey>('high')
 
   // SSE state
-  const [running,          setRunning]          = useState(false)
-  const [progress,         setProgress]         = useState<ProgressEvent | null>(null)
+  const [running,     setRunning]     = useState(false)
+  const [progress,    setProgress]    = useState<ProgressEvent | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
 
   // Auto-confirm state
-  const [autoRunning,      setAutoRunning]      = useState(false)
-  const [autoResult,       setAutoResult]       = useState<{ auto_confirmed: number; needs_review: number; total_checked: number } | null>(null)
+  const [autoRunning, setAutoRunning] = useState(false)
+  const [autoResult,  setAutoResult]  = useState<{ auto_confirmed: number; needs_review: number; total_checked: number } | null>(null)
 
   const tabConfig = TABS.find(t => t.key === activeTab) ?? TABS[0]
 
@@ -319,7 +474,6 @@ export default function MatchingPage() {
 
   useEffect(() => { fetchGroups() }, [fetchGroups])
 
-  // Cleanup EventSource on unmount
   useEffect(() => {
     return () => { eventSourceRef.current?.close() }
   }, [])
@@ -393,7 +547,7 @@ export default function MatchingPage() {
               <button
                 onClick={runAutoConfirm}
                 disabled={autoRunning || running}
-                title="Bekræfter automatisk EAN-matches hvor produktnavnene har mindst 2 ord til fælles"
+                title="Bekræfter automatisk EAN-matches hvor produktnavnene har mindst 2 ord til fælles. Øvrige mærkes med årsag."
                 className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40 flex items-center gap-2"
               >
                 {autoRunning && (
@@ -446,12 +600,12 @@ export default function MatchingPage() {
         {stats && (
           <div className="flex gap-4 flex-wrap text-sm mb-4">
             {[
-              { label: 'I alt',               value: stats.total,     color: 'text-gray-900' },
-              { label: 'Høj konfidens (EAN)',  value: stats.high,      color: 'text-green-700' },
-              { label: 'Fuzzy',               value: stats.medium,    color: 'text-yellow-700' },
-              { label: 'Enkelt leverandør',   value: stats.single,    color: 'text-gray-600' },
-              { label: 'Bekræftet',           value: stats.confirmed, color: 'text-blue-700' },
-              { label: 'Produkt oprettet',    value: stats.created,   color: 'text-emerald-700' },
+              { label: 'I alt',              value: stats.total,     color: 'text-gray-900' },
+              { label: 'Høj konfidens (EAN)', value: stats.high,     color: 'text-green-700' },
+              { label: 'Fuzzy',              value: stats.medium,    color: 'text-yellow-700' },
+              { label: 'Enkelt leverandør',  value: stats.single,    color: 'text-gray-600' },
+              { label: 'Bekræftet',          value: stats.confirmed, color: 'text-blue-700' },
+              { label: 'Produkt oprettet',   value: stats.created,   color: 'text-emerald-700' },
             ].map(s => (
               <div key={s.label} className="bg-gray-50 rounded-lg px-3 py-2 min-w-[100px]">
                 <div className={`text-xl font-bold tabular-nums ${s.color}`}>{s.value.toLocaleString('da-DK')}</div>
