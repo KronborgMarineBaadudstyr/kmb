@@ -8,8 +8,9 @@ const navItems = [
   { href: '/suppliers', label: 'Leverandører',       icon: '🏭' },
   { href: '/matching',  label: 'Leverandør-match',   icon: '🔗' },
   { href: '/staging',   label: 'Til gennemgang',     icon: '🔍' },
-  { href: '/products',  label: 'Produkter',          icon: '📦' },
-  { href: '/inventory', label: 'Lagerbeholdning',    icon: '📊' },
+  { href: '/products',       label: 'Produkter',          icon: '📦' },
+  { href: '/product-types',  label: 'Produkttyper',       icon: '⚙️' },
+  { href: '/inventory',      label: 'Lagerbeholdning',    icon: '📊' },
   { href: '/sync',      label: 'Sync & Logs',        icon: '🔄' },
 ]
 
