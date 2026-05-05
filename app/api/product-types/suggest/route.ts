@@ -127,7 +127,7 @@ Svar KUN med et gyldigt JSON-array. Ingen tekst før eller efter. Format:
 
   try {
     const message = await client.messages.create({
-      model:      'claude-opus-4-5',
+      model:      'claude-haiku-4-5',
       max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     })
