@@ -372,8 +372,12 @@ export default function ProductTypesPage() {
         suggestions  = json.suggestions ?? []
         allCovered   = !!(json.message && suggestions.length === 0)
       } catch (e) {
-        setFullLog(prev => prev.map((l, i) => i === prev.length - 1 ? { ...l, msg: `Runde ${round} — fejl: ${String(e)}` } : l))
-        break
+        // JSON parse / network error — log and retry next round instead of stopping
+        setFullLog(prev => prev.map((l, i) => i === prev.length - 1
+          ? { ...l, msg: `Runde ${round} — forbigået (${String(e).slice(0, 80)})` }
+          : l
+        ))
+        continue
       }
 
       if (allCovered || suggestions.length === 0) {

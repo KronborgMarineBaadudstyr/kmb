@@ -94,7 +94,7 @@ PRODUKTNAVNE (kun dem uden produkttype endnu):
 ${names.slice(0, 500).join('\n')}
 
 OPGAVE:
-Identificér 10-20 produkttyper fra listen. For hver type skal du svare:
+Identificér 5-8 produkttyper fra listen. For hver type skal du svare:
 
 1. **name**: Produkttypens navn på dansk (fx "Ankerkæde", "Fender", "Fortøjningstov")
 2. **keywords**: Nøgleord der identificerer produkter af denne type. Søgning er case-insensitiv og matcher delstrenge. Inkludér variationer af stavning og flertal.
@@ -128,7 +128,7 @@ Svar KUN med et gyldigt JSON-array. Ingen tekst før eller efter. Format:
   try {
     const message = await client.messages.create({
       model:      'claude-opus-4-5',
-      max_tokens: 4096,
+      max_tokens: 8000,
       messages: [{ role: 'user', content: prompt }],
     })
 
