@@ -222,7 +222,7 @@ function GroupCard({
   const [editName,      setEditName]      = useState(group.suggested_name ?? '')
   const [loading,       setLoading]       = useState(false)
   const [msg,           setMsg]           = useState<string | null>(null)
-  const [showMembers,   setShowMembers]   = useState(group.status === 'pending_review')
+  const [showMembers,   setShowMembers]   = useState(true)
   const [detailMember,  setDetailMember]  = useState<MatchMember | null>(null)
 
   const conf     = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
