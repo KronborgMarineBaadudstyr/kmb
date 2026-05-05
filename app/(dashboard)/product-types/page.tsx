@@ -276,6 +276,10 @@ export default function ProductTypesPage() {
   const [dismissedIdxs, setDismissedIdxs] = useState<Set<number>>(new Set())
   const [sampleSize,    setSampleSize]    = useState<number>(0)
 
+  // Full auto-run
+  const [fullRunning, setFullRunning] = useState(false)
+  const [fullLog,     setFullLog]     = useState<{ round: number; added: number; msg?: string }[]>([])
+
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
@@ -350,6 +354,69 @@ export default function ProductTypesPage() {
     finally { setAiRunning(false) }
   }
 
+  async function runFullAnalysis() {
+    setFullRunning(true); setAiError(null); setFullLog([])
+    const MAX_ROUNDS = 15
+    let totalAdded = 0
+
+    for (let round = 1; round <= MAX_ROUNDS; round++) {
+      setFullLog(prev => [...prev, { round, added: 0, msg: `Runde ${round} — analyserer…` }])
+
+      let suggestions: AiSuggestion[] = []
+      try {
+        const res  = await fetch('/api/product-types/suggest', { method: 'POST' })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json.error ?? 'Ukendt fejl')
+        suggestions = json.suggestions ?? []
+      } catch (e) {
+        setFullLog(prev => prev.map((l, i) => i === prev.length - 1 ? { ...l, msg: `Runde ${round} — fejl: ${String(e)}` } : l))
+        break
+      }
+
+      if (suggestions.length === 0) {
+        setFullLog(prev => prev.map((l, i) => i === prev.length - 1 ? { ...l, added: 0, msg: `Runde ${round} — ingen nye forslag. Analyse færdig!` } : l))
+        break
+      }
+
+      // Auto-save all suggestions
+      let added = 0
+      for (const s of suggestions) {
+        try {
+          const res = await fetch('/api/product-types', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              name:               s.name,
+              keywords:           s.keywords,
+              variant_attributes: s.variant_attributes,
+              our_category:       s.our_category || null,
+              our_subcategory:    s.our_subcategory || null,
+              notes:              s.reasoning || null,
+            }),
+          })
+          if (res.ok) added++
+        } catch { /* skip duplicates */ }
+      }
+
+      totalAdded += added
+      setFullLog(prev => prev.map((l, i) => i === prev.length - 1
+        ? { ...l, added, msg: `Runde ${round} — ${added} produkttyper tilføjet (${suggestions.length} forslag)` }
+        : l
+      ))
+      await load()
+
+      if (added === 0) {
+        setFullLog(prev => [...prev, { round: round + 1, added: 0, msg: `Ingen nye typer i runde ${round} — analyse færdig! I alt ${totalAdded} produkttyper tilføjet.` }])
+        break
+      }
+
+      if (round === MAX_ROUNDS) {
+        setFullLog(prev => [...prev, { round: round + 1, added: 0, msg: `Maks ${MAX_ROUNDS} runder nået. I alt ${totalAdded} produkttyper tilføjet.` }])
+      }
+    }
+
+    setFullRunning(false)
+  }
+
   async function acceptSuggestion(s: AiSuggestion, idx: number) {
     setAcceptingId(String(idx))
     try {
@@ -386,12 +453,19 @@ export default function ProductTypesPage() {
             og vores egen kategori til webshop. Bruges automatisk ved produktoprettelse fra leverandørdata.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
-          <button onClick={runAiAnalysis} disabled={aiRunning}
+        <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+          <button onClick={runAiAnalysis} disabled={aiRunning || fullRunning}
             className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
             {aiRunning
               ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Analyserer…</>
               : '✨ Analyser leverandørprodukter'}
+          </button>
+          <button onClick={runFullAnalysis} disabled={aiRunning || fullRunning}
+            title="Kører analyse i flere runder og gemmer automatisk alle forslag, indtil der ikke kommer nye produkttyper"
+            className="px-4 py-2 bg-purple-800 text-white text-sm rounded-md hover:bg-purple-900 disabled:opacity-50 flex items-center gap-2">
+            {fullRunning
+              ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Kører fuld analyse…</>
+              : '⚡ Kør fuld analyse'}
           </button>
           {!showNew && (
             <button onClick={() => { setShowNew(true); setEditId(null) }}
@@ -401,6 +475,25 @@ export default function ProductTypesPage() {
           )}
         </div>
       </div>
+
+      {/* Full analysis log */}
+      {fullLog.length > 0 && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 space-y-1">
+          <div className="text-xs font-semibold text-purple-700 mb-2">⚡ Fuld analyse — fremgang</div>
+          {fullLog.map((l, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs text-purple-800">
+              {fullRunning && i === fullLog.length - 1
+                ? <span className="inline-block w-2.5 h-2.5 border-2 border-purple-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                : <span className="text-purple-400">✓</span>
+              }
+              <span>{l.msg}</span>
+              {l.added > 0 && (
+                <span className="ml-auto bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">+{l.added}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* AI error */}
       {aiError && (
