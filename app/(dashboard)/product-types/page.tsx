@@ -455,6 +455,46 @@ export default function ProductTypesPage() {
   const rowToDelete = rows.find(r => r.id === deleteId)
   const visibleSuggestions = suggestions.filter((_, i) => !dismissedIdxs.has(i))
 
+  // ── Category navigation state ──
+  const [selectedCat,    setSelectedCat]    = useState<string | null>(null)
+  const [selectedSub,    setSelectedSub]    = useState<string | null>(null)
+
+  // Build category tree from rows
+  const NO_CAT = '(Ingen kategori)'
+  const NO_SUB = '(Ingen underkategori)'
+
+  const catTree = (() => {
+    const tree = new Map<string, Map<string, ProductTypeRow[]>>()
+    for (const row of rows) {
+      const cat = row.our_category || NO_CAT
+      const sub = row.our_subcategory || NO_SUB
+      if (!tree.has(cat)) tree.set(cat, new Map())
+      if (!tree.get(cat)!.has(sub)) tree.get(cat)!.set(sub, [])
+      tree.get(cat)!.get(sub)!.push(row)
+    }
+    return tree
+  })()
+
+  const categories   = Array.from(catTree.keys()).sort((a, b) => a === NO_CAT ? 1 : b === NO_CAT ? -1 : a.localeCompare(b, 'da'))
+  const subcategories = selectedCat ? Array.from(catTree.get(selectedCat)?.keys() ?? []).sort((a, b) => a === NO_SUB ? 1 : b === NO_SUB ? -1 : a.localeCompare(b, 'da')) : []
+  const visibleRows   = selectedCat && selectedSub
+    ? (catTree.get(selectedCat)?.get(selectedSub) ?? [])
+    : selectedCat
+      ? Array.from(catTree.get(selectedCat)?.values() ?? []).flat()
+      : []
+
+  function selectCat(cat: string) {
+    setSelectedCat(cat)
+    setSelectedSub(null)
+    setEditId(null)
+    setShowNew(false)
+  }
+  function selectSub(sub: string) {
+    setSelectedSub(sub === selectedSub ? null : sub)
+    setEditId(null)
+    setShowNew(false)
+  }
+
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
 
@@ -574,62 +614,143 @@ export default function ProductTypesPage() {
         </div>
       )}
 
-      {/* List */}
-      <div className="space-y-3">
-        {rows.map(row => (
-          <div key={row.id} className="bg-white border border-gray-200 rounded-lg p-5 shadow-sm">
-            {editId === row.id ? (
-              <>
-                <h3 className="text-sm font-semibold text-gray-800 mb-4">Rediger: {row.name}</h3>
-                <ProductTypeForm initial={formFromRow(row)} onSave={f => handleUpdate(row.id, f)}
-                  onCancel={() => setEditId(null)} saving={saving} />
-              </>
-            ) : (
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex-1 min-w-0 space-y-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-medium text-gray-900 text-sm">{row.name}</span>
-                    {!row.active && (
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">Inaktiv</span>
-                    )}
-                    {row.our_category && (
-                      <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded">
-                        {row.our_category}{row.our_subcategory ? ` › ${row.our_subcategory}` : ''}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {row.keywords.map(kw => (
-                      <span key={kw} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{kw}</span>
-                    ))}
-                  </div>
-                  {row.variant_attributes.length > 0 && (
-                    <div className="flex flex-wrap gap-1 items-center">
-                      <span className="text-xs text-gray-400">Varianter:</span>
-                      {row.variant_attributes.map((a, i) => (
-                        <span key={i} className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded">
-                          {a.name} ({a.unit})
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {row.notes && <p className="text-xs text-gray-400 italic">{row.notes}</p>}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button onClick={() => { setEditId(row.id); setShowNew(false) }}
-                    className="text-xs text-blue-600 hover:text-blue-800 font-medium">
-                    Rediger
-                  </button>
-                  <button onClick={() => setDeleteId(row.id)}
-                    className="text-xs text-red-500 hover:text-red-700 font-medium">
-                    Slet
-                  </button>
-                </div>
-              </div>
-            )}
+      {/* ── Category browser ── */}
+      {!loading && rows.length > 0 && (
+        <div className="flex gap-4 items-start">
+
+          {/* Category column */}
+          <div className="w-56 shrink-0 bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Kategori
+            </div>
+            {categories.map(cat => {
+              const count = Array.from(catTree.get(cat)?.values() ?? []).flat().length
+              return (
+                <button
+                  key={cat}
+                  onClick={() => selectCat(cat)}
+                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center justify-between gap-2 border-b border-gray-100 last:border-0 transition-colors ${
+                    selectedCat === cat ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-700'
+                  }`}
+                >
+                  <span className="truncate">{cat}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${selectedCat === cat ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                    {count}
+                  </span>
+                </button>
+              )
+            })}
           </div>
-        ))}
-      </div>
+
+          {/* Subcategory + product types columns */}
+          {selectedCat && (
+            <div className="flex gap-4 flex-1 min-w-0 items-start">
+
+              {/* Subcategory column */}
+              {subcategories.length > 1 && (
+                <div className="w-48 shrink-0 bg-white border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-gray-50 border-b border-gray-200 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    Underkategori
+                  </div>
+                  <button
+                    onClick={() => setSelectedSub(null)}
+                    className={`w-full text-left px-3 py-2.5 text-sm flex items-center justify-between gap-2 border-b border-gray-100 transition-colors ${
+                      selectedSub === null ? 'bg-blue-50 text-blue-700 font-medium' : 'hover:bg-gray-50 text-gray-600'
+                    }`}
+                  >
+                    <span>Alle</span>
+                    <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
+                      {Array.from(catTree.get(selectedCat)?.values() ?? []).flat().length}
+                    </span>
+                  </button>
+                  {subcategories.map(sub => {
+                    const count = catTree.get(selectedCat)?.get(sub)?.length ?? 0
+                    return (
+                      <button
+                        key={sub}
+                        onClick={() => selectSub(sub)}
+                        className={`w-full text-left px-3 py-2.5 text-sm flex items-center justify-between gap-2 border-b border-gray-100 last:border-0 transition-colors ${
+                          selectedSub === sub ? 'bg-blue-600 text-white' : 'hover:bg-gray-50 text-gray-700'
+                        }`}
+                      >
+                        <span className="truncate">{sub}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full shrink-0 ${selectedSub === sub ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-500'}`}>
+                          {count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Product types list */}
+              <div className="flex-1 min-w-0 space-y-2">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide px-1 py-1">
+                  {visibleRows.length} produkttype{visibleRows.length !== 1 ? 'r' : ''} — {selectedCat}{selectedSub && selectedSub !== NO_SUB ? ` › ${selectedSub}` : ''}
+                </div>
+                {visibleRows.sort((a, b) => a.name.localeCompare(b.name, 'da')).map(row => (
+                  <div key={row.id} className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+                    {editId === row.id ? (
+                      <>
+                        <h3 className="text-sm font-semibold text-gray-800 mb-4">Rediger: {row.name}</h3>
+                        <ProductTypeForm initial={formFromRow(row)} onSave={f => handleUpdate(row.id, f)}
+                          onCancel={() => setEditId(null)} saving={saving} />
+                      </>
+                    ) : (
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium text-gray-900 text-sm">{row.name}</span>
+                            {!row.active && (
+                              <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">Inaktiv</span>
+                            )}
+                            {row.our_subcategory && (
+                              <span className="text-xs text-gray-400">{row.our_subcategory}</span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {row.keywords.map(kw => (
+                              <span key={kw} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{kw}</span>
+                            ))}
+                          </div>
+                          {row.variant_attributes.length > 0 && (
+                            <div className="flex flex-wrap gap-1 items-center">
+                              <span className="text-xs text-gray-400">Varianter:</span>
+                              {row.variant_attributes.map((a, i) => (
+                                <span key={i} className="text-xs bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded">
+                                  {a.name} ({a.unit})
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {row.notes && <p className="text-xs text-gray-400 italic">{row.notes}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button onClick={() => { setEditId(row.id); setShowNew(false) }}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-medium">
+                            Rediger
+                          </button>
+                          <button onClick={() => setDeleteId(row.id)}
+                            className="text-xs text-red-500 hover:text-red-700 font-medium">
+                            Slet
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* No category selected yet */}
+          {!selectedCat && (
+            <div className="flex-1 flex items-center justify-center text-gray-400 text-sm py-16">
+              ← Vælg en kategori for at se produkttyper
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Delete confirm */}
       {deleteId && rowToDelete && (
