@@ -290,9 +290,13 @@ export default function MatchingPage() {
   const [activeTab,   setActiveTab]   = useState<TabKey>('high')
 
   // SSE state
-  const [running,     setRunning]     = useState(false)
-  const [progress,    setProgress]    = useState<ProgressEvent | null>(null)
+  const [running,          setRunning]          = useState(false)
+  const [progress,         setProgress]         = useState<ProgressEvent | null>(null)
   const eventSourceRef = useRef<EventSource | null>(null)
+
+  // Auto-confirm state
+  const [autoRunning,      setAutoRunning]      = useState(false)
+  const [autoResult,       setAutoResult]       = useState<{ auto_confirmed: number; needs_review: number; total_checked: number } | null>(null)
 
   const tabConfig = TABS.find(t => t.key === activeTab) ?? TABS[0]
 
@@ -345,6 +349,17 @@ export default function MatchingPage() {
     }
   }
 
+  async function runAutoConfirm() {
+    if (autoRunning) return
+    setAutoRunning(true)
+    setAutoResult(null)
+    const res  = await fetch('/api/matching/auto-confirm', { method: 'POST' })
+    const json = await res.json()
+    setAutoResult(json)
+    setAutoRunning(false)
+    fetchGroups()
+  }
+
   async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string }) {
     await fetch(`/api/matching/${id}`, {
       method:  'PATCH',
@@ -373,16 +388,39 @@ export default function MatchingPage() {
               Kryds-leverandør matching af staging-produkter
             </p>
           </div>
-          <button
-            onClick={startMatching}
-            disabled={running}
-            className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 disabled:opacity-40 flex items-center gap-2"
-          >
-            {running && (
-              <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-2">
+              <button
+                onClick={runAutoConfirm}
+                disabled={autoRunning || running}
+                title="Bekræfter automatisk EAN-matches hvor produktnavnene har mindst 2 ord til fælles"
+                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40 flex items-center gap-2"
+              >
+                {autoRunning && (
+                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {autoRunning ? 'Kører...' : 'Auto-bekræft sikre matches'}
+              </button>
+              <button
+                onClick={startMatching}
+                disabled={running}
+                className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 disabled:opacity-40 flex items-center gap-2"
+              >
+                {running && (
+                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {running ? 'Kører...' : 'Kør matching'}
+              </button>
+            </div>
+            {autoResult && (
+              <p className="text-xs text-gray-500">
+                Auto-bekræft: <span className="text-green-700 font-medium">{autoResult.auto_confirmed} bekræftet</span>
+                {' · '}
+                <span className="text-orange-600 font-medium">{autoResult.needs_review} til manuel gennemgang</span>
+                {' '}(af {autoResult.total_checked} EAN-grupper)
+              </p>
             )}
-            {running ? 'Kører...' : 'Kør matching'}
-          </button>
+          </div>
         </div>
 
         {/* Progress */}
