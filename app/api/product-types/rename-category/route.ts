@@ -22,23 +22,26 @@ export async function POST(request: Request) {
 
   const supabase = createServiceClient()
 
-  let query = supabase
+  const updatePayload = {
+    our_category: new_category.trim(),
+    ...(new_subcategory !== undefined ? { our_subcategory: new_subcategory.trim() || null } : {}),
+  }
+
+  // Build filter conditions
+  let q = supabase
     .from('product_types')
-    .update({
-      our_category:    new_category.trim(),
-      ...(new_subcategory !== undefined ? { our_subcategory: new_subcategory.trim() || null } : {}),
-    })
+    .update(updatePayload)
     .eq('our_category', old_category)
 
   if (old_subcategory !== undefined) {
-    query = old_subcategory
-      ? query.eq('our_subcategory', old_subcategory)
-      : query.is('our_subcategory', null)
+    q = old_subcategory
+      ? q.eq('our_subcategory', old_subcategory)
+      : q.is('our_subcategory', null)
   }
 
-  const { error, count } = await query.select('id')
+  const { error } = await q
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ ok: true, updated: count ?? 0 })
+  return NextResponse.json({ ok: true })
 }
