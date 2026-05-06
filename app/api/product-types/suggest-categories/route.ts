@@ -17,40 +17,39 @@ export async function POST(request: Request) {
 
   const client = new Anthropic({ apiKey })
 
-  const prompt = `Du er ekspert i produktkatalogisering for en dansk båd- og marinaudstyr-webshop.
+  const prompt = `Du er ekspert i produktkatalogisering for en dansk båd- og marinawebshop.
 
-Nedenfor er den komplette kategoristruktur med tilhørende produkttyper. Kategorinavnene er auto-genereret af en AI over flere kørsler og er derfor ikke konsistente.
+Nedenfor er den komplette kategoristruktur med tilhørende produkttyper. Kategorinavnene er auto-genereret og er IKKE konsistente — din opgave er at rydde grundigt op.
 
 KATEGORISTRUKTUR (Kategori > [Underkategori]: produkttyper):
 ${structure}
 
-OPGAVE — Analyser strukturen og foreslå:
-1. **Sammenlægninger**: Kategorier der dækker samme område men har forskellige navne (fx "Beslag & hardware" og "Beslag & fastgørelse")
-2. **Omdøbninger**: Kategorier med upræcise eller inkonsekvente navne der bør hedde noget andet
+NAVNGIVNINGSREGLER — følg dem strengt:
+1. Fjern ALTID redundante præfikser: "Bådens X" → "X", "Marine X" → "X", "Båd X" → "X"
+   Eksempel: "Bådens dæk & cockpit" → "Dæk & cockpit", "Marine el" → "El & elektronik"
+2. Brug kortfattede, præcise dansk handelstermer som bådejere bruger i daglig tale
+3. Undgå engelske ord med mindre de er alment accepterede i branchen (fx "GPS", "VHF")
+4. "& tilbehør" og "& udstyr" er næsten altid overflødigt — fjern det medmindre det er det eneste indhold
+5. Slå kategorier sammen der dækker overlappende produkter, selvom navnene er lidt forskellige
+6. Vær modig — foreslå alle omdøbninger du finder meningsfulde, ikke kun de åbenlyse
 
-For hver anbefaling skal du angive:
-- "from": det nuværende kategorinavn der skal ændres
-- "to": det bedste kategorinavn (enten eksisterende eller et nyt bedre navn)
-- "reason": 1 kort sætning der forklarer hvorfor
+OPGAVE:
+For HVER kategori der bør omdøbes eller merges med en anden, returner et objekt med:
+- "from": det nuværende kategorinavn
+- "to": det korrekte kategorinavn efter reglerne ovenfor
+- "reason": max 10 ord om hvorfor
 
-VIGTIGE REGLER:
-- Se på de faktiske produkttyper inden du foreslår en sammenlægning — hvis produkttyperne er fundamentalt forskellige, så slå dem IKKE sammen selvom navnene ligner
-- Foreslå kun sammenlægninger/omdøbninger du er sikker på giver mening for en webshop-kunde
-- Brug dansk terminologi der giver mening for bådejere
-- "to"-værdien skal være et præcist, dækkende og brugervenligt kategorinavn
-- Svar KUN med et gyldigt JSON-array, ingen tekst før eller efter
-
-Eksempel på svar:
+Svar KUN med JSON-array, ingen tekst før eller efter:
 [
+  {
+    "from": "Bådens dæk & cockpit",
+    "to": "Dæk & cockpit",
+    "reason": "Redundant 'Bådens' præfiks fjernet"
+  },
   {
     "from": "Beslag & hardware",
     "to": "Beslag & fastgørelse",
-    "reason": "Begge kategorier indeholder beslag, skruer og monteringsdele — hardware er et unødigt engelsk lånord"
-  },
-  {
-    "from": "Diverse marinetilbehør",
-    "to": "Marinetilbehør",
-    "reason": "Diverse tilføjer ingen information og gør kategorien mindre søgbar"
+    "reason": "Hardware er engelsk — fastgørelse er mere præcist"
   }
 ]`
 
