@@ -2,47 +2,61 @@ import { NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 
 export const dynamic    = 'force-dynamic'
-export const maxDuration = 30
+export const maxDuration = 60
 
 // POST /api/product-types/suggest-categories
-// Takes a list of category names and asks Claude to suggest merges.
+// Takes full category structure (cat > sub > product type names) and
+// asks Claude Sonnet to suggest category merges with full context.
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey?.trim()) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY mangler' }, { status: 503 })
   }
 
-  const { categories } = await request.json() as { categories: string }
+  const { structure } = await request.json() as { structure: string }
 
   const client = new Anthropic({ apiKey })
 
-  const prompt = `Du er ekspert i produktkatalogisering for en dansk båd-webshop.
+  const prompt = `Du er ekspert i produktkatalogisering for en dansk båd- og marinaudstyr-webshop.
 
-Herunder er en liste over kategorinavne som er oprettet automatisk. Flere af dem kan med fordel slås sammen fordi de dækker det samme område men har lidt forskellige navne.
+Nedenfor er den komplette kategoristruktur med tilhørende produkttyper. Kategorinavnene er auto-genereret af en AI over flere kørsler og er derfor ikke konsistente.
 
-KATEGORIER:
-${categories}
+KATEGORISTRUKTUR (Kategori > [Underkategori]: produkttyper):
+${structure}
 
-OPGAVE:
-Find kategorier der bør slås sammen. Forklar kort hvorfor. Svar KUN med et gyldigt JSON-array:
+OPGAVE — Analyser strukturen og foreslå:
+1. **Sammenlægninger**: Kategorier der dækker samme område men har forskellige navne (fx "Beslag & hardware" og "Beslag & fastgørelse")
+2. **Omdøbninger**: Kategorier med upræcise eller inkonsekvente navne der bør hedde noget andet
 
+For hver anbefaling skal du angive:
+- "from": det nuværende kategorinavn der skal ændres
+- "to": det bedste kategorinavn (enten eksisterende eller et nyt bedre navn)
+- "reason": 1 kort sætning der forklarer hvorfor
+
+VIGTIGE REGLER:
+- Se på de faktiske produkttyper inden du foreslår en sammenlægning — hvis produkttyperne er fundamentalt forskellige, så slå dem IKKE sammen selvom navnene ligner
+- Foreslå kun sammenlægninger/omdøbninger du er sikker på giver mening for en webshop-kunde
+- Brug dansk terminologi der giver mening for bådejere
+- "to"-værdien skal være et præcist, dækkende og brugervenligt kategorinavn
+- Svar KUN med et gyldigt JSON-array, ingen tekst før eller efter
+
+Eksempel på svar:
 [
   {
     "from": "Beslag & hardware",
     "to": "Beslag & fastgørelse",
-    "reason": "Dækker samme produktområde — hardware og fastgørelse er synonymer i bådudstyr-kontekst"
+    "reason": "Begge kategorier indeholder beslag, skruer og monteringsdele — hardware er et unødigt engelsk lånord"
+  },
+  {
+    "from": "Diverse marinetilbehør",
+    "to": "Marinetilbehør",
+    "reason": "Diverse tilføjer ingen information og gør kategorien mindre søgbar"
   }
-]
-
-Regler:
-- Foreslå kun sammenlægninger hvor det giver klar mening
-- "to" skal være det bedste/mest dækkende navn
-- Slå IKKE kategorier sammen der dækker klart forskellige produkter
-- Svar KUN med JSON-array, ingen tekst før eller efter`
+]`
 
   try {
     const message = await client.messages.create({
-      model:      'claude-haiku-4-5',
+      model:      'claude-sonnet-4-5',
       max_tokens: 2048,
       messages: [{ role: 'user', content: prompt }],
     })

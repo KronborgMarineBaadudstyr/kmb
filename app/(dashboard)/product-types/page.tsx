@@ -337,11 +337,28 @@ function CategoryManagerModal({
 
   async function runAiCleanup() {
     setAiClean(true); setAiSugg([])
-    const catList = catNames.filter(c => c !== NO_CAT).join('\n')
+    // Build full structure directly from rows: category > subcategory > product type names
+    const tree = new Map<string, Map<string, string[]>>()
+    for (const r of rows) {
+      const cat = r.our_category?.trim() || '(Ingen kategori)'
+      const sub = r.our_subcategory?.trim() || '(ingen underkategori)'
+      if (!tree.has(cat)) tree.set(cat, new Map())
+      if (!tree.get(cat)!.has(sub)) tree.get(cat)!.set(sub, [])
+      tree.get(cat)!.get(sub)!.push(r.name)
+    }
+    const structure = Array.from(tree.entries())
+      .filter(([cat]) => cat !== '(Ingen kategori)')
+      .sort(([a], [b]) => a.localeCompare(b, 'da'))
+      .map(([cat, subs]) => {
+        const lines = Array.from(subs.entries())
+          .map(([sub, names]) => `  [${sub}]: ${names.join(', ')}`)
+          .join('\n')
+        return `${cat}:\n${lines}`
+      }).join('\n\n')
     try {
       const res  = await fetch('/api/product-types/suggest-categories', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categories: catList }),
+        body: JSON.stringify({ structure }),
       })
       const json = await res.json()
       setAiSugg(json.merges ?? [])
