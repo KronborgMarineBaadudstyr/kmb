@@ -258,6 +258,206 @@ function SuggestionCard({
   )
 }
 
+// ─── Category manager modal ───────────────────────────────────
+function CategoryManagerModal({
+  rows,
+  onClose,
+  onDone,
+}: {
+  rows:    ProductTypeRow[]
+  onClose: () => void
+  onDone:  () => void
+}) {
+  // Build unique category+subcategory pairs
+  const NO_CAT = '(Ingen kategori)'
+  const NO_SUB = ''
+
+  type CatEntry = { cat: string; sub: string | null; count: number }
+  const entries: CatEntry[] = []
+  const seen = new Set<string>()
+  for (const r of rows) {
+    const cat = r.our_category?.trim() || NO_CAT
+    const sub = r.our_subcategory?.trim() || null
+    const key = `${cat}||${sub ?? ''}`
+    if (!seen.has(key)) { seen.add(key); entries.push({ cat, sub, count: 0 }) }
+    entries.find(e => e.cat === cat && e.sub === sub)!.count++
+  }
+  entries.sort((a, b) => a.cat.localeCompare(b.cat, 'da') || (a.sub ?? '').localeCompare(b.sub ?? '', 'da'))
+
+  // Group by category for display
+  const grouped = new Map<string, CatEntry[]>()
+  for (const e of entries) {
+    if (!grouped.has(e.cat)) grouped.set(e.cat, [])
+    grouped.get(e.cat)!.push(e)
+  }
+  const catNames = Array.from(grouped.keys()).sort((a, b) => a === NO_CAT ? 1 : b === NO_CAT ? -1 : a.localeCompare(b, 'da'))
+
+  // Editing state: key → new value
+  const [edits,   setEdits]   = useState<Record<string, { cat: string; sub: string }>>({})
+  const [saving,  setSaving]  = useState<string | null>(null)
+  const [saved,   setSaved]   = useState<Set<string>>(new Set())
+  const [aiClean, setAiClean] = useState(false)
+  const [aiSugg,  setAiSugg]  = useState<{ from: string; to: string; reason: string }[]>([])
+
+  function entryKey(e: CatEntry) { return `${e.cat}||${e.sub ?? ''}` }
+
+  function getEdit(e: CatEntry) {
+    const k = entryKey(e)
+    return edits[k] ?? { cat: e.cat === NO_CAT ? '' : e.cat, sub: e.sub ?? '' }
+  }
+
+  function setEdit(e: CatEntry, field: 'cat' | 'sub', val: string) {
+    const k = entryKey(e)
+    setEdits(prev => ({ ...prev, [k]: { ...getEdit(e), [field]: val } }))
+  }
+
+  async function saveEntry(e: CatEntry) {
+    const k   = entryKey(e)
+    const ed  = getEdit(e)
+    const newCat = ed.cat.trim() || null
+    const newSub = ed.sub.trim() || null
+    if (!newCat) return
+    setSaving(k)
+    try {
+      const body: Record<string, string | null | undefined> = {
+        old_category:    e.cat === NO_CAT ? null : e.cat,
+        new_category:    newCat,
+        old_subcategory: e.sub,
+        new_subcategory: newSub,
+      }
+      const res = await fetch('/api/product-types/rename-category', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      setSaved(prev => new Set([...prev, k]))
+    } catch (err) { alert(`Fejl: ${String(err)}`) }
+    finally { setSaving(null) }
+  }
+
+  async function runAiCleanup() {
+    setAiClean(true); setAiSugg([])
+    const catList = catNames.filter(c => c !== NO_CAT).join('\n')
+    try {
+      const res  = await fetch('/api/product-types/suggest-categories', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categories: catList }),
+      })
+      const json = await res.json()
+      setAiSugg(json.merges ?? [])
+    } catch (e) { alert(String(e)) }
+    finally { setAiClean(false) }
+  }
+
+  async function applyMerge(m: { from: string; to: string }) {
+    const res = await fetch('/api/product-types/rename-category', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_category: m.from, new_category: m.to }),
+    })
+    if (res.ok) setAiSugg(prev => prev.filter(s => s.from !== m.from))
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40" onClick={onClose} />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Administrer kategorier</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Omdøb eller flet kategorier — skriv samme navn for at merge to kategorier</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={runAiCleanup} disabled={aiClean}
+                className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
+                {aiClean
+                  ? <><span className="inline-block w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Analyserer…</>
+                  : '✨ AI-oprydning'}
+              </button>
+              <button onClick={onClose} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 text-xl leading-none">×</button>
+            </div>
+          </div>
+
+          {/* AI merge suggestions */}
+          {aiSugg.length > 0 && (
+            <div className="px-6 py-3 bg-purple-50 border-b border-purple-100 shrink-0 space-y-2">
+              <div className="text-xs font-semibold text-purple-700">✨ AI foreslår disse sammenlægninger:</div>
+              {aiSugg.map((m, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs">
+                  <span className="text-gray-700 bg-white border border-gray-200 rounded px-2 py-1">{m.from}</span>
+                  <span className="text-gray-400">→</span>
+                  <span className="text-gray-700 bg-white border border-gray-200 rounded px-2 py-1 font-medium">{m.to}</span>
+                  <span className="text-gray-400 flex-1 truncate italic">{m.reason}</span>
+                  <button onClick={() => applyMerge(m)}
+                    className="shrink-0 px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700">
+                    Flet
+                  </button>
+                  <button onClick={() => setAiSugg(prev => prev.filter((_, j) => j !== i))}
+                    className="shrink-0 text-gray-400 hover:text-gray-600">✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Category list */}
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {catNames.map(cat => (
+              <div key={cat}>
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">{cat}</div>
+                <div className="space-y-1.5">
+                  {grouped.get(cat)!.map(e => {
+                    const k  = entryKey(e)
+                    const ed = getEdit(e)
+                    const isDirty  = ed.cat !== (e.cat === NO_CAT ? '' : e.cat) || ed.sub !== (e.sub ?? '')
+                    const isSaving = saving === k
+                    const isSaved  = saved.has(k)
+                    return (
+                      <div key={k} className="flex items-center gap-2">
+                        <input
+                          value={ed.cat}
+                          onChange={ev => setEdit(e, 'cat', ev.target.value)}
+                          placeholder="Kategori"
+                          className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        />
+                        <span className="text-gray-300">›</span>
+                        <input
+                          value={ed.sub}
+                          onChange={ev => setEdit(e, 'sub', ev.target.value)}
+                          placeholder="Underkategori (valgfri)"
+                          className="flex-1 border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        />
+                        <span className="text-xs text-gray-400 w-12 text-right shrink-0">{e.count} typer</span>
+                        {isDirty && (
+                          <button onClick={() => saveEntry(e)} disabled={!!isSaving}
+                            className="shrink-0 px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-40">
+                            {isSaving ? '…' : 'Gem'}
+                          </button>
+                        )}
+                        {isSaved && !isDirty && (
+                          <span className="shrink-0 text-xs text-green-600">✓</span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-3 border-t border-gray-200 shrink-0 flex justify-end">
+            <button onClick={() => { onDone(); onClose() }}
+              className="px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-700">
+              Færdig
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  )
+}
+
 // ─── Main page ─────────────────────────────────────────────────
 export default function ProductTypesPage() {
   const [rows,        setRows]        = useState<ProductTypeRow[]>([])
@@ -268,6 +468,7 @@ export default function ProductTypesPage() {
   const [saving,      setSaving]      = useState(false)
   const [deleteId,    setDeleteId]    = useState<string | null>(null)
   const [acceptingId, setAcceptingId] = useState<string | null>(null)
+  const [showCatMgr,  setShowCatMgr]  = useState(false)
 
   // AI suggestions
   const [aiRunning,     setAiRunning]     = useState(false)
@@ -529,6 +730,12 @@ export default function ProductTypesPage() {
           </p>
         </div>
         <div className="flex gap-2 shrink-0 flex-wrap justify-end">
+          {rows.length > 0 && (
+            <button onClick={() => setShowCatMgr(true)}
+              className="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm rounded-md hover:bg-gray-50 flex items-center gap-2">
+              ⚙ Administrer kategorier
+            </button>
+          )}
           <button onClick={runAiAnalysis} disabled={aiRunning || fullRunning}
             className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
             {aiRunning
@@ -550,6 +757,15 @@ export default function ProductTypesPage() {
           )}
         </div>
       </div>
+
+      {/* Category manager modal */}
+      {showCatMgr && (
+        <CategoryManagerModal
+          rows={rows}
+          onClose={() => setShowCatMgr(false)}
+          onDone={() => { load(); setSelectedCat(null); setSelectedSub(null) }}
+        />
+      )}
 
       {/* Full analysis log */}
       {fullLog.length > 0 && (
