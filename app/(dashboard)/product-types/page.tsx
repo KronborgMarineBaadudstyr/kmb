@@ -263,10 +263,12 @@ function CategoryManagerModal({
   rows,
   onClose,
   onDone,
+  onRefresh,
 }: {
-  rows:    ProductTypeRow[]
-  onClose: () => void
-  onDone:  () => void
+  rows:      ProductTypeRow[]
+  onClose:   () => void
+  onDone:    () => void
+  onRefresh: () => Promise<void>
 }) {
   // Build unique category+subcategory pairs
   const NO_CAT = '(Ingen kategori)'
@@ -331,6 +333,7 @@ function CategoryManagerModal({
       })
       if (!res.ok) throw new Error((await res.json()).error)
       setSaved(prev => new Set([...prev, k]))
+      await onRefresh()
     } catch (err) { alert(`Fejl: ${String(err)}`) }
     finally { setSaving(null) }
   }
@@ -371,7 +374,10 @@ function CategoryManagerModal({
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ old_category: m.from, new_category: m.to }),
     })
-    if (res.ok) setAiSugg(prev => prev.filter(s => s.from !== m.from))
+    if (res.ok) {
+      setAiSugg(prev => prev.filter(s => s.from !== m.from))
+      await onRefresh()
+    }
   }
 
   return (
@@ -781,6 +787,7 @@ export default function ProductTypesPage() {
           rows={rows}
           onClose={() => setShowCatMgr(false)}
           onDone={() => { load(); setSelectedCat(null); setSelectedSub(null) }}
+          onRefresh={load}
         />
       )}
 
