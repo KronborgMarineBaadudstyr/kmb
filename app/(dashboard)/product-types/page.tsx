@@ -302,6 +302,9 @@ function CategoryManagerModal({
   const [aiSugg,     setAiSugg]     = useState<{ from: string; to: string; reason: string }[]>([])
   const [autoRunning, setAutoRunning] = useState(false)
   const [autoPreview, setAutoPreview] = useState<{ from: string; to: string }[]>([])
+  const [stdRunning, setStdRunning]  = useState(false)
+  const [stdPreview, setStdPreview]  = useState<{ from: string; to: string; matched: boolean }[] | null>(null)
+  const [stdSkipped, setStdSkipped]  = useState<string[]>([])
 
   function entryKey(e: CatEntry) { return `${e.cat}||${e.sub ?? ''}` }
 
@@ -391,6 +394,32 @@ function CategoryManagerModal({
     finally { setAiClean(false) }
   }
 
+  async function runStandardStructure() {
+    setStdRunning(true); setStdPreview(null); setStdSkipped([])
+    try {
+      // Preview first
+      const previewRes = await fetch('/api/product-types/rename-category?preview=standard')
+      const { renames } = await previewRes.json() as { renames: { from: string; to: string; matched: boolean }[] }
+      setStdPreview(renames ?? [])
+    } catch (e) { alert(String(e)) }
+    finally { setStdRunning(false) }
+  }
+
+  async function applyStandardStructure() {
+    setStdRunning(true)
+    try {
+      const res = await fetch('/api/product-types/rename-category', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apply_standard: true }),
+      })
+      const json = await res.json() as { ok: boolean; updated: number; skipped: string[] }
+      setStdSkipped(json.skipped ?? [])
+      setStdPreview(null)
+      await onRefresh()
+    } catch (e) { alert(String(e)) }
+    finally { setStdRunning(false) }
+  }
+
   async function applyMerge(m: { from: string; to: string }) {
     const res = await fetch('/api/product-types/rename-category', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -414,14 +443,21 @@ function CategoryManagerModal({
               <p className="text-xs text-gray-500 mt-0.5">Omdøb eller flet kategorier — skriv samme navn for at merge to kategorier</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={runAutoCleanup} disabled={autoRunning || aiClean}
+              <button onClick={runStandardStructure} disabled={stdRunning || autoRunning || aiClean}
+                title="Kortlægger alle kategorier til den faste standardstruktur med 15 kategorier"
+                className="px-3 py-1.5 text-xs bg-teal-600 text-white rounded-md hover:bg-teal-700 disabled:opacity-50 flex items-center gap-1.5">
+                {stdRunning
+                  ? <><span className="inline-block w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Henter…</>
+                  : '🗂 Standardstruktur'}
+              </button>
+              <button onClick={runAutoCleanup} disabled={autoRunning || aiClean || stdRunning}
                 title="Fjerner automatisk 'Bådens', 'Marine', 'Båd' og lignende præfikser fra alle kategorinavne"
                 className="px-3 py-1.5 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:opacity-50 flex items-center gap-1.5">
                 {autoRunning
                   ? <><span className="inline-block w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Rydder op…</>
                   : '🧹 Ryd op i navne'}
               </button>
-              <button onClick={runAiCleanup} disabled={aiClean || autoRunning}
+              <button onClick={runAiCleanup} disabled={aiClean || autoRunning || stdRunning}
                 className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
                 {aiClean
                   ? <><span className="inline-block w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Analyserer…</>
@@ -442,6 +478,50 @@ function CategoryManagerModal({
                   <span className="font-medium">{r.to}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* Standard structure preview */}
+          {stdPreview !== null && (
+            <div className="px-6 py-3 bg-teal-50 border-b border-teal-100 shrink-0 space-y-2 max-h-64 overflow-y-auto">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold text-teal-700">
+                  🗂 Standardstruktur — {stdPreview.filter(r => r.matched && r.from !== r.to).length} kategorier flyttes til standard
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={applyStandardStructure} disabled={stdRunning}
+                    className="px-3 py-1 text-xs bg-teal-600 text-white rounded hover:bg-teal-700 disabled:opacity-50">
+                    {stdRunning ? 'Anvender…' : '✓ Anvend alle'}
+                  </button>
+                  <button onClick={() => setStdPreview(null)} className="text-teal-400 hover:text-teal-600 text-sm">✕</button>
+                </div>
+              </div>
+              {stdPreview.filter(r => r.matched && r.from !== r.to).map((r, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-teal-800">
+                  <span className="text-teal-400 line-through">{r.from}</span>
+                  <span className="text-teal-400">→</span>
+                  <span className="font-medium">{r.to}</span>
+                </div>
+              ))}
+              {stdPreview.filter(r => !r.matched).length > 0 && (
+                <div className="mt-2 pt-2 border-t border-teal-200">
+                  <div className="text-xs text-teal-500 mb-1">
+                    ⚠️ {stdPreview.filter(r => !r.matched).length} kategorier kan ikke kortlægges automatisk (forbliver uændret):
+                  </div>
+                  {stdPreview.filter(r => !r.matched).map((r, i) => (
+                    <div key={i} className="text-xs text-teal-400 italic">{r.from}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {stdSkipped.length > 0 && (
+            <div className="px-6 py-3 bg-amber-50 border-b border-amber-100 shrink-0">
+              <div className="text-xs font-semibold text-amber-700 mb-1">
+                ⚠️ Disse kategorier blev ikke matchet til standardstruktur:
+              </div>
+              <div className="text-xs text-amber-600">{stdSkipped.join(', ')}</div>
+              <button onClick={() => setStdSkipped([])} className="mt-1 text-xs text-amber-400 hover:text-amber-600">Luk</button>
             </div>
           )}
 
