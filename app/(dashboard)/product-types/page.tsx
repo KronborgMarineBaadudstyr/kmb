@@ -298,8 +298,10 @@ function CategoryManagerModal({
   const [edits,   setEdits]   = useState<Record<string, { cat: string; sub: string }>>({})
   const [saving,  setSaving]  = useState<string | null>(null)
   const [saved,   setSaved]   = useState<Set<string>>(new Set())
-  const [aiClean, setAiClean] = useState(false)
-  const [aiSugg,  setAiSugg]  = useState<{ from: string; to: string; reason: string }[]>([])
+  const [aiClean,    setAiClean]    = useState(false)
+  const [aiSugg,     setAiSugg]     = useState<{ from: string; to: string; reason: string }[]>([])
+  const [autoRunning, setAutoRunning] = useState(false)
+  const [autoPreview, setAutoPreview] = useState<{ from: string; to: string }[]>([])
 
   function entryKey(e: CatEntry) { return `${e.cat}||${e.sub ?? ''}` }
 
@@ -336,6 +338,26 @@ function CategoryManagerModal({
       await onRefresh()
     } catch (err) { alert(`Fejl: ${String(err)}`) }
     finally { setSaving(null) }
+  }
+
+  async function runAutoCleanup() {
+    setAutoRunning(true)
+    try {
+      // First fetch preview
+      const previewRes = await fetch('/api/product-types/rename-category')
+      const { renames } = await previewRes.json()
+      setAutoPreview(renames ?? [])
+
+      if (!renames?.length) { setAutoRunning(false); return }
+
+      // Apply
+      const res  = await fetch('/api/product-types/rename-category', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ auto_cleanup: true }),
+      })
+      if (res.ok) { await onRefresh(); setAutoPreview([]) }
+    } catch (e) { alert(String(e)) }
+    finally { setAutoRunning(false) }
   }
 
   async function runAiCleanup() {
@@ -392,7 +414,14 @@ function CategoryManagerModal({
               <p className="text-xs text-gray-500 mt-0.5">Omdøb eller flet kategorier — skriv samme navn for at merge to kategorier</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={runAiCleanup} disabled={aiClean}
+              <button onClick={runAutoCleanup} disabled={autoRunning || aiClean}
+                title="Fjerner automatisk 'Bådens', 'Marine', 'Båd' og lignende præfikser fra alle kategorinavne"
+                className="px-3 py-1.5 text-xs bg-orange-500 text-white rounded-md hover:bg-orange-600 disabled:opacity-50 flex items-center gap-1.5">
+                {autoRunning
+                  ? <><span className="inline-block w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Rydder op…</>
+                  : '🧹 Ryd op i navne'}
+              </button>
+              <button onClick={runAiCleanup} disabled={aiClean || autoRunning}
                 className="px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1.5">
                 {aiClean
                   ? <><span className="inline-block w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin"/>Analyserer…</>
@@ -401,6 +430,20 @@ function CategoryManagerModal({
               <button onClick={onClose} className="p-1.5 rounded hover:bg-gray-100 text-gray-400 text-xl leading-none">×</button>
             </div>
           </div>
+
+          {/* Auto-cleanup preview */}
+          {autoPreview.length > 0 && (
+            <div className="px-6 py-3 bg-orange-50 border-b border-orange-100 shrink-0 space-y-1.5">
+              <div className="text-xs font-semibold text-orange-700">🧹 Disse præfikser fjernes automatisk:</div>
+              {autoPreview.map((r, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-orange-800">
+                  <span className="line-through text-orange-400">{r.from}</span>
+                  <span className="text-orange-400">→</span>
+                  <span className="font-medium">{r.to}</span>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* AI merge suggestions */}
           {aiSugg.length > 0 && (
