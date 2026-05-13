@@ -126,8 +126,10 @@ export async function GET() {
       send({ stage: 'matching', status: 'running', message: 'Kører matching-motor…' })
 
       await runMatchingEngine((event) => {
-        // Proxy matching engine SSE events
-        send({ stage: 'matching', ...event })
+        // Proxy matching engine SSE events (override stage so UI maps correctly)
+        const { stage: _s, ...rest } = event as Record<string, unknown>
+        void _s
+        send({ stage: 'matching', ...rest })
         if ((event as { groups_created?: number }).groups_created != null) {
           summary.groups_created += (event as { groups_created: number }).groups_created
         }
