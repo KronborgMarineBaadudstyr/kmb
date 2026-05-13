@@ -1,5 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { stripPrefix, mapToStandard, normalizeCategory } from '@/lib/standard-categories'
+import { stripPrefix, mapToStandard, normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, updated })
   }
 
-  // ── Apply standard 15-category structure ───────────────────────
+  // ── Apply standard 15-category structure + fuzzy dedup ────────
   if (body.apply_standard) {
     const { data, error } = await supabase
       .from('product_types')
@@ -92,20 +92,30 @@ export async function POST(request: Request) {
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-    const seen = new Set<string>()
+    // Phase 1: normalize each category to standard
+    const allCats = [...new Set((data ?? []).map(r => r.our_category as string))]
+    const phase1: Map<string, string> = new Map()
+    for (const cat of allCats) {
+      const final = normalizeCategory(cat)
+      if (final !== cat) phase1.set(cat, final)
+    }
+
+    // Phase 2: build dedupe map on the POST-phase1 names (catches survivors like Styring vs Styring & kontrol)
+    const afterPhase1 = allCats.map(c => phase1.get(c) ?? c)
+    const phase2 = buildDedupeMap([...new Set(afterPhase1)])
+
     let updated = 0
     const skipped: string[] = []
 
-    for (const row of data ?? []) {
-      const cat = row.our_category as string
-      if (seen.has(cat)) continue
-      seen.add(cat)
+    for (const cat of allCats) {
+      const afterP1 = phase1.get(cat) ?? cat
+      const afterP2 = phase2.get(afterP1) ?? afterP1
+      const final   = afterP2
 
-      const final = normalizeCategory(cat)
       if (final === cat) {
-        // Check if it matched standard at all
+        // Not in standard — flag it
         const matched = mapToStandard(stripPrefix(cat)) ?? mapToStandard(cat)
-        if (!matched) skipped.push(cat)
+        if (!matched && !phase2.has(cat)) skipped.push(cat)
         continue
       }
 

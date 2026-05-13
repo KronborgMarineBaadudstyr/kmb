@@ -1,7 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { runMatchingEngine } from '@/lib/matching-engine'
 import { createProductFromGroup } from '@/lib/product-creator'
-import { normalizeCategory } from '@/lib/standard-categories'
+import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -62,15 +62,24 @@ export async function GET() {
         .select('our_category')
         .not('our_category', 'is', null)
 
-      const catSeen = new Set<string>()
-      for (const row of catRows ?? []) {
-        const cat = row.our_category as string
-        if (catSeen.has(cat)) continue
-        catSeen.add(cat)
+      const allCats = [...new Set((catRows ?? []).map(r => r.our_category as string))]
 
-        const finalName = normalizeCategory(cat)
-        if (finalName !== cat) {
-          await supabase.from('product_types').update({ our_category: finalName }).eq('our_category', cat)
+      // Phase 1: normalize to standard
+      const phase1 = new Map<string, string>()
+      for (const cat of allCats) {
+        const final = normalizeCategory(cat)
+        if (final !== cat) phase1.set(cat, final)
+      }
+
+      // Phase 2: fuzzy dedup on post-phase1 names
+      const afterPhase1 = allCats.map(c => phase1.get(c) ?? c)
+      const phase2 = buildDedupeMap([...new Set(afterPhase1)])
+
+      for (const cat of allCats) {
+        const afterP1 = phase1.get(cat) ?? cat
+        const final   = phase2.get(afterP1) ?? afterP1
+        if (final !== cat) {
+          await supabase.from('product_types').update({ our_category: final }).eq('our_category', cat)
           summary.categories_updated++
         }
       }
