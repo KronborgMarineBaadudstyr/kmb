@@ -57,7 +57,7 @@ const STANDARD_CATEGORIES: { pattern: RegExp; to: string }[] = [
   { pattern: /udstyr|inventar|kabine|interiør|komfort|pude|madras|tæppe|gardin|köje|køje|opbevaring|boks|container|holder|beslag.?inventar|bimsen|kopholder|bestik|køkken|komfur|fyr|varme|ventilation|vindspjæld|hatch|luge|luke/, to: 'Udstyr & inventar' },
 ]
 
-export function mapToStandard(cat: string): string | null {
+function mapToStandard(cat: string): string | null {
   const lower = cat.toLowerCase()
   for (const { pattern, to } of STANDARD_CATEGORIES) {
     if (pattern.test(lower)) return to
