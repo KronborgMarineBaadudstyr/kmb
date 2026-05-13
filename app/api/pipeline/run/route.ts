@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { runMatchingEngine } from '@/lib/matching-engine'
 import { createProductFromGroup } from '@/lib/product-creator'
+import { normalizeCategory } from '@/lib/standard-categories'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -56,48 +57,6 @@ export async function GET() {
       // ── STEP 1: Apply standard categories + strip prefixes ──────
       send({ stage: 'categories', status: 'running', message: 'Anvender standardstruktur på kategorier…' })
 
-      // Strip redundant prefixes first
-      const REDUNDANT_PREFIXES = [
-        'Bådens ', 'Baadens ', 'Båd ', 'Baad ',
-        'Marine ', 'Maritim ', 'Maritimt ', 'Skibets ', 'Skibs ',
-      ]
-      function stripPrefix(name: string): string {
-        const lower = name.toLowerCase()
-        for (const prefix of REDUNDANT_PREFIXES) {
-          if (lower.startsWith(prefix.toLowerCase())) {
-            const stripped = name.slice(prefix.length).trim()
-            return stripped.charAt(0).toUpperCase() + stripped.slice(1)
-          }
-        }
-        return name
-      }
-
-      const STANDARD: { pattern: RegExp; to: string }[] = [
-        { pattern: /ankr|fortøjn|mooring|ankerkæde|docking|pullert|klampe|fortøjningsbeslag/, to: 'Ankre & fortøjning' },
-        { pattern: /beslag|fastgørel|hardware|hængsler|låse|skrue|bolt|møtrik|bøjle|clips|krog|øjebolt|spænde|kæmme|rail|pop-nitte|nitte|strop/, to: 'Beslag & fastgørelse' },
-        { pattern: /belysning|lanterner|lanterne|lys|lampe|led|navigation.?lys|spotlight|lygte|sølygte|positionslys|anticoll|signallampe/, to: 'Belysning & lanterner' },
-        { pattern: /brændstof|brændstofsystem|tank|fuel|diesel|benzin|påfyldning|brændstofsfilter|vandudskiller|brændstofsslange/, to: 'Brændstof & tank' },
-        { pattern: /dæk|cockpit|rig|mast|bom|sejl|blokke|winch|fald|skøde|stag|vant|wire|rigning|solsejl|spray.?hood|bimini|dodger/, to: 'Dæk & rig' },
-        { pattern: /el[- &]|elektr|elektronik|instrument|vhf|radio|autopilot|chartplotter|transducer|ais|plotter|display|forbruger|relæ|sikring|kabel|ledning|stik|connector|usb|strømforsyning|switch.?panel/, to: 'El & elektronik' },
-        { pattern: /batteri|energi|solcelle|solar|oplader|generator|inverter|landstrøm|powerbank|lithium|agm|gel.?batteri|shore.?power|vind.?generator|laderegulator/, to: 'Energi & batterier' },
-        { pattern: /motor|fremdrift|propel|gear|gearkasse|koblin|transmission|impeller|kølevand|startmotor|alternator|drev|påhængsmotor|inboard|saildrive|shaft|throttle|gashåndtag|motorophæng|motorbeslag|manifold|udstødning|varmeveksler|olie.?filter/, to: 'Motor & fremdrift' },
-        { pattern: /maling|overfladebehandling|bundmaling|bundbehandling|lak|primer|coating|polish|grunding|antifoul|gelcoat|teak.?olie|rustbeskyttelse|imprægner|forsegling/, to: 'Maling & overfladebehandling' },
-        { pattern: /navigation|navigations|gps|kompas|ekkolod|dybde|vind.?instrument|log|barometer|pejl|sextant|søkort|chart|nmea|signalflag|flag/, to: 'Navigation & instrumenter' },
-        { pattern: /pumpe|vvs|sanitet|toilet|bilge|vandpumpe|bruse|ferskvand|spildevand|slange|fitting|kuglehane|ventil|seacock|gennemføring|rør|vandtank|wc/, to: 'Pumper & VVS' },
-        { pattern: /rengøring|vedligehold|rengørings|polering|vask|fedt|smøring|smøremidler|service|teak|træpleje|rens|scrubber|moppe|svamp|klud|børste|desinfek/, to: 'Rengøring & vedligehold' },
-        { pattern: /sikkerhed|redning|rednings|flydevest|vest|harness|livline|sele|brandslukker|nødrakette|epirib|epirb|redningskrans|kasteline|mob|redningsflåde|flåde|nødsignal|pyroteknik/, to: 'Sikkerhed & redning' },
-        { pattern: /tovværk|liner?|line\b|tov\b|reb\b|wire\b|spring|ankerliner?|fortøjningsliner?|snøre|polyester.?line/, to: 'Tovværk & liner' },
-        { pattern: /udstyr|inventar|kabine|interiør|komfort|pude|madras|tæppe|gardin|køje|opbevaring|boks|container|holder|kopholder|bestik|køkken|komfur|varme|ventilation|hatch|luge|luke/, to: 'Udstyr & inventar' },
-      ]
-
-      function mapToStandard(cat: string): string | null {
-        const lower = cat.toLowerCase()
-        for (const { pattern, to } of STANDARD) {
-          if (pattern.test(lower)) return to
-        }
-        return null
-      }
-
       const { data: catRows } = await supabase
         .from('product_types')
         .select('our_category')
@@ -109,11 +68,7 @@ export async function GET() {
         if (catSeen.has(cat)) continue
         catSeen.add(cat)
 
-        // First strip prefix, then map to standard
-        const stripped  = stripPrefix(cat)
-        const standard  = mapToStandard(stripped) ?? mapToStandard(cat)
-        const finalName = standard ?? stripped
-
+        const finalName = normalizeCategory(cat)
         if (finalName !== cat) {
           await supabase.from('product_types').update({ our_category: finalName }).eq('our_category', cat)
           summary.categories_updated++
