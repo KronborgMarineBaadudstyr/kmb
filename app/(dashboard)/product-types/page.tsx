@@ -882,19 +882,6 @@ export default function ProductTypesPage() {
               ⚙ Administrer kategorier
             </button>
           )}
-          <button onClick={runAiAnalysis} disabled={aiRunning || fullRunning}
-            className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
-            {aiRunning
-              ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Analyserer…</>
-              : '✨ Analyser leverandørprodukter'}
-          </button>
-          <button onClick={runFullAnalysis} disabled={aiRunning || fullRunning}
-            title="Kører analyse i flere runder og gemmer automatisk alle forslag, indtil der ikke kommer nye produkttyper"
-            className="px-4 py-2 bg-purple-800 text-white text-sm rounded-md hover:bg-purple-900 disabled:opacity-50 flex items-center gap-2">
-            {fullRunning
-              ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Kører fuld analyse…</>
-              : '⚡ Kør fuld analyse'}
-          </button>
           {!showNew && (
             <button onClick={() => { setShowNew(true); setEditId(null) }}
               className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
@@ -914,24 +901,51 @@ export default function ProductTypesPage() {
         />
       )}
 
-      {/* Full analysis log */}
-      {fullLog.length > 0 && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-3 space-y-1">
-          <div className="text-xs font-semibold text-purple-700 mb-2">⚡ Fuld analyse — fremgang</div>
-          {fullLog.map((l, i) => (
-            <div key={i} className="flex items-center gap-2 text-xs text-purple-800">
-              {fullRunning && i === fullLog.length - 1
-                ? <span className="inline-block w-2.5 h-2.5 border-2 border-purple-600 border-t-transparent rounded-full animate-spin shrink-0" />
-                : <span className="text-purple-400">✓</span>
-              }
-              <span>{l.msg}</span>
-              {l.added > 0 && (
-                <span className="ml-auto bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">+{l.added}</span>
-              )}
+      {/* Advanced: AI product type analysis */}
+      <details className="bg-purple-50 border border-purple-200 rounded-lg">
+        <summary className="px-4 py-3 text-sm font-medium text-purple-700 cursor-pointer select-none hover:bg-purple-100 rounded-lg list-none flex items-center justify-between">
+          <span>✨ AI produkttype-analyse <span className="font-normal text-purple-500 text-xs ml-1">(avanceret — kør kun ved nye leverandørimports)</span></span>
+          <span className="text-purple-400 text-xs">▼</span>
+        </summary>
+        <div className="px-4 pb-4 pt-1 space-y-3">
+          <p className="text-xs text-purple-600">
+            AI analyserer uafdækkede produkter i staging og foreslår nye produkttyper med nøgleord og varianter.
+            Kør &quot;Fuld analyse&quot; for at køre automatisk til alle produkter er dækket.
+          </p>
+          <div className="flex gap-2">
+            <button onClick={runAiAnalysis} disabled={aiRunning || fullRunning}
+              className="px-4 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 disabled:opacity-50 flex items-center gap-2">
+              {aiRunning
+                ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Analyserer…</>
+                : '✨ Analyser én runde'}
+            </button>
+            <button onClick={runFullAnalysis} disabled={aiRunning || fullRunning}
+              title="Kører analyse i flere runder og gemmer automatisk alle forslag, indtil der ikke kommer nye produkttyper"
+              className="px-4 py-2 bg-purple-800 text-white text-sm rounded-md hover:bg-purple-900 disabled:opacity-50 flex items-center gap-2">
+              {fullRunning
+                ? <><span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Kører fuld analyse…</>
+                : '⚡ Kør fuld analyse (auto)'}
+            </button>
+          </div>
+          {/* Full analysis log */}
+          {fullLog.length > 0 && (
+            <div className="space-y-1">
+              {fullLog.map((l, i) => (
+                <div key={i} className="flex items-center gap-2 text-xs text-purple-800">
+                  {fullRunning && i === fullLog.length - 1
+                    ? <span className="inline-block w-2.5 h-2.5 border-2 border-purple-600 border-t-transparent rounded-full animate-spin shrink-0" />
+                    : <span className="text-purple-400">✓</span>
+                  }
+                  <span>{l.msg}</span>
+                  {l.added > 0 && (
+                    <span className="ml-auto bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">+{l.added}</span>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      )}
+      </details>
 
       {/* AI error */}
       {aiError && (

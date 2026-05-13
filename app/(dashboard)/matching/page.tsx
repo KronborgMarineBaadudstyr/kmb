@@ -436,24 +436,163 @@ function GroupCard({
   )
 }
 
+// ── Pipeline step type ──
+type PipelineStep = {
+  stage:    string
+  status:   'idle' | 'running' | 'done' | 'error'
+  message?: string
+  detail?:  string
+}
+
+const PIPELINE_STAGES = [
+  { key: 'categories',   label: '1 · Kategorier',        icon: '🗂' },
+  { key: 'matching',     label: '2 · Matching',           icon: '🔗' },
+  { key: 'auto_confirm', label: '3 · Auto-bekræft',       icon: '✅' },
+  { key: 'auto_create',  label: '4 · Opret produkter',    icon: '📦' },
+]
+
+// ── Pipeline Panel ──
+function PipelinePanel({ onDone }: { onDone: () => void }) {
+  const [steps,    setSteps]    = useState<Record<string, PipelineStep>>({})
+  const [running,  setRunning]  = useState(false)
+  const [done,     setDone]     = useState(false)
+  const [summary,  setSummary]  = useState<Record<string, number> | null>(null)
+  const [error,    setError]    = useState<string | null>(null)
+  const esRef = useRef<EventSource | null>(null)
+
+  function startPipeline() {
+    if (running) return
+    setRunning(true)
+    setDone(false)
+    setError(null)
+    setSummary(null)
+    setSteps({})
+
+    const es = new EventSource('/api/pipeline/run')
+    esRef.current = es
+
+    es.onmessage = (e: MessageEvent<string>) => {
+      const ev = JSON.parse(e.data) as Record<string, unknown>
+      const stage = ev.stage as string
+
+      if (stage === 'done') {
+        setSummary(ev.summary as Record<string, number>)
+        setDone(true)
+        setRunning(false)
+        es.close()
+        onDone()
+        return
+      }
+
+      if (stage === 'error') {
+        setError(ev.message as string)
+        setRunning(false)
+        es.close()
+        return
+      }
+
+      setSteps(prev => {
+        const status = ev.status as string === 'done' ? 'done' : ev.status as string === 'running' ? 'running' : 'idle'
+        let detail: string | undefined
+        if (ev.updated != null)  detail = `${ev.updated} kategorier opdateret`
+        if (ev.confirmed != null) detail = `${ev.confirmed} bekræftet, ${ev.needs_review ?? 0} til manuel`
+        if (ev.created != null)  detail = `${ev.created} produkter oprettet`
+        if (ev.groups_created != null) detail = `${ev.groups_created} grupper oprettet`
+        return { ...prev, [stage]: { stage, status: status as PipelineStep['status'], message: ev.message as string, detail } }
+      })
+    }
+
+    es.onerror = () => {
+      setError('Forbindelsesfejl — prøv igen')
+      setRunning(false)
+      es.close()
+    }
+  }
+
+  useEffect(() => () => { esRef.current?.close() }, [])
+
+  return (
+    <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-5 text-white mb-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-semibold text-base mb-0.5">🚀 Onboarding pipeline</h3>
+          <p className="text-gray-400 text-sm">
+            Kører automatisk: kategorioprydning → matching → auto-bekræft → produktoprettelse
+          </p>
+        </div>
+        <button
+          onClick={startPipeline}
+          disabled={running}
+          className="shrink-0 px-5 py-2 bg-white text-gray-900 font-semibold text-sm rounded-lg hover:bg-gray-100 disabled:opacity-50 flex items-center gap-2"
+        >
+          {running && <span className="inline-block w-3.5 h-3.5 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />}
+          {running ? 'Kører pipeline…' : done ? '↺ Kør igen' : '▶ Kør pipeline'}
+        </button>
+      </div>
+
+      {/* Step progress */}
+      {(running || done || error) && (
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {PIPELINE_STAGES.map(s => {
+            const step = steps[s.key]
+            const status = step?.status ?? 'idle'
+            return (
+              <div key={s.key} className={`rounded-lg px-3 py-2.5 text-xs transition-colors ${
+                status === 'done'    ? 'bg-green-500/20 border border-green-500/30' :
+                status === 'running' ? 'bg-blue-500/20 border border-blue-400/40' :
+                                       'bg-white/5 border border-white/10'
+              }`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span>{s.icon}</span>
+                  {status === 'running' && (
+                    <span className="inline-block w-2.5 h-2.5 border-2 border-blue-300 border-t-transparent rounded-full animate-spin" />
+                  )}
+                  {status === 'done' && <span className="text-green-400">✓</span>}
+                  <span className={`font-medium ${status === 'idle' ? 'text-gray-500' : 'text-white'}`}>
+                    {s.label}
+                  </span>
+                </div>
+                {step?.detail && (
+                  <div className="text-gray-300 leading-tight">{step.detail}</div>
+                )}
+                {step?.message && !step.detail && (
+                  <div className="text-gray-400 leading-tight truncate">{step.message}</div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Summary */}
+      {done && summary && (
+        <div className="mt-3 flex flex-wrap gap-3 text-sm">
+          <span className="bg-white/10 rounded px-3 py-1">🗂 {summary.categories_updated ?? 0} kategorier opdateret</span>
+          <span className="bg-white/10 rounded px-3 py-1">🔗 {summary.groups_created ?? 0} nye grupper</span>
+          <span className="bg-white/10 rounded px-3 py-1">✅ {summary.auto_confirmed ?? 0} auto-bekræftet</span>
+          <span className="bg-green-500/20 border border-green-500/30 rounded px-3 py-1 font-semibold">
+            📦 {summary.products_created ?? 0} produkter oprettet
+          </span>
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <div className="mt-3 text-sm text-red-300 bg-red-900/30 rounded px-3 py-2">⚠️ {error}</div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ──
 export default function MatchingPage() {
-  const [groups,      setGroups]      = useState<MatchGroup[]>([])
-  const [stats,       setStats]       = useState<Stats | null>(null)
-  const [total,       setTotal]       = useState(0)
-  const [totalPages,  setTotalPages]  = useState(1)
-  const [page,        setPage]        = useState(1)
-  const [loading,     setLoading]     = useState(true)
-  const [activeTab,   setActiveTab]   = useState<TabKey>('high')
-
-  // SSE state
-  const [running,     setRunning]     = useState(false)
-  const [progress,    setProgress]    = useState<ProgressEvent | null>(null)
-  const eventSourceRef = useRef<EventSource | null>(null)
-
-  // Auto-confirm state
-  const [autoRunning, setAutoRunning] = useState(false)
-  const [autoResult,  setAutoResult]  = useState<{ auto_confirmed: number; needs_review: number; total_checked: number } | null>(null)
+  const [groups,     setGroups]     = useState<MatchGroup[]>([])
+  const [stats,      setStats]      = useState<Stats | null>(null)
+  const [total,      setTotal]      = useState(0)
+  const [totalPages, setTotalPages] = useState(1)
+  const [page,       setPage]       = useState(1)
+  const [loading,    setLoading]    = useState(true)
+  const [activeTab,  setActiveTab]  = useState<TabKey>('high')
 
   const tabConfig = TABS.find(t => t.key === activeTab) ?? TABS[0]
 
@@ -476,46 +615,6 @@ export default function MatchingPage() {
 
   useEffect(() => { fetchGroups() }, [fetchGroups])
 
-  useEffect(() => {
-    return () => { eventSourceRef.current?.close() }
-  }, [])
-
-  function startMatching() {
-    if (running) return
-    setRunning(true)
-    setProgress({ stage: 'ean_phase', message: 'Starter matching-motor...' })
-
-    const es = new EventSource('/api/matching/run')
-    eventSourceRef.current = es
-
-    es.onmessage = (e: MessageEvent<string>) => {
-      const data = JSON.parse(e.data) as ProgressEvent
-      setProgress(data)
-      if (data.stage === 'done' || data.stage === 'error') {
-        es.close()
-        setRunning(false)
-        if (data.stage === 'done') fetchGroups()
-      }
-    }
-
-    es.onerror = () => {
-      setProgress({ stage: 'error', message: 'SSE-forbindelsen fejlede' })
-      es.close()
-      setRunning(false)
-    }
-  }
-
-  async function runAutoConfirm() {
-    if (autoRunning) return
-    setAutoRunning(true)
-    setAutoResult(null)
-    const res  = await fetch('/api/matching/auto-confirm', { method: 'POST' })
-    const json = await res.json()
-    setAutoResult(json)
-    setAutoRunning(false)
-    fetchGroups()
-  }
-
   async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string }) {
     await fetch(`/api/matching/${id}`, {
       method:  'PATCH',
@@ -525,89 +624,26 @@ export default function MatchingPage() {
     setGroups(prev => prev.map(g => g.id === id ? { ...g, ...patch } as MatchGroup : g))
   }
 
-  const stageLabel: Record<string, string> = {
-    ean_phase:    'EAN-fase',
-    fuzzy_phase:  'Fuzzy-fase',
-    singles_phase:'Enkelt-leverandør fase',
-    done:         'Færdig',
-    error:        'Fejl',
-  }
-
   return (
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
       <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">Leverandør-match</h2>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Kryds-leverandør matching af staging-produkter
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex gap-2">
-              <button
-                onClick={runAutoConfirm}
-                disabled={autoRunning || running}
-                title="Bekræfter automatisk EAN-matches hvor produktnavnene har mindst 2 ord til fælles. Øvrige mærkes med årsag."
-                className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-40 flex items-center gap-2"
-              >
-                {autoRunning && (
-                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                )}
-                {autoRunning ? 'Kører...' : 'Auto-bekræft sikre matches'}
-              </button>
-              <button
-                onClick={startMatching}
-                disabled={running}
-                className="px-5 py-2 bg-gray-900 text-white text-sm rounded-lg hover:bg-gray-700 disabled:opacity-40 flex items-center gap-2"
-              >
-                {running && (
-                  <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                )}
-                {running ? 'Kører...' : 'Kør matching'}
-              </button>
-            </div>
-            {autoResult && (
-              <p className="text-xs text-gray-500">
-                Auto-bekræft: <span className="text-green-700 font-medium">{autoResult.auto_confirmed} bekræftet</span>
-                {' · '}
-                <span className="text-orange-600 font-medium">{autoResult.needs_review} til manuel gennemgang</span>
-                {' '}(af {autoResult.total_checked} EAN-grupper)
-              </p>
-            )}
-          </div>
-        </div>
+        <h2 className="text-xl font-bold text-gray-900 mb-0.5">Leverandør-match</h2>
+        <p className="text-sm text-gray-500 mb-4">Kryds-leverandør matching af staging-produkter</p>
 
-        {/* Progress */}
-        {progress && (
-          <div className={`mb-4 px-4 py-3 rounded-lg text-sm ${
-            progress.stage === 'error' ? 'bg-red-50 text-red-700' :
-            progress.stage === 'done'  ? 'bg-green-50 text-green-700' :
-                                         'bg-blue-50 text-blue-700'
-          }`}>
-            <div className="font-medium mb-0.5">
-              {stageLabel[progress.stage] ?? progress.stage}
-            </div>
-            <div>{progress.message}</div>
-            {progress.groups_created != null && (
-              <div className="text-xs mt-1 opacity-75">
-                {progress.groups_created} grupper · {progress.rows_assigned ?? 0} rækker tildelt
-              </div>
-            )}
-          </div>
-        )}
+        {/* Pipeline panel */}
+        <PipelinePanel onDone={fetchGroups} />
 
         {/* Stats */}
         {stats && (
-          <div className="flex gap-4 flex-wrap text-sm mb-4">
+          <div className="flex gap-3 flex-wrap text-sm mb-4">
             {[
-              { label: 'I alt',              value: stats.total,     color: 'text-gray-900' },
-              { label: 'Høj konfidens (EAN)', value: stats.high,     color: 'text-green-700' },
-              { label: 'Fuzzy',              value: stats.medium,    color: 'text-yellow-700' },
-              { label: 'Enkelt leverandør',  value: stats.single,    color: 'text-gray-600' },
-              { label: 'Bekræftet',          value: stats.confirmed, color: 'text-blue-700' },
-              { label: 'Produkt oprettet',   value: stats.created,   color: 'text-emerald-700' },
+              { label: 'Afventer',           value: stats.total - stats.confirmed - stats.rejected - stats.created, color: 'text-orange-700' },
+              { label: 'Høj konfidens (EAN)', value: stats.high,      color: 'text-green-700' },
+              { label: 'Fuzzy',              value: stats.medium,     color: 'text-yellow-700' },
+              { label: 'Enkelt leverandør',  value: stats.single,     color: 'text-gray-600' },
+              { label: 'Bekræftet',          value: stats.confirmed,  color: 'text-blue-700' },
+              { label: 'Produkt oprettet',   value: stats.created,    color: 'text-emerald-700' },
             ].map(s => (
               <div key={s.label} className="bg-gray-50 rounded-lg px-3 py-2 min-w-[100px]">
                 <div className={`text-xl font-bold tabular-nums ${s.color}`}>{s.value.toLocaleString('da-DK')}</div>
@@ -663,12 +699,8 @@ export default function MatchingPage() {
         ) : groups.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
             <div className="text-2xl mb-2">🎯</div>
-            <div>Ingen grupper i denne kategori</div>
-            {!stats?.total && (
-              <div className="mt-2 text-sm">
-                Klik &quot;Kør matching&quot; for at starte matching-processen
-              </div>
-            )}
+            <div className="font-medium text-gray-500 mb-1">Ingen grupper afventer gennemgang</div>
+            <div className="text-sm">Kør pipeline ovenfor for at importere og matche leverandørprodukter</div>
           </div>
         ) : (
           <div className="space-y-3 max-w-4xl">
