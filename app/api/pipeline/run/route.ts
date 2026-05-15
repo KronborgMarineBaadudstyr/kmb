@@ -1,6 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { runMatchingEngine } from '@/lib/matching-engine'
-import { createProductFromGroup } from '@/lib/product-creator'
+import { bulkCreateProductsFromGroups } from '@/lib/bulk-product-creator'
 import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
 
 export const dynamic    = 'force-dynamic'
@@ -192,71 +192,20 @@ export async function GET() {
         message: `${summary.auto_confirmed} grupper bekræftet (${toConfirm.length} EAN, ${singleAndVariantIds.length} enkelt/variant)`,
       })
 
-      // ── STEP 4: Auto-create products for confirmed groups ───────
-      // Cap at 2000 per run to stay within Vercel timeout — pipeline can be re-run
-      const CREATE_LIMIT = 2000
-      send({ stage: 'auto_create', status: 'running', message: 'Tæller bekræftede grupper…' })
+      // ── STEP 4: Bulk-create products for confirmed groups ───────
+      send({ stage: 'auto_create', status: 'running', message: 'Opretter produkter i bulk…' })
 
-      // Count total pending
-      const { count: totalPending } = await supabase
-        .from('staging_match_groups')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'confirmed')
-        .is('product_id', null)
-
-      send({ stage: 'auto_create', status: 'running', message: `Opretter op til ${CREATE_LIMIT} af ${totalPending ?? '?'} ventende produkter…` })
-
-      const confirmedGroups: { id: string; suggested_name: string | null }[] = []
-      const { data: cgData } = await supabase
-        .from('staging_match_groups')
-        .select('id, suggested_name')
-        .eq('status', 'confirmed')
-        .is('product_id', null)
-        .limit(CREATE_LIMIT)
-
-      confirmedGroups.push(...((cgData ?? []) as { id: string; suggested_name: string | null }[]))
-
-      // Load member names for groups without suggested_name
-      const needsNames = confirmedGroups.filter(g => !g.suggested_name).map(g => g.id)
-      const memberNameMap = new Map<string, string>()
-      if (needsNames.length > 0) {
-        // Fetch in batches of 500 (Supabase IN limit)
-        for (let i = 0; i < needsNames.length; i += 500) {
-          const chunk = needsNames.slice(i, i + 500)
-          const { data: mems } = await supabase
-            .from('supplier_product_staging')
-            .select('match_group_id, normalized_name')
-            .in('match_group_id', chunk)
-          for (const m of (mems ?? [])) {
-            const gid = (m as { match_group_id: string }).match_group_id
-            const name = (m as { normalized_name: string }).normalized_name
-            if (!memberNameMap.has(gid) && name?.trim()) memberNameMap.set(gid, name.trim())
-          }
-        }
-      }
-
-      for (const group of confirmedGroups) {
-        const name = group.suggested_name?.trim() || memberNameMap.get(group.id)
-        if (!name) { summary.skipped++; continue }
-        try {
-          await createProductFromGroup(group.id, name, supabase)
-          summary.products_created++
-        } catch {
-          summary.skipped++
-        }
-      }
-
-      const remaining = Math.max(0, (totalPending ?? 0) - confirmedGroups.length)
-      summary.remaining = remaining
+      const { created, skipped, remaining } = await bulkCreateProductsFromGroups(supabase, 2000)
+      summary.products_created = created
+      summary.skipped          = skipped
+      summary.remaining        = remaining
 
       send({
         stage: 'auto_create', status: 'done',
-        created: summary.products_created,
-        skipped: summary.skipped,
-        remaining,
+        created, skipped, remaining,
         message: remaining > 0
-          ? `${summary.products_created} produkter oprettet — ${remaining} tilbage (kør pipeline igen)`
-          : `${summary.products_created} produkter oprettet — alle er nu behandlet`,
+          ? `${created} produkter oprettet — ${remaining} tilbage (kør pipeline igen)`
+          : `${created} produkter oprettet — alle er nu behandlet ✓`,
       })
 
       // ── DONE ────────────────────────────────────────────────────
