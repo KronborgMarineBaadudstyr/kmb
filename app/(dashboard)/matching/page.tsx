@@ -38,6 +38,7 @@ type Stats = {
   total:     number
   high:      number
   medium:    number
+  variant:   number
   single:    number
   confirmed: number
   rejected:  number
@@ -200,12 +201,13 @@ function MemberDetailPanel({
 }
 
 // ── Tab config ──
-type TabKey = 'all' | 'high' | 'medium' | 'single' | 'confirmed' | 'rejected'
+type TabKey = 'all' | 'high' | 'medium' | 'variant' | 'single' | 'confirmed' | 'rejected'
 
 const TABS: { key: TabKey; label: string; status?: string; method?: string; confidence?: string }[] = [
   { key: 'all',       label: 'Alle',              status: 'pending_review' },
   { key: 'high',      label: 'Høj konfidens',     status: 'pending_review', confidence: 'high'   },
   { key: 'medium',    label: 'Lav konfidens',     status: 'pending_review', confidence: 'medium' },
+  { key: 'variant',   label: 'Varianter',         status: 'pending_review', method: 'variant'    },
   { key: 'single',    label: 'Enkelt leverandør', status: 'pending_review', method: 'single'     },
   { key: 'confirmed', label: 'Bekræftet',         status: 'confirmed'      },
   { key: 'rejected',  label: 'Afvist',            status: 'rejected'       },
@@ -573,6 +575,11 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
           <span className="bg-green-500/20 border border-green-500/30 rounded px-3 py-1 font-semibold">
             📦 {summary.products_created ?? 0} produkter oprettet
           </span>
+          {(summary.remaining ?? 0) > 0 && (
+            <span className="bg-orange-500/20 border border-orange-400/30 rounded px-3 py-1 text-orange-200">
+              ⏳ {summary.remaining} tilbage — kør pipeline igen
+            </span>
+          )}
         </div>
       )}
 
@@ -641,6 +648,7 @@ export default function MatchingPage() {
               { label: 'Afventer',           value: stats.total - stats.confirmed - stats.rejected - stats.created, color: 'text-orange-700' },
               { label: 'Høj konfidens (EAN)', value: stats.high,      color: 'text-green-700' },
               { label: 'Fuzzy',              value: stats.medium,     color: 'text-yellow-700' },
+              { label: 'Varianter',          value: stats.variant,    color: 'text-purple-700' },
               { label: 'Enkelt leverandør',  value: stats.single,     color: 'text-gray-600' },
               { label: 'Bekræftet',          value: stats.confirmed,  color: 'text-blue-700' },
               { label: 'Produkt oprettet',   value: stats.created,    color: 'text-emerald-700' },
@@ -660,6 +668,7 @@ export default function MatchingPage() {
               tab.key === 'all'       ? stats.total - stats.confirmed - stats.rejected - stats.created :
               tab.key === 'high'      ? stats.high :
               tab.key === 'medium'    ? stats.medium :
+              tab.key === 'variant'   ? stats.variant :
               tab.key === 'single'    ? stats.single :
               tab.key === 'confirmed' ? stats.confirmed :
               tab.key === 'rejected'  ? stats.rejected :

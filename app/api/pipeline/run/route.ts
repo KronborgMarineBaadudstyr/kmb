@@ -51,7 +51,7 @@ export async function GET() {
 
   ;(async () => {
     const supabase = createServiceClient()
-    const summary = { categories_updated: 0, groups_created: 0, auto_confirmed: 0, products_created: 0, skipped: 0 }
+    const summary: Record<string, number> = { categories_updated: 0, groups_created: 0, auto_confirmed: 0, products_created: 0, skipped: 0, remaining: 0 }
 
     try {
       // ── STEP 1: Apply standard categories + strip prefixes ──────
@@ -170,38 +170,68 @@ export async function GET() {
         }
       }
 
-      summary.auto_confirmed = toConfirm.length
-      send({ stage: 'auto_confirm', status: 'done', confirmed: toConfirm.length, needs_review: reviewReasons.size, message: `${toConfirm.length} grupper bekræftet automatisk` })
+      // Also auto-confirm all single-supplier and variant groups (no ambiguity)
+      const { data: autoGroups } = await supabase
+        .from('staging_match_groups')
+        .select('id')
+        .in('match_method', ['single', 'variant'])
+        .eq('status', 'pending_review')
+
+      const singleAndVariantIds = (autoGroups ?? []).map((g: { id: string }) => g.id)
+      for (let i = 0; i < singleAndVariantIds.length; i += BATCH) {
+        await supabase.from('staging_match_groups')
+          .update({ status: 'confirmed', notes: null })
+          .in('id', singleAndVariantIds.slice(i, i + BATCH))
+      }
+
+      summary.auto_confirmed = toConfirm.length + singleAndVariantIds.length
+      send({
+        stage: 'auto_confirm', status: 'done',
+        confirmed: summary.auto_confirmed,
+        needs_review: reviewReasons.size,
+        message: `${summary.auto_confirmed} grupper bekræftet (${toConfirm.length} EAN, ${singleAndVariantIds.length} enkelt/variant)`,
+      })
 
       // ── STEP 4: Auto-create products for confirmed groups ───────
-      send({ stage: 'auto_create', status: 'running', message: 'Opretter produkter for bekræftede grupper…' })
+      // Cap at 2000 per run to stay within Vercel timeout — pipeline can be re-run
+      const CREATE_LIMIT = 2000
+      send({ stage: 'auto_create', status: 'running', message: 'Tæller bekræftede grupper…' })
+
+      // Count total pending
+      const { count: totalPending } = await supabase
+        .from('staging_match_groups')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'confirmed')
+        .is('product_id', null)
+
+      send({ stage: 'auto_create', status: 'running', message: `Opretter op til ${CREATE_LIMIT} af ${totalPending ?? '?'} ventende produkter…` })
 
       const confirmedGroups: { id: string; suggested_name: string | null }[] = []
-      for (let p = 0; ; p++) {
-        const { data } = await supabase
-          .from('staging_match_groups')
-          .select('id, suggested_name')
-          .eq('status', 'confirmed')
-          .is('product_id', null)
-          .range(p * PAGE, p * PAGE + PAGE - 1)
+      const { data: cgData } = await supabase
+        .from('staging_match_groups')
+        .select('id, suggested_name')
+        .eq('status', 'confirmed')
+        .is('product_id', null)
+        .limit(CREATE_LIMIT)
 
-        if (!data || data.length === 0) break
-        confirmedGroups.push(...(data as { id: string; suggested_name: string | null }[]))
-        if (data.length < PAGE) break
-      }
+      confirmedGroups.push(...((cgData ?? []) as { id: string; suggested_name: string | null }[]))
 
       // Load member names for groups without suggested_name
       const needsNames = confirmedGroups.filter(g => !g.suggested_name).map(g => g.id)
       const memberNameMap = new Map<string, string>()
       if (needsNames.length > 0) {
-        const { data: mems } = await supabase
-          .from('supplier_product_staging')
-          .select('match_group_id, normalized_name')
-          .in('match_group_id', needsNames)
-        for (const m of (mems ?? [])) {
-          const gid = (m as { match_group_id: string }).match_group_id
-          const name = (m as { normalized_name: string }).normalized_name
-          if (!memberNameMap.has(gid) && name?.trim()) memberNameMap.set(gid, name.trim())
+        // Fetch in batches of 500 (Supabase IN limit)
+        for (let i = 0; i < needsNames.length; i += 500) {
+          const chunk = needsNames.slice(i, i + 500)
+          const { data: mems } = await supabase
+            .from('supplier_product_staging')
+            .select('match_group_id, normalized_name')
+            .in('match_group_id', chunk)
+          for (const m of (mems ?? [])) {
+            const gid = (m as { match_group_id: string }).match_group_id
+            const name = (m as { normalized_name: string }).normalized_name
+            if (!memberNameMap.has(gid) && name?.trim()) memberNameMap.set(gid, name.trim())
+          }
         }
       }
 
@@ -216,7 +246,18 @@ export async function GET() {
         }
       }
 
-      send({ stage: 'auto_create', status: 'done', created: summary.products_created, skipped: summary.skipped, message: `${summary.products_created} produkter oprettet` })
+      const remaining = Math.max(0, (totalPending ?? 0) - confirmedGroups.length)
+      summary.remaining = remaining
+
+      send({
+        stage: 'auto_create', status: 'done',
+        created: summary.products_created,
+        skipped: summary.skipped,
+        remaining,
+        message: remaining > 0
+          ? `${summary.products_created} produkter oprettet — ${remaining} tilbage (kør pipeline igen)`
+          : `${summary.products_created} produkter oprettet — alle er nu behandlet`,
+      })
 
       // ── DONE ────────────────────────────────────────────────────
       send({ stage: 'done', summary })

@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type MatchingProgressEvent = {
-  stage:          'ean_phase' | 'fuzzy_phase' | 'singles_phase' | 'done' | 'error'
+  stage:          'ean_phase' | 'fuzzy_phase' | 'variant_phase' | 'singles_phase' | 'done' | 'error'
   message:        string
   groups_created?: number
   rows_assigned?:  number
@@ -179,6 +179,88 @@ async function runFuzzyPhase(
   return { groupsCreated, rowsAssigned }
 }
 
+// ── Phase 2.5: Variant grouping — same supplier, identical normalized name ──
+// Finds staging rows that are NOT yet assigned a group, grouped by
+// (supplier_id, normalized_name). Groups of 2+ are same-product variants
+// (e.g. different sizes/SKUs of the same item from one supplier).
+async function runVariantPhase(
+  supabase: SupabaseClient,
+  onProgress: ProgressCallback,
+): Promise<{ groupsCreated: number; rowsAssigned: number }> {
+  onProgress({ stage: 'variant_phase', message: 'Variant-gruppering kører…' })
+
+  // Fetch all unmatched rows — only the fields we need
+  type Row = { id: string; supplier_id: string; normalized_name: string }
+  const rows: Row[] = []
+  const PAGE = 1000
+  for (let p = 0; ; p++) {
+    const { data, error } = await supabase
+      .from('supplier_product_staging')
+      .select('id, supplier_id, normalized_name')
+      .is('match_group_id', null)
+      .in('status', ['pending_review', 'needs_review'])
+      .not('normalized_name', 'is', null)
+      .range(p * PAGE, p * PAGE + PAGE - 1)
+
+    if (error) {
+      console.error('[matching-engine] variant phase fetch error:', error.message)
+      break
+    }
+    if (!data || data.length === 0) break
+    rows.push(...(data as Row[]))
+    if (data.length < PAGE) break
+  }
+
+  // Group by supplier_id + normalized_name
+  const buckets = new Map<string, string[]>() // key → [id, ...]
+  for (const row of rows) {
+    const key = `${row.supplier_id}||${(row.normalized_name ?? '').toLowerCase().trim()}`
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key)!.push(row.id)
+  }
+
+  let groupsCreated = 0
+  let rowsAssigned  = 0
+
+  for (const [, members] of buckets) {
+    if (members.length < 2) continue // singles handled later
+
+    // Find suggested name from first member
+    const firstRow = rows.find(r => r.id === members[0])
+    const suggestedName = rows.find(r => members.includes(r.id))?.normalized_name ?? ''
+
+    const { data: group, error: gErr } = await supabase
+      .from('staging_match_groups')
+      .insert({
+        match_confidence: 'high',
+        match_method:     'variant',
+        supplier_count:   1,
+        suggested_name:   suggestedName,
+        suggested_ean:    null,
+        status:           'pending_review',
+      })
+      .select('id')
+      .single()
+
+    if (gErr || !group) {
+      console.error('[matching-engine] variant group insert error:', gErr?.message)
+      continue
+    }
+
+    groupsCreated++
+
+    const { error: uErr } = await supabase
+      .from('supplier_product_staging')
+      .update({ match_group_id: group.id })
+      .in('id', members)
+
+    if (!uErr) rowsAssigned += members.length
+    void firstRow // suppress unused warning
+  }
+
+  return { groupsCreated, rowsAssigned }
+}
+
 // ── Phase 3: Singles — single bulk SQL via RPC ──
 async function runSinglesPhase(
   supabase: SupabaseClient,
@@ -221,15 +303,25 @@ export async function runMatchingEngine(
       rows_assigned:  ean.rowsAssigned + fuzzy.rowsAssigned,
     })
 
+    // Phase 2.5: Variant grouping (same supplier, identical name)
+    const variants = await runVariantPhase(db, onProgress)
+
+    onProgress({
+      stage:          'variant_phase',
+      message:        `Variant-fase færdig: ${variants.groupsCreated} variant-grupper, ${variants.rowsAssigned} rækker tildelt`,
+      groups_created: ean.groupsCreated + fuzzy.groupsCreated + variants.groupsCreated,
+      rows_assigned:  ean.rowsAssigned + fuzzy.rowsAssigned + variants.rowsAssigned,
+    })
+
     // Phase 3: Singles
     const singles = await runSinglesPhase(db, onProgress)
 
-    const totalGroups = ean.groupsCreated + fuzzy.groupsCreated + singles.groupsCreated
-    const totalRows   = ean.rowsAssigned  + fuzzy.rowsAssigned  + singles.rowsAssigned
+    const totalGroups = ean.groupsCreated + fuzzy.groupsCreated + variants.groupsCreated + singles.groupsCreated
+    const totalRows   = ean.rowsAssigned  + fuzzy.rowsAssigned  + variants.rowsAssigned  + singles.rowsAssigned
 
     onProgress({
       stage:          'done',
-      message:        `Matching færdig! ${totalGroups} grupper oprettet — ${ean.groupsCreated} EAN, ${fuzzy.groupsCreated} fuzzy, ${singles.groupsCreated} enkelt-leverandør. ${totalRows} rækker tildelt.`,
+      message:        `Matching færdig! ${totalGroups} grupper — ${ean.groupsCreated} EAN, ${fuzzy.groupsCreated} fuzzy, ${variants.groupsCreated} varianter, ${singles.groupsCreated} enkelt-leverandør. ${totalRows} rækker tildelt.`,
       groups_created: totalGroups,
       rows_assigned:  totalRows,
     })
