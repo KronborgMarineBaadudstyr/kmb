@@ -53,6 +53,25 @@ type PreparedProduct = {
   }
 }
 
+// Safe numeric helpers — guard against supplier data that overflows DB columns
+const MAX_PRICE = 9_999_999.99   // NUMERIC(10,2) typical
+const MAX_DIM   = 99_999.999     // NUMERIC(10,3) for weight/dimensions
+
+function safePrice(v: unknown): number | null {
+  if (typeof v !== 'number' || !isFinite(v) || v < 0) return null
+  return v > MAX_PRICE ? null : v
+}
+
+function safeDim(v: unknown): number | null {
+  if (typeof v !== 'number' || !isFinite(v) || v < 0) return null
+  return v > MAX_DIM ? null : v
+}
+
+function safeQty(v: unknown): number {
+  if (typeof v !== 'number' || !isFinite(v) || v < 0) return 0
+  return Math.min(Math.round(v), 2_147_483_647) // INT4 max
+}
+
 function generateSku(idx: number): string {
   const ts   = Date.now().toString(36).toUpperCase()
   const hex  = idx.toString(16).toUpperCase().padStart(4, '0')
@@ -152,10 +171,10 @@ export async function bulkCreateProductsFromGroups(
         description:       typeof raw.description       === 'string' ? raw.description       : null,
         short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
         brand:             typeof raw.brand             === 'string' ? raw.brand             : null,
-        weight:            typeof raw.weight            === 'number' ? raw.weight            : null,
-        length:            typeof raw.length            === 'number' ? raw.length            : null,
-        width:             typeof raw.width             === 'number' ? raw.width             : null,
-        height:            typeof raw.height            === 'number' ? raw.height            : null,
+        weight:            safeDim(raw.weight),
+        length:            safeDim(raw.length),
+        width:             safeDim(raw.width),
+        height:            safeDim(raw.height),
         categories,
       },
     })
@@ -202,9 +221,9 @@ export async function bulkCreateProductsFromGroups(
         supplier_sku:            m.normalized_sku,
         supplier_product_name:   typeof m.raw_data.supplier_product_name === 'string'
                                    ? m.raw_data.supplier_product_name : m.normalized_name,
-        purchase_price:          typeof m.raw_data.purchase_price === 'number'          ? m.raw_data.purchase_price : null,
-        recommended_sales_price: typeof m.raw_data.recommended_sales_price === 'number' ? m.raw_data.recommended_sales_price : null,
-        supplier_stock_quantity: typeof m.raw_data.supplier_stock_quantity === 'number' ? m.raw_data.supplier_stock_quantity : 0,
+        purchase_price:          safePrice(m.raw_data.purchase_price),
+        recommended_sales_price: safePrice(m.raw_data.recommended_sales_price),
+        supplier_stock_quantity: safeQty(m.raw_data.supplier_stock_quantity),
         supplier_stock_reserved: 0,
         supplier_images: Array.isArray(m.raw_data.supplier_images) ? m.raw_data.supplier_images : [],
         supplier_files:  Array.isArray(m.raw_data.supplier_files)  ? m.raw_data.supplier_files  : [],
