@@ -2,6 +2,22 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 
 type RawData = Record<string, unknown>
 
+type ProductType = {
+  id:              string
+  keywords:        string[] | null
+  our_category:    string | null
+  our_subcategory: string | null
+}
+
+function findProductType(name: string, types: ProductType[]): ProductType | null {
+  const lower = name.toLowerCase()
+  for (const pt of types) {
+    const keywords = pt.keywords ?? []
+    if (keywords.some(kw => kw && lower.includes(kw.toLowerCase()))) return pt
+  }
+  return null
+}
+
 type StagingRow = {
   id:             string
   match_group_id: string
@@ -65,6 +81,12 @@ export async function bulkCreateProductsFromGroups(
   limit = 2000,
 ): Promise<{ created: number; skipped: number; remaining: number }> {
 
+  // 0. Load product types for category matching
+  const { data: ptData } = await supabase
+    .from('product_types')
+    .select('id, keywords, our_category, our_subcategory')
+  const productTypes = (ptData ?? []) as ProductType[]
+
   // 1. Load confirmed groups
   const { data: groupData, error: gErr } = await supabase
     .from('staging_match_groups')
@@ -114,6 +136,11 @@ export async function bulkCreateProductsFromGroups(
     const primary = [...members].sort((a, b) => completenessScore(b.raw_data) - completenessScore(a.raw_data))[0]
     const raw     = primary.raw_data
 
+    const matchedType = findProductType(name, productTypes)
+    const categories: string[] = matchedType
+      ? [matchedType.our_category, matchedType.our_subcategory].filter((c): c is string => !!c)
+      : (Array.isArray(raw.categories) ? (raw.categories as string[]) : [])
+
     prepared.push({
       groupId: group.id,
       members,
@@ -129,7 +156,7 @@ export async function bulkCreateProductsFromGroups(
         length:            typeof raw.length            === 'number' ? raw.length            : null,
         width:             typeof raw.width             === 'number' ? raw.width             : null,
         height:            typeof raw.height            === 'number' ? raw.height            : null,
-        categories:        Array.isArray(raw.categories) ? (raw.categories as string[]) : [],
+        categories,
       },
     })
   }

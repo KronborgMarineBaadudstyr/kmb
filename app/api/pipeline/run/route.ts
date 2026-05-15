@@ -192,20 +192,40 @@ export async function GET() {
         message: `${summary.auto_confirmed} grupper bekræftet (${toConfirm.length} EAN, ${singleAndVariantIds.length} enkelt/variant)`,
       })
 
-      // ── STEP 4: Bulk-create products for confirmed groups ───────
+      // ── STEP 4: Bulk-create products for confirmed groups (loop until done) ─
       send({ stage: 'auto_create', status: 'running', message: 'Opretter produkter i bulk…' })
 
-      const { created, skipped, remaining } = await bulkCreateProductsFromGroups(supabase, 2000)
-      summary.products_created = created
-      summary.skipped          = skipped
+      const startMs = Date.now()
+      const MAX_MS  = 200_000 // stop looping after ~200 s to stay within 300 s limit
+      let totalCreated  = 0
+      let totalSkipped  = 0
+      let remaining     = 0
+
+      do {
+        const result = await bulkCreateProductsFromGroups(supabase, 2000)
+        totalCreated += result.created
+        totalSkipped += result.skipped
+        remaining     = result.remaining
+        if (result.created > 0) {
+          send({
+            stage: 'auto_create', status: 'running',
+            created: totalCreated, remaining,
+            message: `${totalCreated} produkter oprettet — ${remaining} tilbage…`,
+          })
+        }
+        if (result.created === 0) break // nothing left to create
+      } while (remaining > 0 && Date.now() - startMs < MAX_MS)
+
+      summary.products_created = totalCreated
+      summary.skipped          = totalSkipped
       summary.remaining        = remaining
 
       send({
         stage: 'auto_create', status: 'done',
-        created, skipped, remaining,
+        created: totalCreated, skipped: totalSkipped, remaining,
         message: remaining > 0
-          ? `${created} produkter oprettet — ${remaining} tilbage (kør pipeline igen)`
-          : `${created} produkter oprettet — alle er nu behandlet ✓`,
+          ? `${totalCreated} produkter oprettet — ${remaining} tilbage (kør pipeline igen)`
+          : `${totalCreated} produkter oprettet — alle er nu behandlet ✓`,
       })
 
       // ── DONE ────────────────────────────────────────────────────
