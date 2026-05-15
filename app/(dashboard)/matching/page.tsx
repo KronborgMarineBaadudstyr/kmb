@@ -636,7 +636,7 @@ export default function MatchingPage() {
       {/* ── Header ── */}
       <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
         <h2 className="text-xl font-bold text-gray-900 mb-0.5">Leverandør-match</h2>
-        <p className="text-sm text-gray-500 mb-4">Kryds-leverandør matching af staging-produkter</p>
+        <p className="text-sm text-gray-500 mb-4">Identificér varesammenfald på tværs af leverandører — bekræft eller afvis grupperinger</p>
 
         {/* Pipeline panel */}
         <PipelinePanel onDone={fetchGroups} />

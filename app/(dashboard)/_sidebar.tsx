@@ -6,12 +6,12 @@ import { usePathname, useRouter } from 'next/navigation'
 const navItems = [
   { href: '/',              label: 'Dashboard',                    icon: '⊞' },
   { href: '/suppliers',     label: 'Leverandører',                 icon: '🏭' },
-  { href: '/matching',      label: 'Match produkt leverandører',   icon: '🔗' },
-  { href: '/product-types', label: 'Produkt & kategori placering', icon: '⚙️' },
-  { href: '/staging',       label: 'Produkt gennemgang',           icon: '🔍' },
+  { href: '/matching',      label: 'Leverandør-match',             icon: '🔗' },
+  { href: '/staging',       label: 'Til gennemgang',               icon: '🔍' },
   { href: '/products',      label: 'Produkter',                    icon: '📦' },
-  { href: '/inventory',     label: 'Aktuelle lagerbeholdninger',   icon: '📊' },
-  { href: '/sync',          label: 'Sync til Shops & POS',         icon: '🔄' },
+  { href: '/product-types', label: 'Produkt & kategori',           icon: '⚙️' },
+  { href: '/inventory',     label: 'Lagerbeholdning',              icon: '📊' },
+  { href: '/sync',          label: 'Sync & Logs',                  icon: '🔄' },
 ]
 
 export default function SidebarClient() {

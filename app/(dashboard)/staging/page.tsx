@@ -258,7 +258,7 @@ export default function StagingPage() {
             <div>
               <h2 className="text-xl font-bold text-gray-900">Til gennemgang</h2>
               <p className="text-sm text-gray-500 mt-0.5">
-                Leverandørprodukter der ikke er matchet automatisk
+                Opret produkter fra bekræftede grupper og enkeltprodukter
               </p>
             </div>
             <span className="text-sm text-gray-400">{groupsTab ? groupsTotal.toLocaleString('da-DK') + ' grupper' : total.toLocaleString('da-DK') + ' rækker'}</span>
