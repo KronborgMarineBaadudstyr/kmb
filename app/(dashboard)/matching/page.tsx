@@ -202,14 +202,13 @@ function MemberDetailPanel({
 }
 
 // ── Tab config ──
-type TabKey = 'all' | 'high' | 'medium' | 'variant' | 'single' | 'confirmed' | 'rejected'
+type TabKey = 'all' | 'high' | 'medium' | 'variant' | 'confirmed' | 'rejected'
 
 const TABS: { key: TabKey; label: string; status?: string; method?: string; confidence?: string }[] = [
   { key: 'all',       label: 'Alle afventer',           status: 'pending_review' },
   { key: 'high',      label: 'EAN-match',               status: 'pending_review', confidence: 'high'   },
   { key: 'medium',    label: 'Fuzzy navn',              status: 'pending_review', confidence: 'medium' },
   { key: 'variant',   label: 'Varianter',               status: 'pending_review', method: 'variant'    },
-  { key: 'single',    label: 'Enkelt leverandør',       status: 'pending_review', method: 'single'     },
   { key: 'confirmed', label: 'Bekræftet gruppering',    status: 'confirmed'      },
   { key: 'rejected',  label: 'Afvist',                  status: 'rejected'       },
 ]
@@ -656,7 +655,6 @@ export default function MatchingPage() {
               { label: 'EAN-match (afventer)', value: stats.high,       color: 'text-green-700'  },
               { label: 'Fuzzy (afventer)',     value: stats.medium,     color: 'text-yellow-700' },
               { label: 'Varianter (afventer)', value: stats.variant,    color: 'text-purple-700' },
-              { label: 'Enkelt lev. (afventer)', value: stats.single,   color: 'text-gray-600'   },
               { label: 'Bekræftet gruppering', value: stats.confirmed,  color: 'text-blue-700'   },
               { label: 'Produkt oprettet',     value: stats.created,    color: 'text-emerald-700'},
               { label: 'Afvist',               value: stats.rejected,   color: 'text-gray-400'   },
@@ -677,7 +675,6 @@ export default function MatchingPage() {
               tab.key === 'high'      ? stats.high :
               tab.key === 'medium'    ? stats.medium :
               tab.key === 'variant'   ? stats.variant :
-              tab.key === 'single'    ? stats.single :
               tab.key === 'confirmed' ? stats.confirmed :
               tab.key === 'rejected'  ? stats.rejected :
               null
@@ -696,7 +693,7 @@ export default function MatchingPage() {
                   <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium tabular-nums ${
                     isActive
                       ? 'bg-white/20 text-white'
-                      : tab.key === 'all' || tab.key === 'high' || tab.key === 'medium' || tab.key === 'single'
+                      : tab.key === 'all' || tab.key === 'high' || tab.key === 'medium'
                         ? 'bg-orange-100 text-orange-700'
                         : 'bg-gray-100 text-gray-500'
                   }`}>
