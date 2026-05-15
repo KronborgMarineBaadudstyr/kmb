@@ -36,6 +36,7 @@ type MatchGroup = {
 
 type Stats = {
   total:     number
+  pending:   number
   high:      number
   medium:    number
   variant:   number
@@ -204,13 +205,13 @@ function MemberDetailPanel({
 type TabKey = 'all' | 'high' | 'medium' | 'variant' | 'single' | 'confirmed' | 'rejected'
 
 const TABS: { key: TabKey; label: string; status?: string; method?: string; confidence?: string }[] = [
-  { key: 'all',       label: 'Alle',              status: 'pending_review' },
-  { key: 'high',      label: 'Høj konfidens',     status: 'pending_review', confidence: 'high'   },
-  { key: 'medium',    label: 'Lav konfidens',     status: 'pending_review', confidence: 'medium' },
-  { key: 'variant',   label: 'Varianter',         status: 'pending_review', method: 'variant'    },
-  { key: 'single',    label: 'Enkelt leverandør', status: 'pending_review', method: 'single'     },
-  { key: 'confirmed', label: 'Bekræftet',         status: 'confirmed'      },
-  { key: 'rejected',  label: 'Afvist',            status: 'rejected'       },
+  { key: 'all',       label: 'Alle afventer',           status: 'pending_review' },
+  { key: 'high',      label: 'EAN-match',               status: 'pending_review', confidence: 'high'   },
+  { key: 'medium',    label: 'Fuzzy navn',              status: 'pending_review', confidence: 'medium' },
+  { key: 'variant',   label: 'Varianter',               status: 'pending_review', method: 'variant'    },
+  { key: 'single',    label: 'Enkelt leverandør',       status: 'pending_review', method: 'single'     },
+  { key: 'confirmed', label: 'Bekræftet gruppering',    status: 'confirmed'      },
+  { key: 'rejected',  label: 'Afvist',                  status: 'rejected'       },
 ]
 
 // ── Group Card ──
@@ -334,7 +335,7 @@ function GroupCard({
               onClick={() => setShowMembers(v => !v)}
               className="text-xs text-blue-600 hover:underline mb-2"
             >
-              {showMembers ? '▲ Skjul' : '▼ Vis'} {group.members.length} leverandørlinjer
+              {showMembers ? '▲ Skjul' : '▼ Vis'} {group.members.length} {group.members.length === 1 ? 'leverandørprodukt' : 'leverandørprodukter'}
             </button>
 
             {showMembers && (
@@ -405,7 +406,7 @@ function GroupCard({
                   disabled={loading}
                   className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
                 >
-                  Bekræft produkt gruppering
+                  Bekræft leverandørgruppering
                 </button>
                 <button
                   onClick={handleReject}
@@ -638,7 +639,7 @@ export default function MatchingPage() {
       {/* ── Header ── */}
       <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
         <h2 className="text-xl font-bold text-gray-900 mb-0.5">Leverandør-match</h2>
-        <p className="text-sm text-gray-500 mb-4">Identificér varesammenfald på tværs af leverandører — bekræft eller afvis grupperinger</p>
+        <p className="text-sm text-gray-500 mb-4">Identificér hvilke leverandører der sælger samme produkt — bekræft eller afvis leverandørgrupperinger</p>
 
         {/* Pipeline panel */}
         <PipelinePanel onDone={fetchGroups} />
@@ -647,15 +648,16 @@ export default function MatchingPage() {
         {stats && (
           <div className="flex gap-3 flex-wrap text-sm mb-4">
             {[
-              { label: 'Afventer',           value: stats.total - stats.confirmed - stats.rejected - stats.created, color: 'text-orange-700' },
-              { label: 'Høj konfidens (EAN)', value: stats.high,      color: 'text-green-700' },
-              { label: 'Fuzzy',              value: stats.medium,     color: 'text-yellow-700' },
-              { label: 'Varianter',          value: stats.variant,    color: 'text-purple-700' },
-              { label: 'Enkelt leverandør',  value: stats.single,     color: 'text-gray-600' },
-              { label: 'Bekræftet',          value: stats.confirmed,  color: 'text-blue-700' },
-              { label: 'Produkt oprettet',   value: stats.created,    color: 'text-emerald-700' },
+              { label: 'Afventer gennemgang',  value: stats.pending,    color: 'text-orange-700' },
+              { label: 'EAN-match (afventer)', value: stats.high,       color: 'text-green-700'  },
+              { label: 'Fuzzy (afventer)',     value: stats.medium,     color: 'text-yellow-700' },
+              { label: 'Varianter (afventer)', value: stats.variant,    color: 'text-purple-700' },
+              { label: 'Enkelt lev. (afventer)', value: stats.single,   color: 'text-gray-600'   },
+              { label: 'Bekræftet gruppering', value: stats.confirmed,  color: 'text-blue-700'   },
+              { label: 'Produkt oprettet',     value: stats.created,    color: 'text-emerald-700'},
+              { label: 'Afvist',               value: stats.rejected,   color: 'text-gray-400'   },
             ].map(s => (
-              <div key={s.label} className="bg-gray-50 rounded-lg px-3 py-2 min-w-[100px]">
+              <div key={s.label} className="bg-gray-50 rounded-lg px-3 py-2 min-w-[110px]">
                 <div className={`text-xl font-bold tabular-nums ${s.color}`}>{s.value.toLocaleString('da-DK')}</div>
                 <div className="text-xs text-gray-500">{s.label}</div>
               </div>
@@ -667,7 +669,7 @@ export default function MatchingPage() {
         <div className="flex gap-0 rounded-lg border border-gray-200 overflow-hidden w-fit text-sm">
           {TABS.map(tab => {
             const count = stats ? (
-              tab.key === 'all'       ? stats.total - stats.confirmed - stats.rejected - stats.created :
+              tab.key === 'all'       ? stats.pending :
               tab.key === 'high'      ? stats.high :
               tab.key === 'medium'    ? stats.medium :
               tab.key === 'variant'   ? stats.variant :
@@ -710,7 +712,7 @@ export default function MatchingPage() {
         ) : groups.length === 0 ? (
           <div className="text-center text-gray-400 py-16">
             <div className="text-2xl mb-2">🎯</div>
-            <div className="font-medium text-gray-500 mb-1">Ingen grupper afventer gennemgang</div>
+            <div className="font-medium text-gray-500 mb-1">Ingen leverandørgrupperinger afventer gennemgang</div>
             <div className="text-sm">Kør pipeline ovenfor for at importere og matche leverandørprodukter</div>
           </div>
         ) : (
@@ -730,7 +732,7 @@ export default function MatchingPage() {
       {totalPages > 1 && (
         <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-between shrink-0">
           <p className="text-sm text-gray-500">
-            Side {page} / {totalPages} — {total.toLocaleString('da-DK')} grupper
+            Side {page} / {totalPages} — {total.toLocaleString('da-DK')} leverandørgrupperinger
           </p>
           <div className="flex gap-1">
             <button

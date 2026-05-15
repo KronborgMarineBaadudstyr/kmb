@@ -56,6 +56,7 @@ export async function GET(request: Request) {
   // Fetch stats via individual count queries (avoids 1000-row Supabase default limit)
   const [
     { count: totalCount },
+    { count: pendingCount },
     { count: highCount },
     { count: mediumCount },
     { count: variantCount },
@@ -65,10 +66,11 @@ export async function GET(request: Request) {
     { count: createdCount },
   ] = await Promise.all([
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'high').eq('match_method', 'ean'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'medium'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'variant'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'single'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'pending_review'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'high').eq('match_method', 'ean').eq('status', 'pending_review'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'medium').eq('status', 'pending_review'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'variant').eq('status', 'pending_review'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'single').eq('status', 'pending_review'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'rejected'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'product_created'),
@@ -76,6 +78,7 @@ export async function GET(request: Request) {
 
   const stats = {
     total:     totalCount     ?? 0,
+    pending:   pendingCount   ?? 0,
     high:      highCount      ?? 0,
     medium:    mediumCount    ?? 0,
     variant:   variantCount   ?? 0,
