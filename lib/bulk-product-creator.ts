@@ -59,12 +59,12 @@ const MAX_DIM   = 99_999.999     // NUMERIC(10,3) for weight/dimensions
 
 function safePrice(v: unknown): number | null {
   if (typeof v !== 'number' || !isFinite(v) || v < 0) return null
-  return v > MAX_PRICE ? null : v
+  return v > MAX_PRICE ? MAX_PRICE : v
 }
 
 function safeDim(v: unknown): number | null {
   if (typeof v !== 'number' || !isFinite(v) || v < 0) return null
-  return v > MAX_DIM ? null : v
+  return v > MAX_DIM ? MAX_DIM : v
 }
 
 function safeQty(v: unknown): number {
