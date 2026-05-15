@@ -451,6 +451,7 @@ const PIPELINE_STAGES = [
   { key: 'matching',     label: '2 · Matching',           icon: '🔗' },
   { key: 'auto_confirm', label: '3 · Auto-bekræft',       icon: '✅' },
   { key: 'auto_create',  label: '4 · Opret produkter',    icon: '📦' },
+  { key: 'remap',        label: '5 · Kategorisér',        icon: '🏷️' },
 ]
 
 // ── Pipeline Panel ──
@@ -575,6 +576,7 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
           <span className="bg-green-500/20 border border-green-500/30 rounded px-3 py-1 font-semibold">
             📦 {summary.products_created ?? 0} produkter oprettet
           </span>
+          <span className="bg-white/10 rounded px-3 py-1">🏷️ {summary.products_remapped ?? 0} kategoriseret</span>
           {(summary.remaining ?? 0) > 0 && (
             <span className="bg-orange-500/20 border border-orange-400/30 rounded px-3 py-1 text-orange-200">
               ⏳ {summary.remaining} tilbage — kør pipeline igen

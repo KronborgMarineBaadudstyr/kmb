@@ -1,5 +1,9 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { stripPrefix, mapToStandard, normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
+import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
+
+// Legacy stubs — these functions were removed when categories were restructured
+function stripPrefix(cat: string): string { return cat.replace(/^[A-Za-zÆØÅæøå]+\s*[–\-:]\s*/, '').trim() }
+function mapToStandard(cat: string): string | null { const n = normalizeCategory(cat); return n !== cat ? n : null }
 import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'

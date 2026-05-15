@@ -1,7 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { runMatchingEngine } from '@/lib/matching-engine'
 import { bulkCreateProductsFromGroups } from '@/lib/bulk-product-creator'
-import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
+import { normalizeCategory, buildDedupeMap, assignProductCategory } from '@/lib/standard-categories'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -226,6 +226,62 @@ export async function GET() {
         message: remaining > 0
           ? `${totalCreated} produkter oprettet — ${remaining} tilbage (kør pipeline igen)`
           : `${totalCreated} produkter oprettet — alle er nu behandlet ✓`,
+      })
+
+      // ── STEP 5: Re-map all existing products to new category structure ──
+      send({ stage: 'remap', status: 'running', message: 'Kategoriserer alle produkter…' })
+
+      let remapUpdated   = 0
+      let remapProcessed = 0
+      const REMAP_PAGE   = 500
+      const startRemap   = Date.now()
+      const MAX_REMAP_MS = 180_000
+
+      for (let offset = 0; ; offset += REMAP_PAGE) {
+        if (Date.now() - startRemap > MAX_REMAP_MS) break
+
+        const { data: batch } = await supabase
+          .from('products')
+          .select('id, name')
+          .range(offset, offset + REMAP_PAGE - 1)
+
+        if (!batch || batch.length === 0) break
+        remapProcessed += batch.length
+
+        // Group by (categories JSON, boat_type JSON) to minimise DB calls
+        const groups = new Map<string, string[]>()
+        for (const p of batch as { id: string; name: string }[]) {
+          const { category, subcategory, boatType } = assignProductCategory(p.name)
+          const cats = [category, subcategory].filter(Boolean) as string[]
+          const key  = JSON.stringify({ cats, boatType })
+          if (!groups.has(key)) groups.set(key, [])
+          groups.get(key)!.push(p.id)
+        }
+
+        await Promise.all(
+          Array.from(groups.entries()).map(([key, ids]) => {
+            const { cats, boatType } = JSON.parse(key) as { cats: string[]; boatType: string[] }
+            return supabase.from('products')
+              .update({ categories: cats, boat_type: boatType })
+              .in('id', ids)
+          })
+        )
+        remapUpdated += batch.length
+
+        if (batch.length < REMAP_PAGE) break
+
+        send({
+          stage: 'remap', status: 'running',
+          processed: remapProcessed,
+          message: `${remapProcessed} produkter kategoriseret…`,
+        })
+      }
+
+      summary.products_remapped = remapUpdated
+      send({
+        stage: 'remap', status: 'done',
+        processed: remapUpdated,
+        message: `${remapUpdated} produkter kategoriseret`,
       })
 
       // ── DONE ────────────────────────────────────────────────────

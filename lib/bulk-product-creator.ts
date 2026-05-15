@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { assignProductCategory } from '@/lib/standard-categories'
 
 type RawData = Record<string, unknown>
 
@@ -50,6 +51,7 @@ type PreparedProduct = {
     width:             number | null
     height:            number | null
     categories:        string[]
+    boat_type:         string[]
   }
 }
 
@@ -137,10 +139,17 @@ export async function bulkCreateProductsFromGroups(
     const primary = [...members].sort((a, b) => completenessScore(b.raw_data) - completenessScore(a.raw_data))[0]
     const raw     = primary.raw_data
 
-    const matchedType = findProductType(name, productTypes)
-    const categories: string[] = matchedType
-      ? [matchedType.our_category, matchedType.our_subcategory].filter((c): c is string => !!c)
-      : (Array.isArray(raw.categories) ? (raw.categories as string[]) : [])
+    // Use new category assignment (product name → standard category + subcategory + boat_type)
+    const assigned = assignProductCategory(name)
+
+    // Fallback: product type keyword match for category if assignProductCategory found nothing
+    const matchedType = assigned.category ? null : findProductType(name, productTypes)
+    const categories: string[] = assigned.category
+      ? [assigned.category, assigned.subcategory].filter((c): c is string => !!c)
+      : matchedType
+        ? [matchedType.our_category, matchedType.our_subcategory].filter((c): c is string => !!c)
+        : (Array.isArray(raw.categories) ? (raw.categories as string[]) : [])
+    const boatType: string[] = assigned.boatType
 
     prepared.push({
       groupId: group.id,
@@ -158,6 +167,7 @@ export async function bulkCreateProductsFromGroups(
         width:             typeof raw.width  === 'number' && isFinite(raw.width)  ? raw.width  : null,
         height:            typeof raw.height === 'number' && isFinite(raw.height) ? raw.height : null,
         categories,
+        boat_type: boatType,
       },
     })
   }
