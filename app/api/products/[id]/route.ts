@@ -55,6 +55,7 @@ const ALLOWED_FIELDS = [
   'tax_class', 'ean', 'manufacturer_sku', 'brand', 'slug', 'weight',
   'length', 'width', 'height', 'categories', 'tags', 'attributes',
   'specifications', 'video_url', 'meta_title', 'meta_description', 'status',
+  'parent_product_id', 'variant_attributes', 'boat_type',
 ]
 
 export async function PATCH(

@@ -60,6 +60,9 @@ export async function GET(request: Request) {
       weight,
       unit,
       unit_size,
+      parent_product_id,
+      variant_attributes,
+      boat_type,
       created_at,
       updated_at,
       product_images ( url, alt_text, is_primary, position )
@@ -78,13 +81,30 @@ export async function GET(request: Request) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  const products = (data ?? []).map(p => {
+  const productList = (data ?? []) as Array<Record<string, unknown> & { id: string }>
+
+  // Fetch variant counts for all products on this page in one query
+  const pageIds = productList.map(p => p.id)
+  const { data: variantRows } = pageIds.length
+    ? await supabase
+        .from('products')
+        .select('parent_product_id')
+        .in('parent_product_id', pageIds)
+    : { data: [] }
+
+  const variantCounts = new Map<string, number>()
+  for (const row of (variantRows ?? []) as { parent_product_id: string }[]) {
+    variantCounts.set(row.parent_product_id, (variantCounts.get(row.parent_product_id) ?? 0) + 1)
+  }
+
+  const products = productList.map(p => {
     const imgs    = (p.product_images as { url: string; is_primary: boolean; position: number }[]) ?? []
     const primary = imgs.find(i => i.is_primary) ?? imgs.sort((a, b) => a.position - b.position)[0]
     return {
       ...p,
       primary_image_url: primary?.url ?? null,
       image_count:       imgs.length,
+      variant_count:     variantCounts.get(p.id) ?? 0,
       product_images:    undefined,
     }
   })

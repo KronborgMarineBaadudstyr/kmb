@@ -102,6 +102,25 @@ export default function StagingPage() {
   const [groupEditNames, setGroupEditNames] = useState<Record<string, string>>({})
   const [groupActionMsg, setGroupActionMsg] = useState<Record<string, string>>({})
 
+  // Variant assignment per group
+  const [groupIsVariant,    setGroupIsVariant]    = useState<Record<string, boolean>>({})
+  const [groupVariantSearch,setGroupVariantSearch]= useState<Record<string, string>>({})
+  const [groupVariantResults,setGroupVariantResults] = useState<Record<string, {id:string;name:string;internal_sku:string}[]>>({})
+  const [groupVariantParent,setGroupVariantParent]= useState<Record<string, {id:string;name:string;internal_sku:string} | null>>({})
+  const [groupVariantAttrs, setGroupVariantAttrs] = useState<Record<string, {key:string;val:string}[]>>({})
+  const variantSearchTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+  function onVariantSearch(groupId: string, val: string) {
+    setGroupVariantSearch(m => ({ ...m, [groupId]: val }))
+    if (variantSearchTimers.current[groupId]) clearTimeout(variantSearchTimers.current[groupId])
+    if (!val.trim()) { setGroupVariantResults(m => ({ ...m, [groupId]: [] })); return }
+    variantSearchTimers.current[groupId] = setTimeout(async () => {
+      const res  = await fetch(`/api/products?search=${encodeURIComponent(val)}&per_page=6`)
+      const json = await res.json()
+      setGroupVariantResults(m => ({ ...m, [groupId]: json.data ?? [] }))
+    }, 300)
+  }
+
   // Search input til fuzzy-søgning i match-panel
   const [matchSearch, setMatchSearch] = useState('')
   const [matchResults, setMatchResults] = useState<Suggestion[]>([])
@@ -149,6 +168,11 @@ export default function StagingPage() {
   async function createProductFromGroup(groupId: string) {
     const name = groupEditNames[groupId] ?? groups.find(g => g.id === groupId)?.suggested_name ?? ''
     if (!name.trim()) { alert('Vælg et produktnavn'); return }
+
+    const isVariant = groupIsVariant[groupId]
+    const parent    = groupVariantParent[groupId]
+    if (isVariant && !parent) { alert('Vælg forælderprodukt for varianten'); return }
+
     const res = await fetch(`/api/matching/${groupId}/create-product`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -157,10 +181,24 @@ export default function StagingPage() {
     const json = await res.json()
     if (json.error) {
       setGroupActionMsg(m => ({ ...m, [groupId]: '✗ Fejl: ' + json.error }))
+      return
+    }
+
+    // Link as variant if requested
+    if (isVariant && parent && json.product_id) {
+      const attrs = Object.fromEntries(
+        (groupVariantAttrs[groupId] ?? []).filter(a => a.key.trim()).map(a => [a.key.trim(), a.val.trim()])
+      )
+      await fetch(`/api/products/${parent.id}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variant_product_id: json.product_id, variant_attributes: attrs }),
+      })
+      setGroupActionMsg(m => ({ ...m, [groupId]: `✓ Produkt oprettet som variant af "${parent.name}"` }))
     } else {
       setGroupActionMsg(m => ({ ...m, [groupId]: '✓ Produkt oprettet!' }))
-      setTimeout(() => fetchGroups(), 1000)
     }
+    setTimeout(() => fetchGroups(), 1000)
   }
 
   async function rejectGroup(groupId: string) {
@@ -388,6 +426,92 @@ export default function StagingPage() {
                             )
                           })}
                         </div>
+                        {/* Variant toggle */}
+                        <div className="mb-3">
+                          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={groupIsVariant[g.id] ?? false}
+                              onChange={e => setGroupIsVariant(m => ({ ...m, [g.id]: e.target.checked }))}
+                              className="accent-purple-600"
+                            />
+                            Dette produkt er en variant af et eksisterende produkt
+                          </label>
+
+                          {groupIsVariant[g.id] && (
+                            <div className="mt-2 space-y-2 pl-5">
+                              {/* Parent search */}
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">Forælderprodukt</label>
+                                {groupVariantParent[g.id] ? (
+                                  <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5 text-xs">
+                                    <span className="font-medium text-purple-800">{groupVariantParent[g.id]!.name}</span>
+                                    <span className="font-mono text-purple-400">{groupVariantParent[g.id]!.internal_sku}</span>
+                                    <button onClick={() => setGroupVariantParent(m => ({ ...m, [g.id]: null }))} className="ml-auto text-purple-400 hover:text-purple-600">×</button>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <input
+                                      type="search"
+                                      placeholder="Søg forælderprodukt..."
+                                      value={groupVariantSearch[g.id] ?? ''}
+                                      onChange={e => onVariantSearch(g.id, e.target.value)}
+                                      className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400"
+                                    />
+                                    {(groupVariantResults[g.id] ?? []).length > 0 && (
+                                      <div className="mt-1 border border-gray-200 rounded-lg overflow-hidden text-xs">
+                                        {(groupVariantResults[g.id] ?? []).map(r => (
+                                          <button
+                                            key={r.id}
+                                            onClick={() => {
+                                              setGroupVariantParent(m => ({ ...m, [g.id]: r }))
+                                              setGroupVariantSearch(m => ({ ...m, [g.id]: '' }))
+                                              setGroupVariantResults(m => ({ ...m, [g.id]: [] }))
+                                            }}
+                                            className="w-full text-left px-3 py-1.5 hover:bg-purple-50 border-b border-gray-100 last:border-0"
+                                          >
+                                            <span className="font-medium text-gray-800">{r.name}</span>
+                                            <span className="font-mono text-gray-400 ml-2">{r.internal_sku}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Variant attributes */}
+                              <div>
+                                <label className="block text-xs text-gray-500 mb-1">Variantattributter (f.eks. farve = rød)</label>
+                                <div className="space-y-1">
+                                  {(groupVariantAttrs[g.id] ?? [{ key: '', val: '' }]).map((a, i) => (
+                                    <div key={i} className="flex gap-1 items-center">
+                                      <input
+                                        placeholder="farve"
+                                        value={a.key}
+                                        onChange={e => setGroupVariantAttrs(m => ({ ...m, [g.id]: (m[g.id] ?? [{ key: '', val: '' }]).map((x, j) => j === i ? { ...x, key: e.target.value } : x) }))}
+                                        className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-300"
+                                      />
+                                      <span className="text-gray-300">=</span>
+                                      <input
+                                        placeholder="rød"
+                                        value={a.val}
+                                        onChange={e => setGroupVariantAttrs(m => ({ ...m, [g.id]: (m[g.id] ?? [{ key: '', val: '' }]).map((x, j) => j === i ? { ...x, val: e.target.value } : x) }))}
+                                        className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-300"
+                                      />
+                                      <button onClick={() => setGroupVariantAttrs(m => ({ ...m, [g.id]: (m[g.id] ?? []).filter((_, j) => j !== i) }))} className="text-gray-300 hover:text-red-400">×</button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => setGroupVariantAttrs(m => ({ ...m, [g.id]: [...(m[g.id] ?? [{ key: '', val: '' }]), { key: '', val: '' }] }))}
+                                    className="text-xs text-purple-500 hover:underline"
+                                  >+ Tilføj attribut</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
                         {actionMsg && (
                           <div className={`mb-2 text-xs px-2 py-1 rounded ${actionMsg.startsWith('✗') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
                             {actionMsg}

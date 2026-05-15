@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, forwardRef } from 'react'
+void forwardRef // suppress unused import
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -21,10 +22,208 @@ type Product = {
   ean: string | null
   manufacturer_sku: string | null
   weight: number | null
+  parent_product_id: string | null
+  variant_attributes: Record<string, string> | null
+  variant_count: number
   primary_image_url: string | null
   image_count: number
   created_at: string
   updated_at: string
+}
+
+// ── Variant Merge Panel ────────────────────────────────────────────────────────
+function VariantMergePanel({
+  product,
+  onClose,
+  onDone,
+}: {
+  product: Product
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [search,        setSearch]        = useState('')
+  const [results,       setResults]       = useState<Product[]>([])
+  const [searching,     setSearching]     = useState(false)
+  const [selectedOther, setSelectedOther] = useState<Product | null>(null)
+  // who is parent?  'this' = current product is parent, 'other' = other is parent
+  const [parentChoice,  setParentChoice]  = useState<'this' | 'other'>('this')
+  const [attrs,         setAttrs]         = useState<{ key: string; val: string }[]>([{ key: '', val: '' }])
+  const [saving,        setSaving]        = useState(false)
+  const [msg,           setMsg]           = useState<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  function onSearchChange(v: string) {
+    setSearch(v)
+    if (timer.current) clearTimeout(timer.current)
+    if (!v.trim()) { setResults([]); return }
+    timer.current = setTimeout(async () => {
+      setSearching(true)
+      const res  = await fetch(`/api/products?search=${encodeURIComponent(v)}&per_page=8`)
+      const json = await res.json()
+      setResults((json.data ?? []).filter((p: Product) => p.id !== product.id))
+      setSearching(false)
+    }, 300)
+  }
+
+  async function save() {
+    if (!selectedOther) return
+    setSaving(true)
+    setMsg(null)
+    const parentId  = parentChoice === 'this' ? product.id : selectedOther.id
+    const variantId = parentChoice === 'this' ? selectedOther.id : product.id
+
+    // Set variant_attributes on the variant product
+    const variantAttrs = Object.fromEntries(
+      attrs.filter(a => a.key.trim()).map(a => [a.key.trim(), a.val.trim()])
+    )
+
+    const res = await fetch(`/api/products/${parentId}/variants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variant_product_id: variantId, variant_attributes: variantAttrs }),
+    })
+    const json = await res.json()
+    if (json.error) { setMsg('Fejl: ' + json.error); setSaving(false); return }
+    setMsg('✓ Varianter sammenkædet!')
+    setTimeout(() => { onDone(); onClose() }, 800)
+    setSaving(false)
+  }
+
+  const parentProduct  = parentChoice === 'this' ? product : selectedOther
+  const variantProduct = parentChoice === 'this' ? selectedOther : product
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-[480px] max-w-full bg-white shadow-2xl z-50 flex flex-col">
+        <div className="px-5 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="font-semibold text-gray-900">Sammenkæd varianter</h3>
+            <p className="text-xs text-gray-400 mt-0.5">Angiv at to produkter er varianter af hinanden</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+
+          {/* Current product */}
+          <div className="bg-gray-50 rounded-lg px-4 py-3 text-sm">
+            <div className="text-xs text-gray-400 mb-1">Dette produkt</div>
+            <div className="font-medium text-gray-800">{product.name}</div>
+            <div className="font-mono text-xs text-gray-500">{product.internal_sku}</div>
+          </div>
+
+          {/* Search for other product */}
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Søg det andet produkt</label>
+            <input
+              type="search"
+              placeholder="Søg navn eller varenr..."
+              value={search}
+              onChange={e => onSearchChange(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {searching && <div className="text-xs text-gray-400 mt-1">Søger...</div>}
+            {results.length > 0 && !selectedOther && (
+              <div className="mt-1 border border-gray-200 rounded-lg overflow-hidden">
+                {results.map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => { setSelectedOther(r); setSearch(r.name); setResults([]) }}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 border-b border-gray-100 last:border-0"
+                  >
+                    <div className="font-medium text-gray-800">{r.name}</div>
+                    <div className="font-mono text-xs text-gray-400">{r.internal_sku}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selectedOther && (
+              <div className="mt-2 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-blue-800">{selectedOther.name}</div>
+                  <div className="font-mono text-xs text-blue-500">{selectedOther.internal_sku}</div>
+                </div>
+                <button onClick={() => { setSelectedOther(null); setSearch('') }} className="text-blue-400 hover:text-blue-600 text-lg">×</button>
+              </div>
+            )}
+          </div>
+
+          {/* Parent choice */}
+          {selectedOther && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-2">Hvem er forælderen (det overordnede produkt)?</label>
+              <div className="space-y-2">
+                {([['this', product], ['other', selectedOther]] as const).map(([val, p]) => (
+                  <label key={val} className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${parentChoice === val ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+                    <input type="radio" checked={parentChoice === val} onChange={() => setParentChoice(val)} className="mt-0.5 accent-blue-600" />
+                    <div>
+                      <div className="text-sm font-medium text-gray-800">{p.name}</div>
+                      <div className="text-xs text-gray-400">{p.internal_sku}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-2">
+                Forælder: <span className="font-medium text-gray-600">{parentProduct?.name}</span> →
+                Variant: <span className="font-medium text-gray-600">{variantProduct?.name}</span>
+              </p>
+            </div>
+          )}
+
+          {/* Variant attributes for the variant product */}
+          {selectedOther && (
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Variantattributter på <span className="text-gray-800">{variantProduct?.name}</span>
+              </label>
+              <p className="text-xs text-gray-400 mb-2">F.eks. farve = rød, størrelse = 40cm</p>
+              <div className="space-y-2">
+                {attrs.map((a, i) => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <input
+                      placeholder="Attribut (farve)"
+                      value={a.key}
+                      onChange={e => setAttrs(prev => prev.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                      className="flex-1 px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                    <span className="text-gray-400">=</span>
+                    <input
+                      placeholder="Værdi (rød)"
+                      value={a.val}
+                      onChange={e => setAttrs(prev => prev.map((x, j) => j === i ? { ...x, val: e.target.value } : x))}
+                      className="flex-1 px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                    />
+                    <button onClick={() => setAttrs(prev => prev.filter((_, j) => j !== i))} className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
+                  </div>
+                ))}
+                <button onClick={() => setAttrs(prev => [...prev, { key: '', val: '' }])} className="text-xs text-blue-500 hover:underline">+ Tilføj attribut</button>
+              </div>
+            </div>
+          )}
+
+          {msg && (
+            <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+              {msg}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-200 flex gap-2 shrink-0">
+          <button
+            onClick={save}
+            disabled={!selectedOther || saving}
+            className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+          >
+            {saving ? 'Gemmer...' : 'Sammenkæd som varianter'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+            Annuller
+          </button>
+        </div>
+      </div>
+    </>
+  )
 }
 
 type ApiResponse = {
@@ -96,8 +295,9 @@ export default function ProductsPage() {
   const [supplierId,  setSupplierId]  = useState('')
   const [suppliers,   setSuppliers]   = useState<{ id: string; name: string }[]>([])
   const [categories,  setCategories]  = useState<string[]>([])
-  const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(loadVisibleCols)
-  const [colMenuOpen, setColMenuOpen] = useState(false)
+  const [visibleCols,  setVisibleCols]  = useState<Set<ColKey>>(loadVisibleCols)
+  const [colMenuOpen,  setColMenuOpen]  = useState(false)
+  const [mergeProduct, setMergeProduct] = useState<Product | null>(null)
   const colMenuRef = useRef<HTMLDivElement>(null)
 
   // Close column menu on outside click
@@ -187,9 +387,21 @@ export default function ProductsPage() {
       case 'name':
         return (
           <div>
-            <Link href={`/products/${p.id}`} className="font-medium text-gray-900 hover:text-blue-600 line-clamp-2 leading-tight">
-              {p.name}
-            </Link>
+            <div className="flex items-start gap-2">
+              <Link href={`/products/${p.id}`} className="font-medium text-gray-900 hover:text-blue-600 line-clamp-2 leading-tight">
+                {p.name}
+              </Link>
+              {p.variant_count > 0 && (
+                <span className="shrink-0 text-xs px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
+                  🔀 {p.variant_count}
+                </span>
+              )}
+              {p.parent_product_id && (
+                <span className="shrink-0 text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-500">
+                  variant
+                </span>
+              )}
+            </div>
             {p.brand && <span className="text-xs text-gray-400 mt-0.5 block">{p.brand}</span>}
           </div>
         )
@@ -288,6 +500,13 @@ export default function ProductsPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {mergeProduct && (
+        <VariantMergePanel
+          product={mergeProduct}
+          onClose={() => setMergeProduct(null)}
+          onDone={fetchProducts}
+        />
+      )}
       {/* Topbar */}
       <div className="border-b border-gray-200 bg-white px-8 py-4 flex items-center justify-between shrink-0">
         <div>
@@ -444,7 +663,16 @@ export default function ProductsPage() {
                   </td>
                 ))}
                 <td className="px-4 py-2">
-                  <Link href={`/products/${p.id}`} className="text-gray-400 hover:text-blue-500 text-base">→</Link>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setMergeProduct(p)}
+                      title="Sammenkæd som varianter"
+                      className="text-gray-300 hover:text-purple-500 transition-colors text-sm"
+                    >
+                      🔀
+                    </button>
+                    <Link href={`/products/${p.id}`} className="text-gray-400 hover:text-blue-500 text-base">→</Link>
+                  </div>
                 </td>
               </tr>
             ))}
