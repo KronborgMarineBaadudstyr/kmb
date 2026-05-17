@@ -1150,9 +1150,13 @@ export default function StagingPage() {
                   </div>
                 </div>
 
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
                   Match til eksisterende produkt i kataloget
                 </h4>
+                <div className="mb-3 text-xs text-gray-500 space-y-0.5">
+                  <p><span className="font-medium text-blue-700">Match</span> — brug kun hvis det er <span className="font-medium">præcis samme produkt</span> (samme størrelse, type, model). Leverandørlinket tilføjes til det eksisterende produkt.</p>
+                  <p><span className="font-medium text-purple-700">🔀 Variantfamilie</span> — brug hvis de er varianter af hinanden (f.eks. forskellig størrelse). Opretter et nyt overprodukt og sætter begge som varianter.</p>
+                </div>
 
                 {sugLoading && <div className="text-sm text-gray-400 mb-3">Søger efter match-forslag...</div>}
 
@@ -1231,6 +1235,7 @@ export default function StagingPage() {
                               <button
                                 onClick={() => doAction('match', s.id)}
                                 disabled={actionLoading}
+                                title="Samme produkt, samme størrelse/type — tilføj dette leverandørlink til det eksisterende produkt"
                                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
                               >
                                 Match
