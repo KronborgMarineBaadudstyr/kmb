@@ -133,10 +133,22 @@ function LinkVariantsPanel({
   const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(() => initVariantRows(defaultName))
   const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
 
-  // Når overprodukt-navn ændres → genberegn hints
+  // Når overprodukt-navn ændres → opdater kun hint-værdier på rækker der ikke er redigeret endnu
   function onParentNameChange(val: string) {
     setParentName(val)
-    setVariantRows(initVariantRows(val))
+    setVariantRows(prev => prev.map((vr, idx) => {
+      const r = rows[idx]
+      const supplierName = typeof r?.raw_data?.supplier_product_name === 'string'
+        ? r.raw_data.supplier_product_name : r?.normalized_name ?? ''
+      const hint = extractSizeHint(supplierName, val)
+      // Kun overskriv hvis værdien er tom eller stadig matcher det gamle auto-hint
+      const oldHint = extractSizeHint(supplierName, parentName)
+      const updated = vr.attrs.map(a => {
+        const valIsAutoHint = a.val === oldHint
+        return valIsAutoHint ? { ...a, val: hint } : a
+      })
+      return { ...vr, attrs: updated }
+    }))
   }
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
