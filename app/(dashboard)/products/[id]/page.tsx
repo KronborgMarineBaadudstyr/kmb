@@ -934,8 +934,8 @@ export default function ProductDetailPage() {
               </Section>
             )}
 
-            {/* Mål & fragt */}
-            <Section title="Mål & fragt">
+            {/* Pakkedimensioner */}
+            <Section title="Pakkedimensioner">
               <dl>
                 <InlineField label="Vægt (kg)"   value={product.weight}
                   displayValue={product.weight != null ? `${product.weight} kg` : null}
