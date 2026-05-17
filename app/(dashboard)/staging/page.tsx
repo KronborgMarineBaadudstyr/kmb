@@ -1248,6 +1248,7 @@ export default function StagingPage() {
                     <button
                       onClick={() => doAction('reject')}
                       disabled={actionLoading}
+                      title="Afvis dette produkt — duplikat, udgået vare eller ikke relevant. Fjernes fra listen og importeres ikke igen."
                       className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                     >
                       Afvis
@@ -1262,16 +1263,6 @@ export default function StagingPage() {
                     className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                   >
                     Marker som set
-                  </button>
-                )}
-                {selected.status === 'pending_review' && (
-                  <button
-                    onClick={() => doAction('reject')}
-                    disabled={actionLoading}
-                    title="Afvis dette produkt — det er f.eks. et duplikat, udgået vare eller ikke relevant for sortimentet. Produktet fjernes fra listen og importeres ikke igen."
-                    className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
-                  >
-                    Afvis
                   </button>
                 )}
                 {(selected.status === 'matched' || selected.status === 'new_product' || selected.status === 'rejected') && (
