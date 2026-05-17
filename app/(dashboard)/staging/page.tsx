@@ -131,6 +131,7 @@ function LinkVariantsPanel({
     })
 
   const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(() => initVariantRows(defaultName))
+  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
 
   // Når overprodukt-navn ændres → genberegn hints
   function onParentNameChange(val: string) {
@@ -212,35 +213,81 @@ function LinkVariantsPanel({
             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Hvad adskiller hver variant?</label>
             <p className="text-xs text-gray-400 mb-3">F.eks. størrelse = 3mm, pakke = 2 stk. Lad felterne stå tomme hvis du ikke ved det endnu.</p>
             <div className="space-y-3">
-              {variantRows.map((vr, i) => (
-                <div key={vr.stagingId} className="border border-gray-200 rounded-lg p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600">{vr.sku}</span>
-                    <span className="text-xs text-gray-500 truncate">{vr.name}</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {vr.attrs.map((a, j) => (
-                      <div key={j} className="flex gap-1.5 items-center">
-                        <input
-                          placeholder="størrelse"
-                          value={a.key}
-                          onChange={e => setAttr(i, j, 'key', e.target.value)}
-                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <span className="text-gray-300 text-xs">=</span>
-                        <input
-                          placeholder="3mm"
-                          value={a.val}
-                          onChange={e => setAttr(i, j, 'val', e.target.value)}
-                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-                        />
-                        <button onClick={() => removeAttr(i, j)} className="text-gray-300 hover:text-red-400 text-sm">×</button>
+              {variantRows.map((vr, i) => {
+                const row      = rows[i]
+                const rd       = row?.raw_data ?? {}
+                const isOpen   = expandedIdx === i
+                const supName  = typeof rd.supplier_product_name === 'string' ? rd.supplier_product_name : null
+                const desc     = typeof rd.short_description === 'string' ? rd.short_description
+                               : typeof rd.description      === 'string' ? rd.description : null
+                const price    = typeof rd.purchase_price === 'number' ? rd.purchase_price : null
+                const vejl     = typeof rd.recommended_sales_price === 'number' ? rd.recommended_sales_price : null
+                const qty      = Number(rd.supplier_stock_quantity ?? 0)
+                const images   = Array.isArray(rd.supplier_images) ? rd.supplier_images as Array<{url:string}> : []
+                const imgUrl   = images[0]?.url ?? null
+
+                return (
+                  <div key={vr.stagingId} className="border border-gray-200 rounded-lg overflow-hidden">
+                    {/* Kort-header: altid synlig */}
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+                      {imgUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={imgUrl} alt="" className="w-8 h-8 object-contain rounded border border-gray-200 bg-white shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-600 shrink-0">{vr.sku}</span>
+                          <span className="text-xs text-gray-700 truncate font-medium">{supName ?? vr.name}</span>
+                        </div>
+                        {(price != null || qty > 0) && (
+                          <div className="flex gap-3 mt-0.5 text-xs text-gray-400">
+                            {price != null && <span>Indkøb: <span className="text-gray-600">{price.toLocaleString('da-DK')} kr</span></span>}
+                            {vejl  != null && <span>Vejl: <span className="text-gray-600">{vejl.toLocaleString('da-DK')} kr</span></span>}
+                            {qty > 0 && <span className="text-green-600">Lager: {qty}</span>}
+                          </div>
+                        )}
                       </div>
-                    ))}
-                    <button onClick={() => addAttr(i)} className="text-xs text-blue-500 hover:underline">+ Attribut</button>
+                      <button
+                        onClick={() => setExpandedIdx(isOpen ? null : i)}
+                        className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-1"
+                        title={isOpen ? 'Skjul detaljer' : 'Vis detaljer'}
+                      >
+                        {isOpen ? '▲' : '▼'}
+                      </button>
+                    </div>
+
+                    {/* Fold-ud: beskrivelse */}
+                    {isOpen && desc && (
+                      <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-100 bg-white leading-relaxed line-clamp-4">
+                        {desc}
+                      </div>
+                    )}
+
+                    {/* Attribut-felter */}
+                    <div className="px-3 py-2.5 space-y-1.5 border-t border-gray-100">
+                      {vr.attrs.map((a, j) => (
+                        <div key={j} className="flex gap-1.5 items-center">
+                          <input
+                            placeholder="størrelse"
+                            value={a.key}
+                            onChange={e => setAttr(i, j, 'key', e.target.value)}
+                            className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                          <span className="text-gray-300 text-xs">=</span>
+                          <input
+                            placeholder="3mm"
+                            value={a.val}
+                            onChange={e => setAttr(i, j, 'val', e.target.value)}
+                            className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                          <button onClick={() => removeAttr(i, j)} className="text-gray-300 hover:text-red-400 text-sm">×</button>
+                        </div>
+                      ))}
+                      <button onClick={() => addAttr(i)} className="text-xs text-blue-500 hover:underline">+ Attribut</button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
 
