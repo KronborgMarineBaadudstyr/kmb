@@ -74,6 +74,154 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   rejected:       { label: 'Afvist',        color: 'bg-gray-100 text-gray-500 border-gray-200'      },
 }
 
+// ── Sammenkæd-panel ───────────────────────────────────────────────────────────
+type LinkVariantsRow = { stagingId: string; name: string; sku: string; attrs: { key: string; val: string }[] }
+
+function LinkVariantsPanel({
+  rows,
+  onClose,
+  onDone,
+}: {
+  rows: StagingRow[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const defaultName = rows[0]?.normalized_name ?? ''
+  const [parentName, setParentName] = useState(defaultName)
+  const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(
+    rows.map(r => ({ stagingId: r.id, name: r.normalized_name, sku: r.normalized_sku, attrs: [{ key: '', val: '' }] }))
+  )
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  function setAttr(i: number, j: number, field: 'key' | 'val', value: string) {
+    setVariantRows(prev => prev.map((r, ri) => ri !== i ? r : {
+      ...r,
+      attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, [field]: value }),
+    }))
+  }
+  function addAttr(i: number) {
+    setVariantRows(prev => prev.map((r, ri) => ri !== i ? r : { ...r, attrs: [...r.attrs, { key: '', val: '' }] }))
+  }
+  function removeAttr(i: number, j: number) {
+    setVariantRows(prev => prev.map((r, ri) => ri !== i ? r : { ...r, attrs: r.attrs.filter((_, ai) => ai !== j) }))
+  }
+
+  async function save() {
+    if (!parentName.trim()) { setMsg('Angiv et overprodukt-navn'); return }
+    setSaving(true)
+    setMsg(null)
+    const res = await fetch('/api/staging/link-variants', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parent_name: parentName.trim(),
+        variants: variantRows.map(r => ({
+          staging_id: r.stagingId,
+          variant_attrs: Object.fromEntries(
+            r.attrs.filter(a => a.key.trim()).map(a => [a.key.trim(), a.val.trim()])
+          ),
+        })),
+      }),
+    })
+    const json = await res.json()
+    if (json.error) {
+      setMsg('Fejl: ' + json.error)
+      setSaving(false)
+      return
+    }
+    setMsg(`✓ Oprettet "${json.parent_name}" med ${json.variants_created} varianter`)
+    setTimeout(() => { onDone(); onClose() }, 1200)
+  }
+
+  return (
+    <>
+      {/* Overlay */}
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      {/* Panel */}
+      <div className="fixed right-0 top-0 h-full w-[520px] bg-white shadow-xl z-50 flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="font-semibold text-gray-900">Sammenkæd som varianter</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{rows.length} leverandørprodukter → 1 overprodukt + {rows.length} varianter</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5 space-y-6">
+          {/* Overprodukt navn */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Overprodukt-navn</label>
+            <input
+              value={parentName}
+              onChange={e => setParentName(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="F.eks. Wirelås rustfri Duplex"
+            />
+            <p className="text-xs text-gray-400 mt-1">Dette er det fælles overprodukt. Varianterne arver dette navn.</p>
+          </div>
+
+          {/* Per-variant attributter */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Hvad adskiller hver variant?</label>
+            <p className="text-xs text-gray-400 mb-3">F.eks. størrelse = 3mm, pakke = 2 stk. Lad felterne stå tomme hvis du ikke ved det endnu.</p>
+            <div className="space-y-3">
+              {variantRows.map((vr, i) => (
+                <div key={vr.stagingId} className="border border-gray-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded text-gray-600">{vr.sku}</span>
+                    <span className="text-xs text-gray-500 truncate">{vr.name}</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {vr.attrs.map((a, j) => (
+                      <div key={j} className="flex gap-1.5 items-center">
+                        <input
+                          placeholder="størrelse"
+                          value={a.key}
+                          onChange={e => setAttr(i, j, 'key', e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <span className="text-gray-300 text-xs">=</span>
+                        <input
+                          placeholder="3mm"
+                          value={a.val}
+                          onChange={e => setAttr(i, j, 'val', e.target.value)}
+                          className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                        />
+                        <button onClick={() => removeAttr(i, j)} className="text-gray-300 hover:text-red-400 text-sm">×</button>
+                      </div>
+                    ))}
+                    <button onClick={() => addAttr(i)} className="text-xs text-blue-500 hover:underline">+ Attribut</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {msg && (
+            <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+              {msg}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex gap-2 shrink-0">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="flex-1 px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
+          >
+            {saving ? 'Opretter...' : `Opret overprodukt + ${rows.length} varianter`}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+            Annuller
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 export default function StagingPage() {
   const [rows,        setRows]        = useState<StagingRow[]>([])
   const [total,       setTotal]       = useState(0)
@@ -85,6 +233,8 @@ export default function StagingPage() {
   const [search,      setSearch]      = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [suppliers,   setSuppliers]   = useState<Supplier[]>([])
+  const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set())
+  const [linkPanel,   setLinkPanel]   = useState(false)
 
   // Panel state
   const [selected,    setSelected]    = useState<StagingRow | null>(null)
@@ -150,6 +300,7 @@ export default function StagingPage() {
     setTotal(json.total ?? 0)
     setTotalPages(json.total_pages ?? 1)
     setLoading(false)
+    setCheckedIds(new Set()) // nulstil valg ved reload
   }, [statusFilter, supplierFilter, search, page])
 
   useEffect(() => { fetchRows() }, [fetchRows])
@@ -285,8 +436,33 @@ export default function StagingPage() {
 
   const displaySuggestions = matchSearch.trim() ? matchResults : (suggestions ?? [])
 
+  const checkedRows = rows.filter(r => checkedIds.has(r.id))
+
+  function toggleCheck(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setCheckedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  function toggleAll() {
+    if (checkedIds.size === rows.length) setCheckedIds(new Set())
+    else setCheckedIds(new Set(rows.map(r => r.id)))
+  }
+
   return (
     <div className="flex h-full">
+      {/* Sammenkæd-panel */}
+      {linkPanel && checkedRows.length >= 2 && (
+        <LinkVariantsPanel
+          rows={checkedRows}
+          onClose={() => setLinkPanel(false)}
+          onDone={fetchRows}
+        />
+      )}
+
       {/* ── Venstre: liste ── */}
       <div className={`flex flex-col ${selected ? 'w-1/2' : 'w-full'} border-r border-gray-200 transition-all`}>
 
@@ -554,6 +730,14 @@ export default function StagingPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
                 <tr>
+                  <th className="w-10 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={rows.length > 0 && checkedIds.size === rows.length}
+                      onChange={toggleAll}
+                      className="w-3.5 h-3.5 accent-gray-700 cursor-pointer"
+                    />
+                  </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Produktnavn</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Leverandør</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">SKU / EAN</th>
@@ -573,9 +757,17 @@ export default function StagingPage() {
                       key={row.id}
                       onClick={() => openPanel(row)}
                       className={`cursor-pointer transition-colors ${
-                        isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
+                        checkedIds.has(row.id) ? 'bg-purple-50' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
                       }`}
                     >
+                      <td className="w-10 px-3 py-3" onClick={e => toggleCheck(row.id, e)}>
+                        <input
+                          type="checkbox"
+                          checked={checkedIds.has(row.id)}
+                          onChange={() => {}}
+                          className="w-3.5 h-3.5 accent-purple-600 cursor-pointer"
+                        />
+                      </td>
                       <td className="px-4 py-3 max-w-xs">
                         <div className="font-medium text-gray-900 line-clamp-1">{row.normalized_name}</div>
                         {brand && (
@@ -609,6 +801,25 @@ export default function StagingPage() {
             </table>
           )}
         </div>}
+
+        {/* Flydende multiselect-bar */}
+        {!groupsTab && checkedIds.size >= 2 && (
+          <div className="border-t border-purple-200 bg-purple-50 px-6 py-3 flex items-center gap-3 shrink-0">
+            <span className="text-sm font-medium text-purple-800">{checkedIds.size} valgt</span>
+            <button
+              onClick={() => setLinkPanel(true)}
+              className="px-4 py-1.5 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium"
+            >
+              🔀 Sammenkæd som varianter
+            </button>
+            <button
+              onClick={() => setCheckedIds(new Set())}
+              className="px-3 py-1.5 text-sm text-purple-600 hover:text-purple-800"
+            >
+              Fravælg alle
+            </button>
+          </div>
+        )}
 
         {/* Pagination */}
         {!groupsTab && totalPages > 1 && (
