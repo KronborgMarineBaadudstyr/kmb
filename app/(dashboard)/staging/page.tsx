@@ -336,6 +336,33 @@ export default function StagingPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [actionMsg,   setActionMsg]   = useState<string | null>(null)
 
+  // Peek: expanded product details for match suggestions
+  type ProductPeek = {
+    id: string
+    name: string
+    description: string | null
+    short_description: string | null
+    categories: string[]
+    sales_price: number | null
+    primary_image_url: string | null
+    product_suppliers: Array<{ suppliers: { name: string } | null; supplier_sku: string }>
+    product_images: Array<{ url: string; is_primary: boolean }>
+  }
+  const [peekId,      setPeekId]      = useState<string | null>(null)
+  const [peekData,    setPeekData]    = useState<Record<string, ProductPeek>>({})
+  const [peekLoading, setPeekLoading] = useState<string | null>(null)
+
+  async function togglePeek(id: string) {
+    if (peekId === id) { setPeekId(null); return }
+    setPeekId(id)
+    if (peekData[id]) return // already loaded
+    setPeekLoading(id)
+    const res  = await fetch(`/api/products/${id}`)
+    const json = await res.json()
+    if (json.data) setPeekData(prev => ({ ...prev, [id]: json.data }))
+    setPeekLoading(null)
+  }
+
   // Bekræftede grupper tab
   const [groupsTab, setGroupsTab] = useState(false)
   const [groups, setGroups] = useState<MatchGroup[]>([])
@@ -471,6 +498,7 @@ export default function StagingPage() {
     setActionMsg(null)
     setMatchSearch('')
     setMatchResults([])
+    setPeekId(null)
     setSugLoading(true)
 
     const res  = await fetch(`/api/staging/${row.id}/suggestions`)
@@ -1037,14 +1065,21 @@ export default function StagingPage() {
             {/* Match-sektion */}
             {(selected.status === 'pending_review' || selected.status === 'matched') && (
               <section>
+                {/* Tydelig label: hvad er vi igang med */}
+                <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 flex items-start gap-2.5">
+                  <span className="text-yellow-500 text-base shrink-0 mt-0.5">↑</span>
+                  <div className="text-xs text-yellow-800">
+                    <span className="font-semibold">Leverandørprodukt der gennemgås:</span>{' '}
+                    <span className="font-mono">{selected.normalized_sku}</span> fra {selected.suppliers?.name} —{' '}
+                    findes dette allerede i vores katalog?
+                  </div>
+                </div>
+
                 <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                  Match til eksisterende produkt
+                  Match til eksisterende produkt i kataloget
                 </h4>
 
-                {/* Fuzzy-forslag */}
-                {sugLoading && (
-                  <div className="text-sm text-gray-400">Søger efter match-forslag...</div>
-                )}
+                {sugLoading && <div className="text-sm text-gray-400 mb-3">Søger efter match-forslag...</div>}
 
                 {/* Manuel søgning */}
                 <input
@@ -1054,41 +1089,107 @@ export default function StagingPage() {
                   onChange={e => onMatchSearchChange(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                {matchSearchLoading && (
-                  <div className="text-xs text-gray-400 mb-2">Søger...</div>
-                )}
+                {matchSearchLoading && <div className="text-xs text-gray-400 mb-2">Søger...</div>}
 
                 {displaySuggestions.length > 0 ? (
                   <div className="space-y-2">
-                    {displaySuggestions.map(s => (
-                      <div
-                        key={s.id}
-                        className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-4 py-3 hover:border-blue-300 transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium text-gray-900 text-sm line-clamp-1">{s.name}</div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="font-mono text-xs text-gray-400">{s.internal_sku}</span>
-                            {s.score > 0 && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                                s.score >= 0.9 ? 'bg-green-100 text-green-700' :
-                                s.score >= 0.6 ? 'bg-yellow-100 text-yellow-700' :
-                                                 'bg-gray-100 text-gray-500'
-                              }`}>
-                                {s.match_field === 'ean' ? 'EAN match' : `${Math.round(s.score * 100)}% lighed`}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => doAction('match', s.id)}
-                          disabled={actionLoading}
-                          className="ml-3 px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 shrink-0"
+                    {displaySuggestions.map(s => {
+                      const isOpen = peekId === s.id
+                      const peek   = peekData[s.id]
+                      const loading = peekLoading === s.id
+                      const img = peek?.product_images?.find(i => i.is_primary)?.url
+                             ?? peek?.product_images?.[0]?.url
+                             ?? peek?.primary_image_url
+                             ?? null
+                      return (
+                        <div
+                          key={s.id}
+                          className={`border rounded-lg overflow-hidden transition-colors ${isOpen ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200 bg-white hover:border-blue-200'}`}
                         >
-                          Match
-                        </button>
-                      </div>
-                    ))}
+                          {/* Kort-header */}
+                          <div className="flex items-center gap-3 px-3 py-2.5">
+                            {/* Miniature hvis loaded */}
+                            {img ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={img} alt="" className="w-9 h-9 object-contain rounded border border-gray-200 bg-white shrink-0" />
+                            ) : (
+                              <div className="w-9 h-9 rounded border border-gray-100 bg-gray-50 shrink-0" />
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-gray-900 text-sm leading-tight">{s.name}</div>
+                              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                <span className="font-mono text-xs text-gray-400">{s.internal_sku}</span>
+                                {s.score > 0 && (
+                                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                                    s.score >= 0.9 ? 'bg-green-100 text-green-700' :
+                                    s.score >= 0.6 ? 'bg-yellow-100 text-yellow-700' :
+                                                     'bg-gray-100 text-gray-500'
+                                  }`}>
+                                    {s.match_field === 'ean' ? 'EAN match' : `${Math.round(s.score * 100)}% lighed`}
+                                  </span>
+                                )}
+                                {peek?.categories?.[0] && (
+                                  <span className="text-xs text-gray-400">{peek.categories[0]}</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={() => togglePeek(s.id)}
+                                className={`px-2 py-1 text-xs rounded border transition-colors ${isOpen ? 'border-blue-300 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-400 hover:text-gray-600'}`}
+                                title="Vis/skjul produktdetaljer"
+                              >
+                                {loading ? '…' : isOpen ? '▲' : '▼'}
+                              </button>
+                              <button
+                                onClick={() => doAction('match', s.id)}
+                                disabled={actionLoading}
+                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+                              >
+                                Match
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Fold-ud: produktdetaljer */}
+                          {isOpen && (
+                            <div className="border-t border-blue-100 px-3 py-3 bg-white space-y-2">
+                              {loading && <p className="text-xs text-gray-400">Henter produktdata...</p>}
+                              {peek && (
+                                <>
+                                  {/* Billede + nøgledata side om side */}
+                                  <div className="flex gap-3">
+                                    {img && (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img src={img} alt="" className="w-20 h-20 object-contain rounded border border-gray-200 bg-gray-50 shrink-0" />
+                                    )}
+                                    <div className="text-xs space-y-1 text-gray-600">
+                                      {peek.sales_price != null && (
+                                        <div><span className="text-gray-400">Salgspris: </span><span className="font-medium">{Number(peek.sales_price).toLocaleString('da-DK')} kr</span></div>
+                                      )}
+                                      {peek.product_suppliers?.length > 0 && (
+                                        <div><span className="text-gray-400">Leverandører: </span>
+                                          {peek.product_suppliers.map(ps => ps.suppliers?.name ?? '—').join(', ')}
+                                        </div>
+                                      )}
+                                      {peek.categories?.length > 0 && (
+                                        <div><span className="text-gray-400">Kategori: </span>{peek.categories.join(' › ')}</div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {/* Beskrivelse */}
+                                  {(peek.short_description || peek.description) && (
+                                    <p className="text-xs text-gray-500 leading-relaxed line-clamp-3 border-t border-gray-100 pt-2">
+                                      {peek.short_description || peek.description}
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 ) : !sugLoading && !matchSearchLoading && (
                   <p className="text-sm text-gray-400">
