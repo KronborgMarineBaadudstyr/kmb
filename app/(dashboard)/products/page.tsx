@@ -236,19 +236,40 @@ function BulkVariantPanel({
   onClose: () => void
   onDone: () => void
 }) {
-  const [parentId, setParentId] = useState<string>(products[0]?.id ?? '')
-  const [saving,   setSaving]   = useState(false)
-  const [msg,      setMsg]      = useState<string | null>(null)
-
-  const parentProduct  = products.find(p => p.id === parentId)
-  const variantProducts = products.filter(p => p.id !== parentId)
+  // Udgangspunkt: opret nyt overprodukt med fælles navn (strip variant-specifik del)
+  const defaultName = products[0]?.name?.replace(/\s+\d+\s*(kg|l|ml|mm|cm|m|stk\.?)\s*$/i, '').trim() ?? ''
+  const [parentName, setParentName] = useState(defaultName)
+  const [saving,     setSaving]     = useState(false)
+  const [msg,        setMsg]        = useState<string | null>(null)
 
   async function save() {
+    if (!parentName.trim()) { setMsg('Angiv et overprodukt-navn'); return }
     setSaving(true)
     setMsg(null)
+
+    // 1. Opret nyt overprodukt
+    const createRes = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name:       parentName.trim(),
+        status:     'draft',
+        categories: products[0]?.categories ?? [],
+        boat_type:  [],
+      }),
+    })
+    const createJson = await createRes.json()
+    const newParentId = createJson.data?.id
+    if (!newParentId) {
+      setMsg('Fejl: kunne ikke oprette overprodukt — ' + (createJson.error ?? ''))
+      setSaving(false)
+      return
+    }
+
+    // 2. Sæt alle valgte produkter som varianter under det nye overprodukt
     let errors = 0
-    for (const v of variantProducts) {
-      const res = await fetch(`/api/products/${parentId}/variants`, {
+    for (const v of products) {
+      const res = await fetch(`/api/products/${newParentId}/variants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ variant_product_id: v.id }),
@@ -256,11 +277,12 @@ function BulkVariantPanel({
       const json = await res.json()
       if (json.error) errors++
     }
+
     if (errors > 0) {
-      setMsg(`Fejl: ${errors} produkter kunne ikke sammenkædes`)
+      setMsg(`Oprettet overprodukt, men ${errors} produkter kunne ikke sammenkædes`)
       setSaving(false)
     } else {
-      setMsg(`✓ ${variantProducts.length} varianter sammenkædet under "${parentProduct?.name}"`)
+      setMsg(`✓ Oprettet "${parentName.trim()}" med ${products.length} varianter`)
       setTimeout(() => { onDone(); onClose() }, 1200)
     }
   }
@@ -272,58 +294,51 @@ function BulkVariantPanel({
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
           <div>
             <h3 className="font-semibold text-gray-900">Sammenkæd som varianter</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{products.length} produkter → 1 overprodukt + {products.length - 1} varianter</p>
+            <p className="text-xs text-gray-400 mt-0.5">Opretter nyt overprodukt → {products.length} varianter under det</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
+          {/* Overprodukt navn */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
+              Overprodukt-navn
+            </label>
+            <input
+              value={parentName}
+              onChange={e => setParentName(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+              placeholder="F.eks. ZETA Teak Cleaner Powder"
+            />
+            <p className="text-xs text-gray-400 mt-1">Et nyt tomt overprodukt oprettes med dette navn. Alle valgte produkter sættes som varianter under det.</p>
+          </div>
+
+          {/* Liste over varianter */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
-              Hvem er overprodukt (forælderen)?
+              Varianter ({products.length})
             </label>
-            <p className="text-xs text-gray-400 mb-3">De øvrige produkter bliver varianter under denne.</p>
             <div className="space-y-2">
-              {products.map(p => {
-                const isParent = p.id === parentId
-                const imgs = (p as Product & { product_images?: Array<{url:string;is_primary:boolean}> })
-                const imgUrl = p.primary_image_url
-                return (
-                  <label
-                    key={p.id}
-                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                      isParent ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="parent"
-                      checked={isParent}
-                      onChange={() => setParentId(p.id)}
-                      className="accent-purple-600"
-                    />
-                    {imgUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={imgUrl} alt="" className="w-10 h-10 object-contain rounded border border-gray-200 bg-gray-50 shrink-0" />
-                    ) : (
-                      <div className="w-10 h-10 rounded border border-gray-100 bg-gray-50 shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-800 leading-tight">{p.name}</div>
-                      <div className="text-xs text-gray-400 font-mono mt-0.5">{p.internal_sku}</div>
-                      {p.parent_product_id && (
-                        <span className="text-xs text-orange-500">⚠ Er allerede en variant</span>
-                      )}
-                    </div>
-                    {isParent && <span className="text-xs text-purple-600 font-medium shrink-0">Overprodukt</span>}
-                  </label>
-                )
-              })}
+              {products.map(p => (
+                <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
+                  {p.primary_image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.primary_image_url} alt="" className="w-9 h-9 object-contain rounded border border-gray-200 bg-white shrink-0" />
+                  ) : (
+                    <div className="w-9 h-9 rounded border border-gray-100 bg-white shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-gray-800 leading-tight">{p.name}</div>
+                    <div className="text-xs text-gray-400 font-mono mt-0.5">{p.internal_sku}</div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
           {msg && (
-            <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+            <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') || msg.startsWith('Oprettet') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
               {msg}
             </div>
           )}
@@ -332,10 +347,10 @@ function BulkVariantPanel({
         <div className="px-6 py-4 border-t border-gray-200 flex gap-2 shrink-0">
           <button
             onClick={save}
-            disabled={saving || variantProducts.length === 0}
+            disabled={saving || !parentName.trim()}
             className="flex-1 px-4 py-2 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 disabled:opacity-40"
           >
-            {saving ? 'Sammenkæder...' : `Sæt ${variantProducts.length} som varianter under "${parentProduct?.name?.slice(0, 30)}..."`}
+            {saving ? 'Opretter...' : `Opret overprodukt + ${products.length} varianter`}
           </button>
           <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
             Annuller

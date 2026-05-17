@@ -117,3 +117,31 @@ export async function GET(request: Request) {
     total_pages: Math.ceil((count ?? 0) / perPage),
   })
 }
+
+// POST /api/products — opret nyt produkt (bruges til overprodukt ved bulk variant-sammenkædning)
+export async function POST(request: Request) {
+  const supabase = createServiceClient()
+  let body: Record<string, unknown>
+  try { body = await request.json() } catch {
+    return NextResponse.json({ error: 'Ugyldig JSON' }, { status: 400 })
+  }
+
+  const ts  = Date.now().toString(36).toUpperCase()
+  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase()
+
+  const { data, error } = await supabase
+    .from('products')
+    .insert({
+      internal_sku:       `KMB-${ts}-${rnd}`,
+      name:               body.name,
+      status:             body.status ?? 'draft',
+      categories:         body.categories ?? [],
+      boat_type:          body.boat_type ?? [],
+      variant_attributes: {},
+    })
+    .select('id, internal_sku, name')
+    .single()
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ data })
+}
