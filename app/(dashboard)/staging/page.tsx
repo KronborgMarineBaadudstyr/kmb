@@ -155,12 +155,12 @@ function LinkVariantsPanel({
 
   function setAttr(i: number, j: number, field: 'key' | 'val', value: string) {
     setVariantRows(prev => prev.map((r, ri) => {
-      if (field === 'val' || ri === i) {
-        // Opdater dette felt normalt
+      if (ri === i) {
+        // Denne variant: opdater præcis det felt der er ændret
         return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, [field]: value }) }
       }
-      // field === 'key' på en anden variant: sæt samme nøgle på index j hvis den findes, ellers tilføj
-      if (j < r.attrs.length) {
+      if (field === 'key' && j < r.attrs.length) {
+        // Andre varianter: kun synkroniser nøglenavnet, aldrig værdien
         return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, key: value }) }
       }
       return r
