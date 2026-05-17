@@ -39,13 +39,13 @@ export async function GET(
 
   // Build a map: variant_id → supplier info (from product_suppliers with variant_id set)
   type SupplierRow = {
-    variant_id: string | null; supplier_sku: string
+    variant_id: string | null; supplier_sku: string; supplier_product_name: string | null
     purchase_price: number | null; supplier_stock_quantity: number
     supplier_images: unknown
     suppliers: { name: string }
   }
   const supplierByVariant = new Map<string, {
-    name: string; supplier_sku: string
+    name: string; supplier_sku: string; supplier_product_name: string | null
     purchase_price: number | null; supplier_stock_quantity: number
     image_url: string | null
   }>()
@@ -55,6 +55,7 @@ export async function GET(
       supplierByVariant.set(ps.variant_id, {
         name: ps.suppliers.name,
         supplier_sku: ps.supplier_sku,
+        supplier_product_name: ps.supplier_product_name,
         purchase_price: ps.purchase_price,
         supplier_stock_quantity: ps.supplier_stock_quantity,
         image_url: imgs[0]?.url ?? null,

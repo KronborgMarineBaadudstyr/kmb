@@ -25,7 +25,7 @@ type Variant = {
   woo_variation_id: number | null; status: string
   // supplier linked to this specific variant (via product_suppliers.variant_id)
   supplier?: {
-    name: string; supplier_sku: string
+    name: string; supplier_sku: string; supplier_product_name: string | null
     purchase_price: number | null
     supplier_stock_quantity: number
     image_url?: string | null
@@ -309,13 +309,20 @@ function VariantsEditor({
               )}
 
               <div className="flex-1 min-w-0">
+                {/* Supplier product name — the key differentiator between variants */}
+                {sup?.supplier_product_name && (
+                  <div className="text-sm font-medium text-gray-800 leading-tight truncate mb-0.5">
+                    {sup.supplier_product_name}
+                  </div>
+                )}
+
                 {/* SKU + supplier name */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="font-mono text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-500 shrink-0">
                     {v.internal_variant_sku}
                   </span>
                   {sup && (
-                    <span className="text-xs font-medium text-gray-700 truncate">{sup.name}</span>
+                    <span className="text-xs text-gray-500">{sup.name}</span>
                   )}
                   {sup?.supplier_sku && (
                     <span className="font-mono text-xs text-gray-400">{sup.supplier_sku}</span>
