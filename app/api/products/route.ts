@@ -12,8 +12,9 @@ export async function GET(request: Request) {
   const supplierId = url.searchParams.get('supplier_id') || ''
   const page       = Math.max(1, parseInt(url.searchParams.get('page')     || '1',  10))
   const perPage    = Math.min(100, parseInt(url.searchParams.get('per_page') || '50', 10))
-  const sort       = url.searchParams.get('sort')  || 'name'
-  const order      = url.searchParams.get('order') === 'desc' ? false : true
+  const sort          = url.searchParams.get('sort')  || 'name'
+  const order         = url.searchParams.get('order') === 'desc' ? false : true
+  const hideVariants  = url.searchParams.get('hide_variants') !== 'false' // default true
 
   const supabase  = createServiceClient()
   const from      = (page - 1) * perPage
@@ -76,6 +77,7 @@ export async function GET(request: Request) {
   if (status)               query = query.eq('status', status)
   if (category)             query = query.contains('categories', [category])
   if (supplierProductIds)   query = query.in('id', supplierProductIds)
+  if (hideVariants)         query = query.is('parent_product_id', null)
 
   const { data, error, count } = await query
 

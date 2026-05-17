@@ -433,6 +433,7 @@ export default function ProductsPage() {
   const [visibleCols,  setVisibleCols]  = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen,  setColMenuOpen]  = useState(false)
   const [mergeProduct,   setMergeProduct]   = useState<Product | null>(null)
+  const [hideVariants,   setHideVariants]   = useState(true)
   const [checkedIds,     setCheckedIds]     = useState<Set<string>>(new Set())
   const [bulkVariantOpen,setBulkVariantOpen]= useState(false)
   const [deduping,       setDeduping]       = useState(false)
@@ -472,6 +473,7 @@ export default function ProductsPage() {
       search, status, category,
       page: String(page), per_page: '50',
       sort, order,
+      hide_variants: String(hideVariants),
     })
     if (supplierId) params.set('supplier_id', supplierId)
     const res  = await fetch(`/api/products?${params}`)
@@ -481,7 +483,7 @@ export default function ProductsPage() {
     setTotalPages(json.total_pages ?? 1)
     setLoading(false)
     setCheckedIds(new Set())
-  }, [search, status, category, supplierId, page, sort, order])
+  }, [search, status, category, supplierId, page, sort, order, hideVariants])
 
   function toggleCheck(id: string) {
     setCheckedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -782,6 +784,19 @@ export default function ProductsPage() {
               </div>
             )}
           </div>
+
+          {/* Vis/skjul varianter */}
+          <button
+            onClick={() => { setHideVariants(v => !v); setPage(1) }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-md transition-colors ${
+              hideVariants
+                ? 'border-gray-300 text-gray-500 hover:border-gray-400'
+                : 'border-purple-400 bg-purple-50 text-purple-700'
+            }`}
+            title={hideVariants ? 'Varianter er skjult — klik for at vise dem' : 'Varianter vises — klik for at skjule dem'}
+          >
+            🔀 {hideVariants ? 'Vis varianter' : 'Skjul varianter'}
+          </button>
 
           {/* Dedupliker */}
           <button
