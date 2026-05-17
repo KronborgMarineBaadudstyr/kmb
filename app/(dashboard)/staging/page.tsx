@@ -360,6 +360,55 @@ export default function StagingPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [actionMsg,   setActionMsg]   = useState<string | null>(null)
 
+  // Variantfamilie: opret overprodukt + eksisterende + staging som varianter
+  const [familyForId,   setFamilyForId]   = useState<string | null>(null) // suggestion product id
+  const [familyName,    setFamilyName]    = useState('')
+  const [familySaving,  setFamilySaving]  = useState(false)
+  const [familyMsg,     setFamilyMsg]     = useState<string | null>(null)
+
+  async function createVariantFamily(existingProductId: string) {
+    if (!familyName.trim()) { setFamilyMsg('Angiv et overprodukt-navn'); return }
+    if (!selected) return
+    setFamilySaving(true)
+    setFamilyMsg(null)
+
+    // 1. Opret nyt overprodukt
+    const createRes = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: familyName.trim(), status: 'draft', categories: peekData[existingProductId]?.categories ?? [] }),
+    })
+    const createJson = await createRes.json()
+    const parentId = createJson.data?.id
+    if (!parentId) { setFamilyMsg('Fejl: kunne ikke oprette overprodukt'); setFamilySaving(false); return }
+
+    // 2. Gør det eksisterende produkt til variant
+    await fetch(`/api/products/${parentId}/variants`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ variant_product_id: existingProductId }),
+    })
+
+    // 3. Opret nyt produkt fra staging + gør det til variant
+    const newRes = await fetch(`/api/staging/${selected.id}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'new_product' }),
+    })
+    const newJson = await newRes.json()
+    if (newJson.ok && newJson.product_id) {
+      await fetch(`/api/products/${parentId}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variant_product_id: newJson.product_id }),
+      })
+    }
+
+    setFamilyMsg(`✓ Oprettet "${familyName.trim()}" med 2 varianter`)
+    setFamilySaving(false)
+    setTimeout(() => { setFamilyForId(null); setSelected(null); fetchRows() }, 1200)
+  }
+
   // Peek: expanded product details for match suggestions
   type ProductPeek = {
     id: string
@@ -523,6 +572,8 @@ export default function StagingPage() {
     setMatchSearch('')
     setMatchResults([])
     setPeekId(null)
+    setFamilyForId(null)
+    setFamilyMsg(null)
     setSugLoading(true)
 
     const res  = await fetch(`/api/staging/${row.id}/suggestions`)
@@ -1166,6 +1217,18 @@ export default function StagingPage() {
                                 {loading ? '…' : isOpen ? '▲' : '▼'}
                               </button>
                               <button
+                                onClick={() => {
+                                  const sugName = s.name.replace(/\s+\d+\s*(kg|l|ml|mm|cm|m|stk\.?)\s*$/i, '').trim()
+                                  setFamilyForId(familyForId === s.id ? null : s.id)
+                                  setFamilyName(sugName)
+                                  setFamilyMsg(null)
+                                }}
+                                title="Disse er begge varianter — opret nyt overprodukt og sæt dem begge under det"
+                                className={`px-2 py-1.5 text-xs rounded border transition-colors ${familyForId === s.id ? 'border-purple-400 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-400 hover:border-purple-300 hover:text-purple-600'}`}
+                              >
+                                🔀
+                              </button>
+                              <button
                                 onClick={() => doAction('match', s.id)}
                                 disabled={actionLoading}
                                 className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
@@ -1209,6 +1272,36 @@ export default function StagingPage() {
                                   )}
                                 </>
                               )}
+                            </div>
+                          )}
+
+                          {/* Variantfamilie-panel */}
+                          {familyForId === s.id && (
+                            <div className="border-t border-purple-100 px-3 py-3 bg-purple-50 space-y-2">
+                              <p className="text-xs text-purple-700 font-medium">
+                                Opret nyt overprodukt — sæt både <span className="font-semibold">{s.name}</span> og dette leverandørprodukt som varianter under det.
+                              </p>
+                              <input
+                                value={familyName}
+                                onChange={e => setFamilyName(e.target.value)}
+                                placeholder="Overprodukt-navn"
+                                className="w-full px-2 py-1.5 text-xs border border-purple-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400 bg-white"
+                              />
+                              {familyMsg && (
+                                <p className={`text-xs ${familyMsg.startsWith('Fejl') ? 'text-red-600' : 'text-green-700'}`}>{familyMsg}</p>
+                              )}
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => createVariantFamily(s.id)}
+                                  disabled={familySaving || !familyName.trim()}
+                                  className="px-3 py-1.5 text-xs bg-purple-700 text-white rounded-lg hover:bg-purple-800 disabled:opacity-40"
+                                >
+                                  {familySaving ? 'Opretter...' : 'Opret variantfamilie'}
+                                </button>
+                                <button onClick={() => setFamilyForId(null)} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700">
+                                  Annuller
+                                </button>
+                              </div>
                             </div>
                           )}
                         </div>
