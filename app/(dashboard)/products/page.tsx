@@ -297,8 +297,26 @@ export default function ProductsPage() {
   const [categories,  setCategories]  = useState<string[]>([])
   const [visibleCols,  setVisibleCols]  = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen,  setColMenuOpen]  = useState(false)
-  const [mergeProduct, setMergeProduct] = useState<Product | null>(null)
+  const [mergeProduct,   setMergeProduct]   = useState<Product | null>(null)
+  const [deduping,       setDeduping]       = useState(false)
+  const [dedupeResult,   setDedupeResult]   = useState<{ message: string; deleted: number } | null>(null)
   const colMenuRef = useRef<HTMLDivElement>(null)
+
+  async function runDeduplicate() {
+    if (!confirm('Dette vil finde og slette dublerede produkter (samme navn) og samle leverandørlinks på det bedste produkt. Fortsæt?')) return
+    setDeduping(true)
+    setDedupeResult(null)
+    try {
+      const res  = await fetch('/api/products/deduplicate', { method: 'POST' })
+      const json = await res.json()
+      setDedupeResult({ message: json.message ?? 'Færdig', deleted: json.deleted ?? 0 })
+      if ((json.deleted ?? 0) > 0) fetchProducts()
+    } catch (e) {
+      setDedupeResult({ message: String(e), deleted: 0 })
+    } finally {
+      setDeduping(false)
+    }
+  }
 
   // Close column menu on outside click
   useEffect(() => {
@@ -612,8 +630,28 @@ export default function ProductsPage() {
               </div>
             )}
           </div>
+
+          {/* Dedupliker */}
+          <button
+            onClick={runDeduplicate}
+            disabled={deduping}
+            title="Find og slet dublerede produkter (samme navn)"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 text-gray-600 rounded-md hover:border-orange-400 hover:text-orange-600 hover:bg-orange-50 transition-colors disabled:opacity-40"
+          >
+            {deduping ? '⏳' : '🧹'} Dedupliker
+          </button>
         </div>
       </div>
+
+      {/* Dedupliker resultat */}
+      {dedupeResult && (
+        <div className={`mx-8 mt-3 px-4 py-2.5 rounded-lg text-sm flex items-center justify-between ${
+          dedupeResult.deleted > 0 ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-gray-50 text-gray-600 border border-gray-200'
+        }`}>
+          <span>{dedupeResult.message}</span>
+          <button onClick={() => setDedupeResult(null)} className="text-gray-400 hover:text-gray-600 ml-4">×</button>
+        </div>
+      )}
 
       {/* Tabel */}
       <div className="flex-1 overflow-auto">

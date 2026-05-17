@@ -174,10 +174,93 @@ export async function bulkCreateProductsFromGroups(
 
   if (prepared.length === 0) return { created: 0, skipped: skipped.length, remaining: 0 }
 
-  // 4. Bulk insert products
+  // 4a. Check for existing products with the same name → link instead of re-creating
+  const { data: existingByName } = await supabase
+    .from('products')
+    .select('id, name')
+    .in('name', prepared.map(p => p.dbRow.name))
+
+  const existingNameMap = new Map<string, string>() // lower name → product id
+  for (const ep of existingByName ?? []) {
+    existingNameMap.set((ep.name as string).toLowerCase().trim(), ep.id as string)
+  }
+
+  // Split: groups whose name already has a product (link) vs new ones (insert)
+  const toLink:   PreparedProduct[] = []
+  const toInsert: PreparedProduct[] = []
+  for (const p of prepared) {
+    const existingId = existingNameMap.get(p.dbRow.name.toLowerCase().trim())
+    if (existingId) {
+      toLink.push({ ...p, _existingProductId: existingId } as PreparedProduct & { _existingProductId: string })
+    } else {
+      toInsert.push(p)
+    }
+  }
+
+  // Link groups that already have a matching product (add missing suppliers, mark matched)
+  const now0 = new Date().toISOString()
+  for (const p of toLink) {
+    const productId = (p as PreparedProduct & { _existingProductId: string })._existingProductId
+
+    // Get existing supplier IDs on this product
+    const { data: existingSuppliers } = await supabase
+      .from('product_suppliers')
+      .select('supplier_id')
+      .eq('product_id', productId)
+    const existingSupSet = new Set((existingSuppliers ?? []).map(r => r.supplier_id as string))
+
+    const ordered = [...p.members].sort((a, b) => {
+      if (!!a.normalized_ean !== !!b.normalized_ean) return a.normalized_ean ? -1 : 1
+      const aPrice = typeof a.raw_data.purchase_price === 'number' ? a.raw_data.purchase_price : Infinity
+      const bPrice = typeof b.raw_data.purchase_price === 'number' ? b.raw_data.purchase_price : Infinity
+      return aPrice - bPrice
+    })
+
+    const newSuppliers = ordered.filter(m => !existingSupSet.has(m.supplier_id))
+    if (newSuppliers.length > 0) {
+      const nextPriority = existingSupSet.size + 1
+      await supabase.from('product_suppliers').insert(
+        newSuppliers.map((m, i) => ({
+          product_id:              productId,
+          supplier_id:             m.supplier_id,
+          supplier_sku:            m.normalized_sku,
+          supplier_product_name:   typeof m.raw_data.supplier_product_name === 'string'
+                                     ? m.raw_data.supplier_product_name : m.normalized_name,
+          purchase_price:          typeof m.raw_data.purchase_price === 'number' && isFinite(m.raw_data.purchase_price) ? m.raw_data.purchase_price : null,
+          recommended_sales_price: typeof m.raw_data.recommended_sales_price === 'number' && isFinite(m.raw_data.recommended_sales_price) ? m.raw_data.recommended_sales_price : null,
+          supplier_stock_quantity: typeof m.raw_data.supplier_stock_quantity === 'number' ? Math.max(0, Math.round(m.raw_data.supplier_stock_quantity)) : 0,
+          supplier_stock_reserved: 0,
+          supplier_images: Array.isArray(m.raw_data.supplier_images) ? m.raw_data.supplier_images : [],
+          supplier_files:  Array.isArray(m.raw_data.supplier_files)  ? m.raw_data.supplier_files  : [],
+          priority:    nextPriority + i,
+          item_status: 'active',
+          is_active:   true,
+        }))
+      )
+    }
+
+    // Mark staging rows as matched
+    const stagingIds = p.members.map(m => m.id)
+    for (let i = 0; i < stagingIds.length; i += 500) {
+      await supabase.from('supplier_product_staging')
+        .update({ status: 'matched', updated_at: now0 })
+        .in('id', stagingIds.slice(i, i + 500))
+    }
+
+    // Update group → product_created
+    await supabase.from('staging_match_groups')
+      .update({ status: 'product_created', product_id: productId, updated_at: now0 })
+      .eq('id', p.groupId)
+
+    skipped.push(p.groupId) // count as "skipped creation" (linked instead)
+  }
+
+  if (toInsert.length === 0) return { created: 0, skipped: skipped.length, remaining: 0 }
+
+  // 4b. Bulk insert genuinely new products
   const { data: insertedProducts, error: pErr } = await supabase
     .from('products')
-    .insert(prepared.map(p => p.dbRow))
+    .insert(toInsert.map(p => p.dbRow))
     .select('id, internal_sku')
 
   if (pErr) throw new Error(`Produkt bulk-insert fejlede: ${pErr.message}`)
@@ -192,7 +275,7 @@ export async function bulkCreateProductsFromGroups(
   const supplierInserts: Record<string, unknown>[] = []
   const allStagingIds: string[] = []
 
-  for (const p of prepared) {
+  for (const p of toInsert) {
     const productId = skuToId.get(p.dbRow.internal_sku)
     if (!productId) continue
     groupIdToProductId.set(p.groupId, productId)
@@ -259,5 +342,5 @@ export async function bulkCreateProductsFromGroups(
     .eq('status', 'confirmed')
     .is('product_id', null)
 
-  return { created: prepared.length, skipped: skipped.length, remaining: remaining ?? 0 }
+  return { created: toInsert.length, skipped: skipped.length, remaining: remaining ?? 0 }
 }
