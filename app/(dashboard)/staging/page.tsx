@@ -142,16 +142,25 @@ function LinkVariantsPanel({
   const [msg, setMsg] = useState<string | null>(null)
 
   function setAttr(i: number, j: number, field: 'key' | 'val', value: string) {
-    setVariantRows(prev => prev.map((r, ri) => ri !== i ? r : {
-      ...r,
-      attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, [field]: value }),
+    setVariantRows(prev => prev.map((r, ri) => {
+      if (field === 'val' || ri === i) {
+        // Opdater dette felt normalt
+        return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, [field]: value }) }
+      }
+      // field === 'key' på en anden variant: sæt samme nøgle på index j hvis den findes, ellers tilføj
+      if (j < r.attrs.length) {
+        return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, key: value }) }
+      }
+      return r
     }))
   }
   function addAttr(i: number) {
-    setVariantRows(prev => prev.map((r, ri) => ri !== i ? r : { ...r, attrs: [...r.attrs, { key: '', val: '' }] }))
+    // Tilføj en tom attribut på ALLE varianter så nøglen kan synkroniseres
+    setVariantRows(prev => prev.map(r => ({ ...r, attrs: [...r.attrs, { key: '', val: '' }] })))
   }
-  function removeAttr(i: number, j: number) {
-    setVariantRows(prev => prev.map((r, ri) => ri !== i ? r : { ...r, attrs: r.attrs.filter((_, ai) => ai !== j) }))
+  function removeAttr(_i: number, j: number) {
+    // Fjern samme attribut-index på alle varianter
+    setVariantRows(prev => prev.map(r => ({ ...r, attrs: r.attrs.filter((_, ai) => ai !== j) })))
   }
 
   async function save() {
