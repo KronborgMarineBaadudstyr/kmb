@@ -226,6 +226,126 @@ function VariantMergePanel({
   )
 }
 
+// ── Bulk variant-panel ────────────────────────────────────────────────────────
+function BulkVariantPanel({
+  products,
+  onClose,
+  onDone,
+}: {
+  products: Product[]
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [parentId, setParentId] = useState<string>(products[0]?.id ?? '')
+  const [saving,   setSaving]   = useState(false)
+  const [msg,      setMsg]      = useState<string | null>(null)
+
+  const parentProduct  = products.find(p => p.id === parentId)
+  const variantProducts = products.filter(p => p.id !== parentId)
+
+  async function save() {
+    setSaving(true)
+    setMsg(null)
+    let errors = 0
+    for (const v of variantProducts) {
+      const res = await fetch(`/api/products/${parentId}/variants`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ variant_product_id: v.id }),
+      })
+      const json = await res.json()
+      if (json.error) errors++
+    }
+    if (errors > 0) {
+      setMsg(`Fejl: ${errors} produkter kunne ikke sammenkædes`)
+      setSaving(false)
+    } else {
+      setMsg(`✓ ${variantProducts.length} varianter sammenkædet under "${parentProduct?.name}"`)
+      setTimeout(() => { onDone(); onClose() }, 1200)
+    }
+  }
+
+  return (
+    <>
+      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-[480px] bg-white shadow-xl z-50 flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
+          <div>
+            <h3 className="font-semibold text-gray-900">Sammenkæd som varianter</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{products.length} produkter → 1 overprodukt + {products.length - 1} varianter</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
+        </div>
+
+        <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">
+              Hvem er overprodukt (forælderen)?
+            </label>
+            <p className="text-xs text-gray-400 mb-3">De øvrige produkter bliver varianter under denne.</p>
+            <div className="space-y-2">
+              {products.map(p => {
+                const isParent = p.id === parentId
+                const imgs = (p as Product & { product_images?: Array<{url:string;is_primary:boolean}> })
+                const imgUrl = p.primary_image_url
+                return (
+                  <label
+                    key={p.id}
+                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      isParent ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="parent"
+                      checked={isParent}
+                      onChange={() => setParentId(p.id)}
+                      className="accent-purple-600"
+                    />
+                    {imgUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={imgUrl} alt="" className="w-10 h-10 object-contain rounded border border-gray-200 bg-gray-50 shrink-0" />
+                    ) : (
+                      <div className="w-10 h-10 rounded border border-gray-100 bg-gray-50 shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-800 leading-tight">{p.name}</div>
+                      <div className="text-xs text-gray-400 font-mono mt-0.5">{p.internal_sku}</div>
+                      {p.parent_product_id && (
+                        <span className="text-xs text-orange-500">⚠ Er allerede en variant</span>
+                      )}
+                    </div>
+                    {isParent && <span className="text-xs text-purple-600 font-medium shrink-0">Overprodukt</span>}
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          {msg && (
+            <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
+              {msg}
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-200 flex gap-2 shrink-0">
+          <button
+            onClick={save}
+            disabled={saving || variantProducts.length === 0}
+            className="flex-1 px-4 py-2 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 disabled:opacity-40"
+          >
+            {saving ? 'Sammenkæder...' : `Sæt ${variantProducts.length} som varianter under "${parentProduct?.name?.slice(0, 30)}..."`}
+          </button>
+          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
+            Annuller
+          </button>
+        </div>
+      </div>
+    </>
+  )
+}
+
 type ApiResponse = {
   data: Product[]
   total: number
@@ -298,6 +418,8 @@ export default function ProductsPage() {
   const [visibleCols,  setVisibleCols]  = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen,  setColMenuOpen]  = useState(false)
   const [mergeProduct,   setMergeProduct]   = useState<Product | null>(null)
+  const [checkedIds,     setCheckedIds]     = useState<Set<string>>(new Set())
+  const [bulkVariantOpen,setBulkVariantOpen]= useState(false)
   const [deduping,       setDeduping]       = useState(false)
   const [dedupeResult,   setDedupeResult]   = useState<{ message: string; deleted: number } | null>(null)
   const colMenuRef = useRef<HTMLDivElement>(null)
@@ -343,7 +465,15 @@ export default function ProductsPage() {
     setTotal(json.total ?? 0)
     setTotalPages(json.total_pages ?? 1)
     setLoading(false)
+    setCheckedIds(new Set())
   }, [search, status, category, supplierId, page, sort, order])
+
+  function toggleCheck(id: string) {
+    setCheckedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
+  function toggleAll() {
+    setCheckedIds(prev => prev.size === products.length ? new Set() : new Set(products.map(p => p.id)))
+  }
 
   useEffect(() => { fetchProducts() }, [fetchProducts])
 
@@ -525,6 +655,13 @@ export default function ProductsPage() {
           onDone={fetchProducts}
         />
       )}
+      {bulkVariantOpen && checkedIds.size >= 2 && (
+        <BulkVariantPanel
+          products={products.filter(p => checkedIds.has(p.id))}
+          onClose={() => setBulkVariantOpen(false)}
+          onDone={() => { fetchProducts(); setCheckedIds(new Set()) }}
+        />
+      )}
       {/* Topbar */}
       <div className="border-b border-gray-200 bg-white px-8 py-4 flex items-center justify-between shrink-0">
         <div>
@@ -658,6 +795,13 @@ export default function ProductsPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
             <tr>
+              <th className="w-10 px-3 py-3">
+                <input type="checkbox"
+                  checked={products.length > 0 && checkedIds.size === products.length}
+                  onChange={toggleAll}
+                  className="w-3.5 h-3.5 accent-purple-600 cursor-pointer"
+                />
+              </th>
               {cols.map(col => (
                 <th
                   key={col.key}
@@ -689,7 +833,14 @@ export default function ProductsPage() {
               </tr>
             )}
             {!loading && products.map(p => (
-              <tr key={p.id} className="hover:bg-gray-50 transition-colors">
+              <tr key={p.id} className={`transition-colors ${checkedIds.has(p.id) ? 'bg-purple-50' : 'hover:bg-gray-50'}`}>
+                <td className="w-10 px-3 py-2">
+                  <input type="checkbox"
+                    checked={checkedIds.has(p.id)}
+                    onChange={() => toggleCheck(p.id)}
+                    className="w-3.5 h-3.5 accent-purple-600 cursor-pointer"
+                  />
+                </td>
                 {cols.map(col => (
                   <td
                     key={col.key}
@@ -717,6 +868,22 @@ export default function ProductsPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Flydende multiselect-bar */}
+      {checkedIds.size >= 2 && (
+        <div className="border-t border-purple-200 bg-purple-50 px-8 py-3 flex items-center gap-3 shrink-0">
+          <span className="text-sm font-medium text-purple-800">{checkedIds.size} valgt</span>
+          <button
+            onClick={() => setBulkVariantOpen(true)}
+            className="px-4 py-1.5 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium"
+          >
+            🔀 Sammenkæd som varianter
+          </button>
+          <button onClick={() => setCheckedIds(new Set())} className="px-3 py-1.5 text-sm text-purple-600 hover:text-purple-800">
+            Fravælg alle
+          </button>
+        </div>
+      )}
 
       {/* Pagination */}
       {totalPages > 1 && (
