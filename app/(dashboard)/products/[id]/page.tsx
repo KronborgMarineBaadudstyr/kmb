@@ -427,6 +427,20 @@ function VariantsEditor({
                     />
                   </div>
                 </div>
+
+                {/* Save + close button */}
+                <div className="px-3 py-2 border-t border-gray-100 flex justify-end">
+                  <SaveVariantButton onSave={async () => {
+                    await patchVariant(v, {
+                      attributes: v.attributes,
+                      sales_price: v.sales_price,
+                      sale_price: v.sale_price,
+                      ean: v.ean,
+                      weight: v.weight,
+                    })
+                    toggleExpand(i)
+                  }} />
+                </div>
               </>
             )}
 
@@ -452,6 +466,19 @@ function VariantsEditor({
         + Tilføj attribut til alle varianter
       </button>
     </div>
+  )
+}
+
+function SaveVariantButton({ onSave }: { onSave: () => Promise<void> }) {
+  const [saving, setSaving] = useState(false)
+  return (
+    <button
+      disabled={saving}
+      onClick={async () => { setSaving(true); try { await onSave() } finally { setSaving(false) } }}
+      className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
+    >
+      {saving ? 'Gemmer…' : 'Gem'}
+    </button>
   )
 }
 
