@@ -29,8 +29,39 @@ type Product = {
   updated_at: string
 }
 
-// ── Bulk variant-panel ────────────────────────────────────────────────────────
-function BulkVariantPanel({
+// ── Hjælper: udtræk størrelseshint fra produktnavn ────────────────────────────
+function extractSizeHint(productName: string, parentName: string): string {
+  const base      = parentName.trim().toLowerCase()
+  const full      = productName.trim()
+  const lower     = full.toLowerCase()
+  const remainder = lower.startsWith(base) ? full.slice(base.length).trim() : full
+
+  const mmMatch  = remainder.match(/\b(\d+(?:[,\.]\d+)?)\s*(mm|cm|m|l|ml|kg|g)\b/i)
+  if (mmMatch) return `${mmMatch[1]} ${mmMatch[2].toLowerCase()}`
+
+  const stkMatch = remainder.match(/\b(\d+)\s*stk\.?/i)
+  if (stkMatch) return `${stkMatch[1]} stk`
+
+  if (remainder.length > 0 && remainder.length <= 30) return remainder
+  return ''
+}
+
+// Longest common prefix for a list of strings
+function commonPrefix(strs: string[]): string {
+  if (!strs.length) return ''
+  let prefix = strs[0]
+  for (const s of strs.slice(1)) {
+    while (!s.toLowerCase().startsWith(prefix.toLowerCase()) && prefix.length > 0) {
+      prefix = prefix.slice(0, prefix.lastIndexOf(' ') > 0 ? prefix.lastIndexOf(' ') : prefix.length - 1)
+    }
+  }
+  return prefix.trim()
+}
+
+type VariantRow = { productId: string; attrs: { key: string; val: string }[] }
+
+// ── Variantfamilie-panel (erstatter ProductVariantFamilyPanel) ─────────────────────────
+function ProductVariantFamilyPanel({
   products,
   onClose,
   onDone,
@@ -39,83 +70,163 @@ function BulkVariantPanel({
   onClose: () => void
   onDone: () => void
 }) {
-  const defaultName = products[0]?.name?.replace(/\s+\d+\s*(kg|l|ml|mm|cm|m|stk\.?)\s*$/i, '').trim() ?? ''
-  const [parentName, setParentName] = useState(defaultName)
-  const [saving,     setSaving]     = useState(false)
-  const [msg,        setMsg]        = useState<string | null>(null)
+  const defaultName = commonPrefix(products.map(p => p.name))
+
+  const initRows = (pName: string): VariantRow[] =>
+    products.map(p => {
+      const hint = extractSizeHint(p.name, pName)
+      return { productId: p.id, attrs: [{ key: 'størrelse', val: hint }] }
+    })
+
+  const [parentName,   setParentName]   = useState(defaultName)
+  const [variantRows,  setVariantRows]  = useState<VariantRow[]>(() => initRows(defaultName))
+  const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
+  const [saving,       setSaving]       = useState(false)
+  const [msg,          setMsg]          = useState<string | null>(null)
+
+  function onParentNameChange(val: string) {
+    setParentName(val)
+    setVariantRows(prev => prev.map((vr, idx) => {
+      const hint    = extractSizeHint(products[idx].name, val)
+      const oldHint = extractSizeHint(products[idx].name, parentName)
+      return {
+        ...vr,
+        attrs: vr.attrs.map(a => a.val === oldHint ? { ...a, val: hint } : a),
+      }
+    }))
+  }
+
+  function setAttr(i: number, j: number, field: 'key' | 'val', value: string) {
+    setVariantRows(prev => prev.map((r, ri) => {
+      if (ri === i) return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, [field]: value }) }
+      if (field === 'key' && j < r.attrs.length) return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, key: value }) }
+      return r
+    }))
+  }
+  function addAttr() {
+    setVariantRows(prev => prev.map(r => ({ ...r, attrs: [...r.attrs, { key: '', val: '' }] })))
+  }
+  function removeAttr(j: number) {
+    setVariantRows(prev => prev.map(r => ({ ...r, attrs: r.attrs.filter((_, ai) => ai !== j) })))
+  }
 
   async function save() {
     if (!parentName.trim()) { setMsg('Angiv et overprodukt-navn'); return }
-    setSaving(true)
-    setMsg(null)
+    setSaving(true); setMsg(null)
 
-    const createRes = await fetch('/api/products', {
+    // 1. Opret nyt overprodukt
+    const createRes  = await fetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: parentName.trim(), status: 'draft', categories: products[0]?.categories ?? [], boat_type: [] }),
     })
     const createJson = await createRes.json()
-    const newParentId = createJson.data?.id
-    if (!newParentId) { setMsg('Fejl: kunne ikke oprette overprodukt — ' + (createJson.error ?? '')); setSaving(false); return }
+    const parentId   = createJson.data?.id
+    if (!parentId) { setMsg('Fejl: ' + (createJson.error ?? 'Kunne ikke oprette overprodukt')); setSaving(false); return }
 
+    // 2. Opret product_variants rækker
     let errors = 0
-    for (const v of products) {
-      const res = await fetch(`/api/products/${newParentId}/variants`, {
+    for (let i = 0; i < products.length; i++) {
+      const p    = products[i]
+      const vr   = variantRows[i]
+      const attrs = vr.attrs.filter(a => a.key.trim()).map(a => ({ name: a.key.trim(), value: a.val.trim() }))
+      const res  = await fetch(`/api/products/${parentId}/variants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attributes: [], ean: v.ean, sales_price: v.sales_price }),
+        body: JSON.stringify({ attributes: attrs, ean: p.ean, sales_price: p.sales_price }),
       })
       const json = await res.json()
       if (json.error) errors++
     }
 
-    if (errors > 0) { setMsg(`Oprettet overprodukt, men ${errors} produkter kunne ikke sammenkædes`); setSaving(false) }
+    if (errors > 0) { setMsg(`Oprettet overprodukt, men ${errors} varianter fejlede`); setSaving(false) }
     else { setMsg(`✓ Oprettet "${parentName.trim()}" med ${products.length} varianter`); setTimeout(() => { onDone(); onClose() }, 1200) }
   }
 
   return (
     <>
       <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-[480px] bg-white shadow-xl z-50 flex flex-col">
+      <div className="fixed right-0 top-0 h-full w-[520px] bg-white shadow-xl z-50 flex flex-col">
         <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
           <div>
-            <h3 className="font-semibold text-gray-900">Sammenkæd som varianter</h3>
-            <p className="text-xs text-gray-400 mt-0.5">Opretter nyt overprodukt → {products.length} varianter under det</p>
+            <h3 className="font-semibold text-gray-900">Opret variantfamilie</h3>
+            <p className="text-xs text-gray-400 mt-0.5">{products.length} produkter → 1 overprodukt + {products.length} varianter</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
         </div>
-        <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
+
+        <div className="flex-1 overflow-auto px-6 py-5 space-y-6">
+          {/* Overprodukt navn */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Overprodukt-navn</label>
-            <input value={parentName} onChange={e => setParentName(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-              placeholder="F.eks. ZETA Teak Cleaner Powder" />
-            <p className="text-xs text-gray-400 mt-1">Et nyt tomt overprodukt oprettes med dette navn. Alle valgte produkter sættes som varianter under det.</p>
+            <input value={parentName} onChange={e => onParentNameChange(e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="F.eks. Wirelås rustfri Duplex" />
+            <p className="text-xs text-gray-400 mt-1">Det fælles overprodukt. Varianterne grupperes under det.</p>
           </div>
+
+          {/* Per-variant attributter */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Varianter ({products.length})</label>
-            <div className="space-y-2">
-              {products.map(p => (
-                <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 rounded-lg border border-gray-200 bg-gray-50">
-                  {p.primary_image_url
-                    // eslint-disable-next-line @next/next/no-img-element
-                    ? <img src={p.primary_image_url} alt="" className="w-9 h-9 object-contain rounded border border-gray-200 bg-white shrink-0" />
-                    : <div className="w-9 h-9 rounded border border-gray-100 bg-white shrink-0" />}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm text-gray-800 leading-tight">{p.name}</div>
-                    <div className="text-xs text-gray-400 font-mono mt-0.5">{p.internal_sku}</div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Hvad adskiller hver variant?</label>
+            <p className="text-xs text-gray-400 mb-3">Nøgler synkroniseres på tværs — værdier er per variant. F.eks. størrelse = 3mm, pakke = 2 stk.</p>
+            <div className="space-y-3">
+              {products.map((p, i) => {
+                const vr     = variantRows[i]
+                const isOpen = expandedIdxs.has(i)
+                return (
+                  <div key={p.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                    {/* Korte header */}
+                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+                      {p.primary_image_url
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={p.primary_image_url} alt="" className="w-8 h-8 object-contain rounded border border-gray-200 bg-white shrink-0" />
+                        : <div className="w-8 h-8 rounded border border-gray-100 bg-gray-100 shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-500 shrink-0">{p.internal_sku}</span>
+                          <span className="text-xs text-gray-700 truncate font-medium">{p.name}</span>
+                        </div>
+                        <div className="flex gap-3 mt-0.5 text-xs text-gray-400">
+                          {p.sales_price != null && <span>Pris: <span className="text-gray-600">{p.sales_price.toLocaleString('da-DK')} kr</span></span>}
+                          {p.own_stock_quantity > 0 && <span className="text-green-600">Lager: {p.own_stock_quantity}</span>}
+                        </div>
+                      </div>
+                      <button onClick={() => setExpandedIdxs(prev => { const n = new Set(prev); isOpen ? n.delete(i) : n.add(i); return n })}
+                        className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-1" title={isOpen ? 'Skjul' : 'Vis'}>
+                        {isOpen ? '▲' : '▼'}
+                      </button>
+                    </div>
+
+                    {/* Attribut-felter */}
+                    <div className="px-3 py-2.5 space-y-1.5 border-t border-gray-100">
+                      {vr?.attrs.map((a, j) => (
+                        <div key={j} className="flex gap-1.5 items-center">
+                          <input placeholder="størrelse" value={a.key}
+                            onChange={e => setAttr(i, j, 'key', e.target.value)}
+                            className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          <span className="text-gray-300 text-xs">=</span>
+                          <input placeholder="3mm" value={a.val}
+                            onChange={e => setAttr(i, j, 'val', e.target.value)}
+                            className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                          <button onClick={() => removeAttr(j)} className="text-gray-300 hover:text-red-400 text-sm">×</button>
+                        </div>
+                      ))}
+                      <button onClick={addAttr} className="text-xs text-blue-500 hover:underline">+ Attribut</button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
+
           {msg && (
             <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>{msg}</div>
           )}
         </div>
+
         <div className="px-6 py-4 border-t border-gray-200 flex gap-2 shrink-0">
           <button onClick={save} disabled={saving || !parentName.trim()}
-            className="flex-1 px-4 py-2 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 disabled:opacity-40">
+            className="flex-1 px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40">
             {saving ? 'Opretter...' : `Opret overprodukt + ${products.length} varianter`}
           </button>
           <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">Annuller</button>
@@ -195,7 +306,7 @@ export default function ProductsPage() {
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen, setColMenuOpen] = useState(false)
   const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set())
-  const [bulkVariantOpen, setBulkVariantOpen] = useState(false)
+  const [familyPanelOpen, setFamilyPanelOpen] = useState(false)
   const [deduping,    setDeduping]    = useState(false)
   const [dedupeResult, setDedupeResult] = useState<{ message: string; deleted: number } | null>(null)
   const [selectedId,  setSelectedId]  = useState<string | null>(null)
@@ -378,10 +489,10 @@ export default function ProductsPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Bulk variant panel (modal) */}
-      {bulkVariantOpen && checkedIds.size >= 2 && (
-        <BulkVariantPanel
+      {familyPanelOpen && checkedIds.size >= 2 && (
+        <ProductVariantFamilyPanel
           products={products.filter(p => checkedIds.has(p.id))}
-          onClose={() => setBulkVariantOpen(false)}
+          onClose={() => setFamilyPanelOpen(false)}
           onDone={() => { fetchProducts(); setCheckedIds(new Set()) }}
         />
       )}
@@ -536,7 +647,7 @@ export default function ProductsPage() {
         {checkedIds.size >= 2 && (
           <div className="border-t border-purple-200 bg-purple-50 px-5 py-2.5 flex items-center gap-3 shrink-0">
             <span className="text-sm font-medium text-purple-800">{checkedIds.size} valgt</span>
-            <button onClick={() => setBulkVariantOpen(true)}
+            <button onClick={() => setFamilyPanelOpen(true)}
               className="px-3 py-1.5 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium">
               🔀 Sammenkæd som varianter
             </button>
