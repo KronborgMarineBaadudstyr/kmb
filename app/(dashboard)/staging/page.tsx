@@ -131,7 +131,7 @@ function LinkVariantsPanel({
     })
 
   const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(() => initVariantRows(defaultName))
-  const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
+  const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
 
   // Når overprodukt-navn ændres → genberegn hints
   function onParentNameChange(val: string) {
@@ -216,7 +216,7 @@ function LinkVariantsPanel({
               {variantRows.map((vr, i) => {
                 const row      = rows[i]
                 const rd       = row?.raw_data ?? {}
-                const isOpen   = expandedIdx === i
+                const isOpen   = expandedIdxs.has(i)
                 const supName  = typeof rd.supplier_product_name === 'string' ? rd.supplier_product_name : null
                 const desc     = typeof rd.short_description === 'string' ? rd.short_description
                                : typeof rd.description      === 'string' ? rd.description : null
@@ -248,7 +248,7 @@ function LinkVariantsPanel({
                         )}
                       </div>
                       <button
-                        onClick={() => setExpandedIdx(isOpen ? null : i)}
+                        onClick={() => setExpandedIdxs(prev => { const n = new Set(prev); isOpen ? n.delete(i) : n.add(i); return n })}
                         className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-1"
                         title={isOpen ? 'Skjul detaljer' : 'Vis detaljer'}
                       >
