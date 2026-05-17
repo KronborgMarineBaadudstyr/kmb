@@ -77,6 +77,32 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 // ── Sammenkæd-panel ───────────────────────────────────────────────────────────
 type LinkVariantsRow = { stagingId: string; name: string; sku: string; attrs: { key: string; val: string }[] }
 
+// Forsøger at udtrække det der adskiller en leverandørproduktnavn fra overprodukt-navn.
+// "Wirelås rustfri Duplex 3 mm 2 stk." → "3 mm"
+// "Ankerkæde 10mm HT" → "10 mm"
+function extractSizeHint(supplierName: string, parentName: string): string {
+  // Fjern fælles præfiks (case-insensitiv)
+  const base = parentName.trim().toLowerCase()
+  const full = supplierName.trim()
+  const lower = full.toLowerCase()
+  const remainder = lower.startsWith(base)
+    ? full.slice(base.length).trim()
+    : full
+
+  // Find mm/cm/m størrelser
+  const mmMatch = remainder.match(/\b(\d+(?:[,\.]\d+)?)\s*(mm|cm|m)\b/i)
+  if (mmMatch) return `${mmMatch[1]} ${mmMatch[2].toLowerCase()}`
+
+  // Find stykantal (2 stk, 3 stk)
+  const stkMatch = remainder.match(/\b(\d+)\s*stk\.?/i)
+  if (stkMatch) return `${stkMatch[1]} stk`
+
+  // Returner resten hvis den er kort nok
+  if (remainder.length > 0 && remainder.length <= 30) return remainder
+
+  return ''
+}
+
 function LinkVariantsPanel({
   rows,
   onClose,
@@ -88,9 +114,29 @@ function LinkVariantsPanel({
 }) {
   const defaultName = rows[0]?.normalized_name ?? ''
   const [parentName, setParentName] = useState(defaultName)
-  const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(
-    rows.map(r => ({ stagingId: r.id, name: r.normalized_name, sku: r.normalized_sku, attrs: [{ key: '', val: '' }] }))
-  )
+
+  // Initialiser med auto-udtræk fra leverandørens produktnavn
+  const initVariantRows = (pName: string): LinkVariantsRow[] =>
+    rows.map(r => {
+      const supplierName = typeof r.raw_data?.supplier_product_name === 'string'
+        ? r.raw_data.supplier_product_name
+        : r.normalized_name
+      const hint = extractSizeHint(supplierName, pName)
+      return {
+        stagingId: r.id,
+        name: r.normalized_name,
+        sku: r.normalized_sku,
+        attrs: hint ? [{ key: 'størrelse', val: hint }] : [{ key: '', val: '' }],
+      }
+    })
+
+  const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(() => initVariantRows(defaultName))
+
+  // Når overprodukt-navn ændres → genberegn hints
+  function onParentNameChange(val: string) {
+    setParentName(val)
+    setVariantRows(initVariantRows(val))
+  }
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -154,7 +200,7 @@ function LinkVariantsPanel({
             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Overprodukt-navn</label>
             <input
               value={parentName}
-              onChange={e => setParentName(e.target.value)}
+              onChange={e => onParentNameChange(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               placeholder="F.eks. Wirelås rustfri Duplex"
             />
