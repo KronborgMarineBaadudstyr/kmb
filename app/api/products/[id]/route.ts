@@ -23,7 +23,7 @@ export async function GET(
         own_stock_reserved, sales_price, sale_price, ean, woo_variation_id, status
       ),
       product_suppliers (
-        id, priority, is_active, supplier_sku, supplier_product_name,
+        id, priority, is_active, variant_id, supplier_sku, supplier_product_name,
         purchase_price, recommended_sales_price, delivery_days_min, delivery_days_max,
         moq, supplier_stock_quantity, supplier_stock_reserved, item_status,
         supplier_images, supplier_files, extra_data, updated_at,
@@ -37,13 +37,33 @@ export async function GET(
     return NextResponse.json({ error: 'Produkt ikke fundet' }, { status: 404 })
   }
 
-  // Sortér billeder og varianter
+  // Build a map: variant_id → supplier info (from product_suppliers with variant_id set)
+  type SupplierRow = { variant_id: string | null; supplier_sku: string; purchase_price: number | null; supplier_stock_quantity: number; suppliers: { name: string } }
+  const supplierByVariant = new Map<string, { name: string; supplier_sku: string; purchase_price: number | null; supplier_stock_quantity: number }>()
+  for (const ps of (product.product_suppliers ?? []) as SupplierRow[]) {
+    if (ps.variant_id) {
+      supplierByVariant.set(ps.variant_id, {
+        name: ps.suppliers.name,
+        supplier_sku: ps.supplier_sku,
+        purchase_price: ps.purchase_price,
+        supplier_stock_quantity: ps.supplier_stock_quantity,
+      })
+    }
+  }
+
+  // Enrich product_variants with their linked supplier
+  const enrichedVariants = [...(product.product_variants ?? [])]
+    .sort((a, b) => a.internal_variant_sku.localeCompare(b.internal_variant_sku))
+    .map(v => ({
+      ...v,
+      supplier: supplierByVariant.get(v.id) ?? null,
+    }))
+
   const sorted = {
     ...product,
-    product_images:   [...(product.product_images ?? [])].sort((a, b) => a.position - b.position),
-    product_files:    [...(product.product_files   ?? [])].sort((a, b) => a.position - b.position),
-    product_variants: [...(product.product_variants ?? [])].sort((a, b) =>
-      a.internal_variant_sku.localeCompare(b.internal_variant_sku)),
+    product_images:    [...(product.product_images ?? [])].sort((a, b) => a.position - b.position),
+    product_files:     [...(product.product_files   ?? [])].sort((a, b) => a.position - b.position),
+    product_variants:  enrichedVariants,
     product_suppliers: [...(product.product_suppliers ?? [])].sort((a, b) => a.priority - b.priority),
   }
 
@@ -55,7 +75,7 @@ const ALLOWED_FIELDS = [
   'tax_class', 'ean', 'manufacturer_sku', 'brand', 'slug', 'weight',
   'length', 'width', 'height', 'categories', 'tags', 'attributes',
   'specifications', 'video_url', 'meta_title', 'meta_description', 'status',
-  'parent_product_id', 'variant_attributes', 'boat_type',
+  'boat_type',
 ]
 
 export async function PATCH(

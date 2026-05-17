@@ -528,15 +528,15 @@ export default function StagingPage() {
       return
     }
 
-    // Link as variant if requested
+    // Link as variant if requested — create a product_variants row under the parent
     if (isVariant && parent && json.product_id) {
-      const attrs = Object.fromEntries(
-        (groupVariantAttrs[groupId] ?? []).filter(a => a.key.trim()).map(a => [a.key.trim(), a.val.trim()])
-      )
+      const attrList = (groupVariantAttrs[groupId] ?? [])
+        .filter(a => a.key.trim())
+        .map(a => ({ name: a.key.trim(), value: a.val.trim() }))
       await fetch(`/api/products/${parent.id}/variants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variant_product_id: json.product_id, variant_attributes: attrs }),
+        body: JSON.stringify({ attributes: attrList }),
       })
       setGroupActionMsg(m => ({ ...m, [groupId]: `✓ Produkt oprettet som variant af "${parent.name}"` }))
     } else {

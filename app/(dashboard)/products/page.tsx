@@ -22,8 +22,6 @@ type Product = {
   ean: string | null
   manufacturer_sku: string | null
   weight: number | null
-  parent_product_id: string | null
-  variant_attributes: Record<string, string> | null
   variant_count: number
   primary_image_url: string | null
   image_count: number
@@ -69,22 +67,25 @@ function VariantMergePanel({
     if (!selectedOther) return
     setSaving(true)
     setMsg(null)
-    const parentId  = parentChoice === 'this' ? product.id : selectedOther.id
-    const variantId = parentChoice === 'this' ? selectedOther.id : product.id
+    const parentId = parentChoice === 'this' ? product.id : selectedOther.id
+    const variantProduct = parentChoice === 'this' ? selectedOther : product
 
-    // Set variant_attributes on the variant product
-    const variantAttrs = Object.fromEntries(
-      attrs.filter(a => a.key.trim()).map(a => [a.key.trim(), a.val.trim()])
-    )
+    // Build attributes array from both this product and the other
+    const sharedAttrs = attrs.filter(a => a.key.trim()).map(a => ({ name: a.key.trim(), value: a.val.trim() }))
 
+    // Create a product_variants row for the variant product under the chosen parent
     const res = await fetch(`/api/products/${parentId}/variants`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ variant_product_id: variantId, variant_attributes: variantAttrs }),
+      body: JSON.stringify({
+        attributes:   sharedAttrs,
+        ean:          variantProduct.ean,
+        sales_price:  variantProduct.sales_price,
+      }),
     })
     const json = await res.json()
     if (json.error) { setMsg('Fejl: ' + json.error); setSaving(false); return }
-    setMsg('✓ Varianter sammenkædet!')
+    setMsg('✓ Variant oprettet under overproduktet!')
     setTimeout(() => { onDone(); onClose() }, 800)
     setSaving(false)
   }
@@ -266,13 +267,17 @@ function BulkVariantPanel({
       return
     }
 
-    // 2. Sæt alle valgte produkter som varianter under det nye overprodukt
+    // 2. Opret product_variants rækker for hvert valgt produkt
     let errors = 0
     for (const v of products) {
       const res = await fetch(`/api/products/${newParentId}/variants`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variant_product_id: v.id }),
+        body: JSON.stringify({
+          attributes:  [],
+          ean:         v.ean,
+          sales_price: v.sales_price,
+        }),
       })
       const json = await res.json()
       if (json.error) errors++
@@ -433,7 +438,6 @@ export default function ProductsPage() {
   const [visibleCols,  setVisibleCols]  = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen,  setColMenuOpen]  = useState(false)
   const [mergeProduct,   setMergeProduct]   = useState<Product | null>(null)
-  const [hideVariants,   setHideVariants]   = useState(true)
   const [checkedIds,     setCheckedIds]     = useState<Set<string>>(new Set())
   const [bulkVariantOpen,setBulkVariantOpen]= useState(false)
   const [deduping,       setDeduping]       = useState(false)
@@ -473,7 +477,6 @@ export default function ProductsPage() {
       search, status, category,
       page: String(page), per_page: '50',
       sort, order,
-      hide_variants: String(hideVariants),
     })
     if (supplierId) params.set('supplier_id', supplierId)
     const res  = await fetch(`/api/products?${params}`)
@@ -483,7 +486,7 @@ export default function ProductsPage() {
     setTotalPages(json.total_pages ?? 1)
     setLoading(false)
     setCheckedIds(new Set())
-  }, [search, status, category, supplierId, page, sort, order, hideVariants])
+  }, [search, status, category, supplierId, page, sort, order])
 
   function toggleCheck(id: string) {
     setCheckedIds(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
@@ -559,11 +562,6 @@ export default function ProductsPage() {
               {p.variant_count > 0 && (
                 <span className="shrink-0 text-xs px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-700 font-medium">
                   🔀 {p.variant_count}
-                </span>
-              )}
-              {p.parent_product_id && (
-                <span className="shrink-0 text-xs px-1.5 py-0.5 rounded-full bg-purple-50 text-purple-500">
-                  variant
                 </span>
               )}
             </div>
@@ -784,19 +782,6 @@ export default function ProductsPage() {
               </div>
             )}
           </div>
-
-          {/* Vis/skjul varianter */}
-          <button
-            onClick={() => { setHideVariants(v => !v); setPage(1) }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm border rounded-md transition-colors ${
-              hideVariants
-                ? 'border-gray-300 text-gray-500 hover:border-gray-400'
-                : 'border-purple-400 bg-purple-50 text-purple-700'
-            }`}
-            title={hideVariants ? 'Varianter er skjult — klik for at vise dem' : 'Varianter vises — klik for at skjule dem'}
-          >
-            🔀 {hideVariants ? 'Vis varianter' : 'Skjul varianter'}
-          </button>
 
           {/* Dedupliker */}
           <button

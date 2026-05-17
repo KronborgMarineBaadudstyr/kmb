@@ -12,18 +12,17 @@ export async function GET(request: Request) {
   const supplierId = url.searchParams.get('supplier_id') || ''
   const page       = Math.max(1, parseInt(url.searchParams.get('page')     || '1',  10))
   const perPage    = Math.min(100, parseInt(url.searchParams.get('per_page') || '50', 10))
-  const sort          = url.searchParams.get('sort')  || 'name'
-  const order         = url.searchParams.get('order') === 'desc' ? false : true
-  const hideVariants  = url.searchParams.get('hide_variants') !== 'false' // default true
+  const sort       = url.searchParams.get('sort')  || 'name'
+  const order      = url.searchParams.get('order') === 'desc' ? false : true
 
-  const supabase  = createServiceClient()
-  const from      = (page - 1) * perPage
-  const to        = from + perPage - 1
+  const supabase = createServiceClient()
+  const from     = (page - 1) * perPage
+  const to       = from + perPage - 1
 
   const allowedSortCols = ['name', 'internal_sku', 'sales_price', 'own_stock_quantity', 'created_at', 'updated_at']
-  const sortCol   = allowedSortCols.includes(sort) ? sort : 'name'
+  const sortCol = allowedSortCols.includes(sort) ? sort : 'name'
 
-  // Hvis der filtreres på leverandør, hent produkt-IDs via product_suppliers først
+  // Filter by supplier via product_suppliers join
   let supplierProductIds: string[] | null = null
   if (supplierId) {
     const { data: spRows } = await supabase
@@ -34,7 +33,6 @@ export async function GET(request: Request) {
       .not('product_id', 'is', null)
 
     supplierProductIds = [...new Set((spRows ?? []).map(r => r.product_id).filter(Boolean))]
-    // Ingen produkter hos denne leverandør → returner tomt resultat
     if (supplierProductIds.length === 0) {
       return NextResponse.json({ data: [], total: 0, page, per_page: perPage, total_pages: 0 })
     }
@@ -61,8 +59,6 @@ export async function GET(request: Request) {
       weight,
       unit,
       unit_size,
-      parent_product_id,
-      variant_attributes,
       boat_type,
       created_at,
       updated_at,
@@ -71,13 +67,10 @@ export async function GET(request: Request) {
     .order(sortCol, { ascending: order })
     .range(from, to)
 
-  if (search) {
-    query = query.or(`name.ilike.%${search}%,internal_sku.ilike.%${search}%,woo_bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%`)
-  }
-  if (status)               query = query.eq('status', status)
-  if (category)             query = query.contains('categories', [category])
-  if (supplierProductIds)   query = query.in('id', supplierProductIds)
-  if (hideVariants)         query = query.is('parent_product_id', null)
+  if (search)             query = query.or(`name.ilike.%${search}%,internal_sku.ilike.%${search}%,woo_bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%`)
+  if (status)             query = query.eq('status', status)
+  if (category)           query = query.contains('categories', [category])
+  if (supplierProductIds) query = query.in('id', supplierProductIds)
 
   const { data, error, count } = await query
 
@@ -85,18 +78,18 @@ export async function GET(request: Request) {
 
   const productList = (data ?? []) as Array<Record<string, unknown> & { id: string }>
 
-  // Fetch variant counts for all products on this page in one query
+  // Fetch variant counts from product_variants table
   const pageIds = productList.map(p => p.id)
   const { data: variantRows } = pageIds.length
     ? await supabase
-        .from('products')
-        .select('parent_product_id')
-        .in('parent_product_id', pageIds)
+        .from('product_variants')
+        .select('product_id')
+        .in('product_id', pageIds)
     : { data: [] }
 
   const variantCounts = new Map<string, number>()
-  for (const row of (variantRows ?? []) as { parent_product_id: string }[]) {
-    variantCounts.set(row.parent_product_id, (variantCounts.get(row.parent_product_id) ?? 0) + 1)
+  for (const row of (variantRows ?? []) as { product_id: string }[]) {
+    variantCounts.set(row.product_id, (variantCounts.get(row.product_id) ?? 0) + 1)
   }
 
   const products = productList.map(p => {
@@ -120,7 +113,7 @@ export async function GET(request: Request) {
   })
 }
 
-// POST /api/products — opret nyt produkt (bruges til overprodukt ved bulk variant-sammenkædning)
+// POST /api/products — opret nyt produkt
 export async function POST(request: Request) {
   const supabase = createServiceClient()
   let body: Record<string, unknown>
@@ -134,12 +127,11 @@ export async function POST(request: Request) {
   const { data, error } = await supabase
     .from('products')
     .insert({
-      internal_sku:       `KMB-${ts}-${rnd}`,
-      name:               body.name,
-      status:             body.status ?? 'draft',
-      categories:         body.categories ?? [],
-      boat_type:          body.boat_type ?? [],
-      variant_attributes: {},
+      internal_sku: `KMB-${ts}-${rnd}`,
+      name:         body.name,
+      status:       body.status ?? 'draft',
+      categories:   body.categories ?? [],
+      boat_type:    body.boat_type  ?? [],
     })
     .select('id, internal_sku, name')
     .single()

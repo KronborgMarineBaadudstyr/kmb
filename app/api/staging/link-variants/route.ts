@@ -15,8 +15,10 @@ function generateSku(): string {
 //   parent_name: string,
 //   variants: Array<{ staging_id: string, variant_attrs: Record<string, string> }>
 // }
-// Creates 1 parent product + N variant products (one per staging row),
-// links them with parent_product_id, creates product_suppliers, marks staging as matched.
+//
+// Creates 1 parent product + N product_variants rows (one per staging row),
+// creates product_suppliers on the PARENT with variant_id set,
+// marks staging rows as matched.
 export async function POST(request: Request) {
   const supabase = createServiceClient()
 
@@ -49,16 +51,34 @@ export async function POST(request: Request) {
     : []
   const boatType: string[] = assigned.boatType
 
-  // 3. Create parent product (no supplier, just a container)
+  // Pick the staging row with the most complete raw_data to fill parent-level fields
+  function completenessScore(raw: Record<string, unknown>): number {
+    return ['description','short_description','brand','weight','supplier_images'].reduce((n, f) => {
+      const v = raw[f]; if (!v) return n
+      if (typeof v === 'string' && v.trim()) return n + 1
+      if (typeof v === 'number') return n + 1
+      if (Array.isArray(v) && v.length > 0) return n + 1
+      return n
+    }, 0)
+  }
+  const primaryStaging = [...stagingRows].sort((a, b) =>
+    completenessScore(b.raw_data as Record<string, unknown>) - completenessScore(a.raw_data as Record<string, unknown>)
+  )[0]
+  const primaryRaw = (primaryStaging?.raw_data ?? {}) as Record<string, unknown>
+
+  // 3. Create parent product
   const { data: parentProduct, error: ppErr } = await supabase
     .from('products')
     .insert({
-      internal_sku:  generateSku(),
-      name:          parent_name.trim(),
-      status:        'draft',
+      internal_sku:      generateSku(),
+      name:              parent_name.trim(),
+      status:            'draft',
       categories,
-      boat_type:     boatType,
-      variant_attributes: {},
+      boat_type:         boatType,
+      description:       typeof primaryRaw.description      === 'string' ? primaryRaw.description      : null,
+      short_description: typeof primaryRaw.short_description === 'string' ? primaryRaw.short_description : null,
+      brand:             typeof primaryRaw.brand             === 'string' ? primaryRaw.brand             : null,
+      weight:            typeof primaryRaw.weight === 'number' && isFinite(primaryRaw.weight as number) ? primaryRaw.weight : null,
     })
     .select('id')
     .single()
@@ -69,30 +89,29 @@ export async function POST(request: Request) {
 
   const parentId = parentProduct.id
 
-  // 4. Create one variant product per staging row
-  const variantRows = variants.map(v => {
+  // 4. Create product_variants rows — one per staging row
+  //    attributes: [{name: key, value: val}, ...]
+  const variantInserts = variants.map(v => {
     const staging = stagingRows.find(r => r.id === v.staging_id)
     const raw     = (staging?.raw_data ?? {}) as Record<string, unknown>
+    const attrs   = Object.entries(v.variant_attrs ?? {}).map(([name, value]) => ({ name, value }))
     return {
-      internal_sku:       generateSku(),
-      name:               parent_name.trim(),
-      parent_product_id:  parentId,
-      variant_attributes: v.variant_attrs ?? {},
-      status:             'draft',
-      categories,
-      boat_type:          boatType,
-      description:        typeof raw.description === 'string' ? raw.description : null,
-      short_description:  typeof raw.short_description === 'string' ? raw.short_description : null,
-      brand:              typeof raw.brand === 'string' ? raw.brand : null,
-      weight:             typeof raw.weight === 'number' && isFinite(raw.weight) ? raw.weight : null,
-      ean:                staging?.normalized_ean ?? null,
+      product_id:           parentId,
+      internal_variant_sku: generateSku(),
+      attributes:           attrs,
+      ean:                  staging?.normalized_ean ?? null,
+      sales_price:          typeof raw.recommended_sales_price === 'number' && isFinite(raw.recommended_sales_price as number)
+                              ? raw.recommended_sales_price : null,
+      own_stock_quantity:   0,
+      own_stock_reserved:   0,
+      status:               'active',
     }
   })
 
   const { data: createdVariants, error: cvErr } = await supabase
-    .from('products')
-    .insert(variantRows)
-    .select('id, internal_sku')
+    .from('product_variants')
+    .insert(variantInserts)
+    .select('id, internal_variant_sku')
 
   if (cvErr || !createdVariants?.length) {
     // Rollback parent
@@ -100,30 +119,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: cvErr?.message ?? 'Kunne ikke oprette varianter' }, { status: 500 })
   }
 
-  // Map staging_id → variant product_id via position (same order as insert)
-  const skuToId = new Map<string, string>()
-  for (const v of createdVariants as { id: string; internal_sku: string }[]) {
-    skuToId.set(v.internal_sku, v.id)
-  }
-  // variantRows[i].internal_sku → createdVariants[i]
-  const stagingToProductId = new Map<string, string>()
-  for (let i = 0; i < variantRows.length; i++) {
-    const productId = skuToId.get(variantRows[i].internal_sku)
-    if (productId) stagingToProductId.set(variants[i].staging_id, productId)
+  // Map staging_id → variant id via position (same order as insert)
+  const stagingToVariantId = new Map<string, string>()
+  for (let i = 0; i < variantInserts.length; i++) {
+    const variantId = (createdVariants as { id: string; internal_variant_sku: string }[])
+      .find(cv => cv.internal_variant_sku === variantInserts[i].internal_variant_sku)?.id
+    if (variantId) stagingToVariantId.set(variants[i].staging_id, variantId)
   }
 
-  // 5. Create product_suppliers for each variant
+  // 5. Create product_suppliers on the PARENT with variant_id set
   const supplierInserts = stagingRows.map(s => {
-    const productId = stagingToProductId.get(s.id)
-    const raw = (s.raw_data ?? {}) as Record<string, unknown>
+    const raw       = (s.raw_data ?? {}) as Record<string, unknown>
+    const variantId = stagingToVariantId.get(s.id)
     return {
-      product_id:              productId,
+      product_id:              parentId,
+      variant_id:              variantId ?? null,
       supplier_id:             s.supplier_id,
       supplier_sku:            s.normalized_sku,
       supplier_product_name:   typeof raw.supplier_product_name === 'string' ? raw.supplier_product_name : s.normalized_name,
-      purchase_price:          typeof raw.purchase_price === 'number' && isFinite(raw.purchase_price) ? raw.purchase_price : null,
-      recommended_sales_price: typeof raw.recommended_sales_price === 'number' && isFinite(raw.recommended_sales_price) ? raw.recommended_sales_price : null,
-      supplier_stock_quantity: typeof raw.supplier_stock_quantity === 'number' ? Math.max(0, Math.round(raw.supplier_stock_quantity)) : 0,
+      purchase_price:          typeof raw.purchase_price === 'number' && isFinite(raw.purchase_price as number) ? raw.purchase_price : null,
+      recommended_sales_price: typeof raw.recommended_sales_price === 'number' && isFinite(raw.recommended_sales_price as number) ? raw.recommended_sales_price : null,
+      supplier_stock_quantity: typeof raw.supplier_stock_quantity === 'number' ? Math.max(0, Math.round(raw.supplier_stock_quantity as number)) : 0,
       supplier_stock_reserved: 0,
       supplier_images: Array.isArray(raw.supplier_images) ? raw.supplier_images : [],
       supplier_files:  Array.isArray(raw.supplier_files)  ? raw.supplier_files  : [],
@@ -131,7 +147,7 @@ export async function POST(request: Request) {
       item_status: 'active',
       is_active:   true,
     }
-  }).filter(r => r.product_id)
+  })
 
   if (supplierInserts.length > 0) {
     await supabase.from('product_suppliers').insert(supplierInserts)
@@ -145,9 +161,9 @@ export async function POST(request: Request) {
     .in('id', stagingIds)
 
   return NextResponse.json({
-    ok: true,
-    parent_id:   parentId,
-    parent_name: parent_name.trim(),
+    ok:               true,
+    parent_id:        parentId,
+    parent_name:      parent_name.trim(),
     variants_created: createdVariants.length,
   })
 }

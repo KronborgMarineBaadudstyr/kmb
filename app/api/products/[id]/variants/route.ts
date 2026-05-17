@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 // GET /api/products/[id]/variants
-// Returns all variants of a product (siblings sharing the same parent, or children of this product)
+// Returns product_variants rows for product [id]
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -12,92 +12,68 @@ export async function GET(
   const { id } = await params
   const supabase = createServiceClient()
 
-  // Find the effective parent id
-  const { data: self } = await supabase
-    .from('products')
-    .select('id, name, parent_product_id, variant_attributes, internal_sku')
-    .eq('id', id)
-    .single()
+  const { data, error } = await supabase
+    .from('product_variants')
+    .select('id, internal_variant_sku, attributes, ean, sales_price, sale_price, own_stock_quantity, own_stock_reserved, status, woo_variation_id')
+    .eq('product_id', id)
+    .order('internal_variant_sku')
 
-  if (!self) return NextResponse.json({ error: 'Ikke fundet' }, { status: 404 })
-
-  const parentId = self.parent_product_id ?? self.id
-
-  // Load parent
-  const { data: parent } = await supabase
-    .from('products')
-    .select('id, name, internal_sku, variant_attributes')
-    .eq('id', parentId)
-    .single()
-
-  // Load all children
-  const { data: variants } = await supabase
-    .from('products')
-    .select('id, name, internal_sku, variant_attributes, status, ean')
-    .eq('parent_product_id', parentId)
-    .order('name')
-
-  return NextResponse.json({ parent, variants: variants ?? [] })
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ data: data ?? [] })
 }
 
 // POST /api/products/[id]/variants
-// Link another product as a variant of [id] (making [id] the parent)
-// Body: { variant_product_id: string, variant_attributes?: Record<string,string> }
+// Create a new product_variant row linked to product [id]
+// Body: { attributes: [{name,value}], ean?, sales_price?, own_stock_quantity? }
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { id: parentId } = await params
+  const { id: productId } = await params
   const supabase = createServiceClient()
 
-  const body = await request.json() as {
-    variant_product_id: string
-    variant_attributes?: Record<string, string>
+  let body: Record<string, unknown>
+  try { body = await request.json() } catch {
+    return NextResponse.json({ error: 'Ugyldig JSON' }, { status: 400 })
   }
 
-  if (!body.variant_product_id) {
-    return NextResponse.json({ error: 'variant_product_id påkrævet' }, { status: 400 })
-  }
+  const ts  = Date.now().toString(36).toUpperCase()
+  const rnd = Math.random().toString(36).slice(2, 6).toUpperCase()
 
-  // Ensure parent itself has no parent (can't chain)
-  const { data: parent } = await supabase
-    .from('products')
-    .select('parent_product_id')
-    .eq('id', parentId)
+  const { data, error } = await supabase
+    .from('product_variants')
+    .insert({
+      product_id:           productId,
+      internal_variant_sku: `${ts}-${rnd}`,
+      attributes:           body.attributes ?? [],
+      ean:                  body.ean ?? null,
+      sales_price:          body.sales_price ?? null,
+      sale_price:           body.sale_price ?? null,
+      own_stock_quantity:   body.own_stock_quantity ?? 0,
+      own_stock_reserved:   0,
+      status:               'active',
+    })
+    .select('id, internal_variant_sku')
     .single()
 
-  if (parent?.parent_product_id) {
-    return NextResponse.json({ error: 'Forælderen er selv en variant — vælg rod-produktet som forælder' }, { status: 400 })
-  }
-
-  const { error } = await supabase
-    .from('products')
-    .update({
-      parent_product_id:  parentId,
-      variant_attributes: body.variant_attributes ?? {},
-      updated_at:         new Date().toISOString(),
-    })
-    .eq('id', body.variant_product_id)
-
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ data })
 }
 
 // DELETE /api/products/[id]/variants?variant_id=...
-// Unlink a variant (set parent_product_id = null)
+// Delete a product_variant row
 export async function DELETE(
   request: Request,
-  { params }: { params: Promise<{ id: string }> },
+  _ctx: { params: Promise<{ id: string }> },
 ) {
-  await params
   const supabase  = createServiceClient()
   const variantId = new URL(request.url).searchParams.get('variant_id')
 
   if (!variantId) return NextResponse.json({ error: 'variant_id påkrævet' }, { status: 400 })
 
   const { error } = await supabase
-    .from('products')
-    .update({ parent_product_id: null, variant_attributes: {}, updated_at: new Date().toISOString() })
+    .from('product_variants')
+    .delete()
     .eq('id', variantId)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

@@ -5,14 +5,14 @@ export const dynamic = 'force-dynamic'
 
 // POST /api/products/deduplicate
 // Finds products with identical names, keeps the one with most product_suppliers,
-// merges all product_suppliers onto the winner, updates parent_product_id refs, deletes duplicates.
+// merges all product_suppliers onto the winner, deletes duplicates.
 export async function POST() {
   const supabase = createServiceClient()
 
   // 1. Load all products
   const { data: products, error: pErr } = await supabase
     .from('products')
-    .select('id, name, parent_product_id')
+    .select('id, name')
     .order('name')
 
   if (pErr || !products) {
@@ -30,7 +30,7 @@ export async function POST() {
   }
 
   // 3. Group by normalized name
-  const groups = new Map<string, Array<{ id: string; name: string; parent_product_id: string | null }>>()
+  const groups = new Map<string, Array<{ id: string; name: string }>>()
   for (const p of products) {
     const key = (p.name ?? '').toLowerCase().trim()
     if (!key) continue
@@ -55,8 +55,8 @@ export async function POST() {
       return diff !== 0 ? diff : a.id.localeCompare(b.id)
     })
 
-    const winner = sorted[0]
-    const losers = sorted.slice(1)
+    const winner  = sorted[0]
+    const losers  = sorted.slice(1)
     const loserIds = losers.map(l => l.id)
 
     // Get winner's existing supplier IDs to avoid duplicates
@@ -68,7 +68,6 @@ export async function POST() {
     const winnerSupplierSet = new Set((winnerSuppliers ?? []).map(r => r.supplier_id as string))
 
     for (const loser of losers) {
-      // Get loser's suppliers
       const { data: loserSuppliers } = await supabase
         .from('product_suppliers')
         .select('supplier_id')
@@ -77,7 +76,6 @@ export async function POST() {
       const toMove   = (loserSuppliers ?? []).filter(r => !winnerSupplierSet.has(r.supplier_id)).map(r => r.supplier_id as string)
       const toDelete = (loserSuppliers ?? []).filter(r =>  winnerSupplierSet.has(r.supplier_id)).map(r => r.supplier_id as string)
 
-      // Move non-conflicting suppliers to winner
       if (toMove.length > 0) {
         const { error: moveErr } = await supabase
           .from('product_suppliers')
@@ -88,7 +86,6 @@ export async function POST() {
         else toMove.forEach(sid => winnerSupplierSet.add(sid))
       }
 
-      // Delete duplicate supplier entries on loser
       if (toDelete.length > 0) {
         await supabase
           .from('product_suppliers')
@@ -97,14 +94,14 @@ export async function POST() {
           .in('supplier_id', toDelete)
       }
 
-      // Redirect any variant parent refs
+      // Move product_variants to the winner
       await supabase
-        .from('products')
-        .update({ parent_product_id: winner.id })
-        .eq('parent_product_id', loser.id)
+        .from('product_variants')
+        .update({ product_id: winner.id })
+        .eq('product_id', loser.id)
     }
 
-    // Delete all loser products
+    // Delete all loser products (product_images, product_files cascade)
     const { error: delErr } = await supabase
       .from('products')
       .delete()
@@ -118,9 +115,9 @@ export async function POST() {
   }
 
   return NextResponse.json({
-    groups: dupeGroups.length,
+    groups:  dupeGroups.length,
     deleted: totalDeleted,
-    errors: errors.length > 0 ? errors : undefined,
-    message: `Fandt ${dupeGroups.length} dublet-grupper. Slettede ${totalDeleted} dubletter og samlede leverandørlinks på det bedste produkt.`,
+    errors:  errors.length > 0 ? errors : undefined,
+    message: `Fandt ${dupeGroups.length} dublet-grupper. Slettede ${totalDeleted} dubletter.`,
   })
 }
