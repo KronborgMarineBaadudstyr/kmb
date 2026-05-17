@@ -226,6 +226,7 @@ function LinkVariantsPanel({
                 const row      = rows[i]
                 const rd       = row?.raw_data ?? {}
                 const isOpen   = expandedIdxs.has(i)
+                function autoOpen() { if (!isOpen) setExpandedIdxs(prev => { const n = new Set(prev); n.add(i); return n }) }
                 const supName  = typeof rd.supplier_product_name === 'string' ? rd.supplier_product_name : null
                 const desc     = typeof rd.short_description === 'string' ? rd.short_description
                                : typeof rd.description      === 'string' ? rd.description : null
@@ -280,6 +281,7 @@ function LinkVariantsPanel({
                             placeholder="størrelse"
                             value={a.key}
                             onChange={e => setAttr(i, j, 'key', e.target.value)}
+                            onFocus={autoOpen}
                             className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
                           />
                           <span className="text-gray-300 text-xs">=</span>
@@ -287,6 +289,7 @@ function LinkVariantsPanel({
                             placeholder="3mm"
                             value={a.val}
                             onChange={e => setAttr(i, j, 'val', e.target.value)}
+                            onFocus={autoOpen}
                             className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
                           />
                           <button onClick={() => removeAttr(i, j)} className="text-gray-300 hover:text-red-400 text-sm">×</button>
