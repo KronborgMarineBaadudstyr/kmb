@@ -21,9 +21,15 @@ type Variant = {
   attributes: { name: string; value: string }[]
   own_stock_quantity: number; own_stock_reserved: number
   sales_price: number | null; sale_price: number | null; ean: string | null
+  weight: number | null
   woo_variation_id: number | null; status: string
   // supplier linked to this specific variant (via product_suppliers.variant_id)
-  supplier?: { name: string; supplier_sku: string; purchase_price: number | null; supplier_stock_quantity: number }
+  supplier?: {
+    name: string; supplier_sku: string
+    purchase_price: number | null
+    supplier_stock_quantity: number
+    image_url?: string | null
+  }
 }
 type ProductImage = { id: string; url: string; alt_text: string | null; is_primary: boolean; position: number; source: string; storage_path: string | null }
 type ProductFile  = { id: string; url: string; file_name: string; file_type: string; language: string; position: number; source: string }
@@ -207,7 +213,7 @@ function Field({ label, value, mono = false }: { label: string; value: React.Rea
   )
 }
 
-// ─── Variant editor (product_variants table) ──────────────────────────────────
+// ─── Variant editor — card-based, matches staging LinkVariantsPanel ───────────
 function VariantsEditor({
   variants,
   onChange,
@@ -215,53 +221,8 @@ function VariantsEditor({
   variants: Variant[]
   onChange: (updated: Variant[]) => void
 }) {
-  const [savingId, setSavingId] = useState<string | null>(null)
-  const [newKey, setNewKey]     = useState('')
-
-  // All attribute keys across all variants
-  const allKeys = Array.from(
-    new Set(variants.flatMap(v => (v.attributes ?? []).map(a => a.name)))
-  )
-
-  function getAttrVal(v: Variant, key: string) {
-    return v.attributes?.find(a => a.name === key)?.value ?? ''
-  }
-
-  function setAttrVal(variant: Variant, key: string, value: string) {
-    const attrs = (variant.attributes ?? []).map(a => a.name === key ? { ...a, value } : a)
-    if (!attrs.find(a => a.name === key)) attrs.push({ name: key, value })
-    patchVariant(variant, { attributes: attrs })
-  }
-
-  function addAttrKey(key: string) {
-    const trimmed = key.trim()
-    if (!trimmed) return
-    // Add the key (empty value) to ALL variants missing it — bulk PATCH each
-    const updated = variants.map(v => {
-      if (v.attributes?.find(a => a.name === trimmed)) return v
-      const attrs = [...(v.attributes ?? []), { name: trimmed, value: '' }]
-      fetch(`/api/products/variants/${v.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attributes: attrs }),
-      })
-      return { ...v, attributes: attrs }
-    })
-    onChange(updated)
-  }
-
-  function removeAttrKey(key: string) {
-    const updated = variants.map(v => {
-      const attrs = (v.attributes ?? []).filter(a => a.name !== key)
-      fetch(`/api/products/variants/${v.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attributes: attrs }),
-      })
-      return { ...v, attributes: attrs }
-    })
-    onChange(updated)
-  }
+  const [savingId,     setSavingId]     = useState<string | null>(null)
+  const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
 
   async function patchVariant(variant: Variant, fields: Partial<Variant>) {
     setSavingId(variant.id)
@@ -274,117 +235,215 @@ function VariantsEditor({
     setSavingId(null)
   }
 
+  // Attribute helpers — key changes sync across ALL variants; value only changes current
+  function setAttr(variantIdx: number, attrIdx: number, field: 'name' | 'value', val: string) {
+    const updated = variants.map((v, vi) => {
+      if (vi === variantIdx) {
+        return { ...v, attributes: v.attributes.map((a, ai) => ai === attrIdx ? { ...a, [field]: val } : a) }
+      }
+      if (field === 'name' && attrIdx < v.attributes.length) {
+        return { ...v, attributes: v.attributes.map((a, ai) => ai === attrIdx ? { ...a, name: val } : a) }
+      }
+      return v
+    })
+    onChange(updated)
+    // Save only the variant that changed (key sync saves on blur via individual patchVariant calls)
+  }
+
+  function saveAttr(variantIdx: number) {
+    patchVariant(variants[variantIdx], { attributes: variants[variantIdx].attributes })
+  }
+
+  function addAttr() {
+    // Add empty attr to ALL variants
+    const updated = variants.map(v => ({ ...v, attributes: [...(v.attributes ?? []), { name: '', value: '' }] }))
+    onChange(updated)
+    // No save yet — user fills in the values
+  }
+
+  function removeAttr(attrIdx: number) {
+    const updated = variants.map(v => {
+      const attrs = (v.attributes ?? []).filter((_, ai) => ai !== attrIdx)
+      fetch(`/api/products/variants/${v.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attributes: attrs }),
+      })
+      return { ...v, attributes: attrs }
+    })
+    onChange(updated)
+  }
+
+  function toggleExpand(i: number) {
+    setExpandedIdxs(prev => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
+  }
+  function autoExpand(i: number) {
+    setExpandedIdxs(prev => { if (prev.has(i)) return prev; const n = new Set(prev); n.add(i); return n })
+  }
+
   if (variants.length === 0) {
     return <p className="text-sm text-gray-300">Ingen varianter — simpelt produkt</p>
   }
 
+  const inputCls = 'flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400'
+
   return (
-    <div>
-      {/* Column headers */}
-      <div className="flex items-center gap-2 mb-1 px-3 pb-2 border-b border-gray-100">
-        <div className="w-32 shrink-0 text-xs text-gray-400 font-medium">Variant SKU</div>
-        {allKeys.map(key => (
-          <div key={key} className="flex-1 flex items-center gap-1 min-w-0">
-            <span className="text-xs font-medium text-gray-500 truncate">{key}</span>
-            <button
-              onClick={() => removeAttrKey(key)}
-              className="text-gray-200 hover:text-red-400 text-xs shrink-0 ml-auto"
-              title={`Fjern "${key}" fra alle varianter`}
-            >✕</button>
-          </div>
-        ))}
-        <div className="w-20 shrink-0 text-xs text-gray-400 font-medium text-right">Pris</div>
-        <div className="w-24 shrink-0 text-xs text-gray-400 font-medium">EAN</div>
-        <div className="w-14 shrink-0 text-xs text-gray-400 font-medium text-right">Lager</div>
-      </div>
+    <div className="space-y-3">
+      {variants.map((v, i) => {
+        const isSaving     = savingId === v.id
+        const isOpen       = expandedIdxs.has(i)
+        const sup          = v.supplier
+        const totalStock   = v.own_stock_quantity + (sup?.supplier_stock_quantity ?? 0)
 
-      {/* Variant rows */}
-      <div className="space-y-1.5">
-        {variants.map(v => {
-          const isSaving = savingId === v.id
-          const supplierStock = v.supplier?.supplier_stock_quantity ?? 0
-          const totalStock = v.own_stock_quantity + supplierStock
-          return (
-            <div
-              key={v.id}
-              className={`rounded-lg border transition-colors ${isSaving ? 'border-blue-200 bg-blue-50/20' : 'border-gray-100 bg-white hover:border-gray-200'}`}
-            >
-              <div className="flex items-center gap-2 px-3 py-2">
-                <div className="w-32 shrink-0 font-mono text-xs text-gray-400 truncate" title={v.internal_variant_sku}>
-                  {v.internal_variant_sku}
-                </div>
+        return (
+          <div
+            key={v.id}
+            className={`border rounded-lg overflow-hidden transition-colors ${isSaving ? 'border-blue-200' : 'border-gray-200'}`}
+          >
+            {/* ── Card header: always visible ── */}
+            <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
+              {/* Supplier image if available */}
+              {sup?.image_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={sup.image_url} alt="" className="w-9 h-9 object-contain rounded border border-gray-200 bg-white shrink-0" />
+              )}
 
-                {allKeys.map(key => (
-                  <div key={key} className="flex-1 min-w-0">
-                    <AttrValueInput
-                      value={getAttrVal(v, key)}
-                      onSave={val => setAttrVal(v, key, val)}
-                    />
-                  </div>
-                ))}
-
-                <div className="w-20 shrink-0">
-                  <NumericInput
-                    value={v.sales_price}
-                    suffix=" kr"
-                    onSave={val => patchVariant(v, { sales_price: val })}
-                    placeholder="Pris"
-                  />
-                </div>
-
-                <div className="w-24 shrink-0">
-                  <AttrValueInput
-                    value={v.ean ?? ''}
-                    placeholder="EAN"
-                    onSave={val => patchVariant(v, { ean: val || null })}
-                    mono
-                  />
-                </div>
-
-                <div className="w-14 shrink-0 text-right">
-                  <span className={`text-xs font-medium tabular-nums ${totalStock > 0 ? 'text-green-700' : 'text-gray-300'}`}>
-                    {totalStock} stk
+              <div className="flex-1 min-w-0">
+                {/* SKU + supplier name */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-mono text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-500 shrink-0">
+                    {v.internal_variant_sku}
                   </span>
+                  {sup && (
+                    <span className="text-xs font-medium text-gray-700 truncate">{sup.name}</span>
+                  )}
+                  {sup?.supplier_sku && (
+                    <span className="font-mono text-xs text-gray-400">{sup.supplier_sku}</span>
+                  )}
+                </div>
+
+                {/* Price + stock row */}
+                <div className="flex gap-3 mt-0.5 flex-wrap">
+                  {sup?.purchase_price != null && (
+                    <span className="text-xs text-gray-400">Indkøb: <span className="text-gray-600 font-medium">{sup.purchase_price.toLocaleString('da-DK')} kr</span></span>
+                  )}
+                  {v.sales_price != null && (
+                    <span className="text-xs text-gray-400">Salg: <span className="text-gray-700 font-medium">{v.sales_price.toLocaleString('da-DK')} kr</span></span>
+                  )}
+                  <span className={`text-xs font-medium ${totalStock > 0 ? 'text-green-600' : 'text-gray-300'}`}>
+                    Lager: {totalStock} stk
+                  </span>
+                  {v.ean && (
+                    <span className="text-xs text-gray-400 font-mono">{v.ean}</span>
+                  )}
                 </div>
               </div>
 
-              {/* Supplier badge for this variant */}
-              {v.supplier && (
-                <div className="px-3 pb-2 flex items-center gap-2">
-                  <span className="text-xs text-gray-400 bg-gray-50 rounded px-2 py-0.5 flex items-center gap-1.5">
-                    <span className="text-gray-500 font-medium">{v.supplier.name}</span>
-                    <span className="font-mono text-gray-400">{v.supplier.supplier_sku}</span>
-                    {v.supplier.purchase_price != null && (
-                      <span className="text-gray-500">{v.supplier.purchase_price.toLocaleString('da-DK')} kr</span>
-                    )}
-                    <span className={v.supplier.supplier_stock_quantity > 0 ? 'text-green-600' : 'text-gray-300'}>
-                      ({v.supplier.supplier_stock_quantity} stk)
-                    </span>
-                  </span>
-                </div>
-              )}
+              {/* Expand toggle */}
+              <button
+                onClick={() => toggleExpand(i)}
+                className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-1.5 py-1"
+                title={isOpen ? 'Skjul' : 'Rediger'}
+              >
+                {isOpen ? '▲' : '▼'}
+              </button>
             </div>
-          )
-        })}
-      </div>
 
-      {/* Add attribute key */}
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-        <input
-          type="text"
-          value={newKey}
-          onChange={e => setNewKey(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && newKey.trim()) { addAttrKey(newKey); setNewKey('') }
-          }}
-          placeholder="Nyt attributnavn (Enter for at tilføje til alle varianter)"
-          className="flex-1 px-2 py-1.5 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-        />
-        <button
-          onClick={() => { addAttrKey(newKey); setNewKey('') }}
-          className="text-xs px-3 py-1.5 rounded bg-gray-100 text-gray-600 hover:bg-gray-200"
-        >+ Tilføj</button>
-      </div>
+            {/* ── Expanded: editable fields ── */}
+            {isOpen && (
+              <>
+                {/* Attributes */}
+                <div className="px-3 py-3 border-t border-gray-100 space-y-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Attributter</p>
+                  {(v.attributes ?? []).map((a, j) => (
+                    <div key={j} className="flex gap-1.5 items-center">
+                      <input
+                        placeholder="størrelse"
+                        value={a.name}
+                        onChange={e => setAttr(i, j, 'name', e.target.value)}
+                        onBlur={() => saveAttr(i)}
+                        className={inputCls}
+                      />
+                      <span className="text-gray-300 text-xs">=</span>
+                      <input
+                        placeholder="3 mm"
+                        value={a.value}
+                        onChange={e => setAttr(i, j, 'value', e.target.value)}
+                        onBlur={() => saveAttr(i)}
+                        className={inputCls}
+                      />
+                      <button
+                        onClick={() => removeAttr(j)}
+                        className="text-gray-300 hover:text-red-400 text-base leading-none shrink-0"
+                      >×</button>
+                    </div>
+                  ))}
+                  <button onClick={addAttr} className="text-xs text-blue-500 hover:underline">+ Attribut</button>
+                </div>
+
+                {/* Editable numeric fields */}
+                <div className="px-3 py-3 border-t border-gray-100 grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Salgspris (kr)</label>
+                    <NumericInput
+                      value={v.sales_price}
+                      suffix=" kr"
+                      onSave={val => patchVariant(v, { sales_price: val })}
+                      placeholder="Pris"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Tilbudspris (kr)</label>
+                    <NumericInput
+                      value={v.sale_price}
+                      suffix=" kr"
+                      onSave={val => patchVariant(v, { sale_price: val })}
+                      placeholder="—"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">EAN</label>
+                    <AttrValueInput
+                      value={v.ean ?? ''}
+                      placeholder="Stregkode"
+                      onSave={val => patchVariant(v, { ean: val || null })}
+                      mono
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-400 mb-1">Vægt (kg)</label>
+                    <NumericInput
+                      value={v.weight ?? null}
+                      suffix=" kg"
+                      onSave={val => patchVariant(v, { weight: val as number | null })}
+                      placeholder="—"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Attribute pills — visible when collapsed, shows what's filled in */}
+            {!isOpen && (v.attributes ?? []).filter(a => a.name).length > 0 && (
+              <div className="px-3 py-2 border-t border-gray-100 flex flex-wrap gap-1">
+                {(v.attributes ?? []).filter(a => a.name).map((a, j) => (
+                  <span key={j} className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">
+                    {a.name}{a.value ? `: ${a.value}` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Global "add attribute to all" shortcut */}
+      <button
+        onClick={addAttr}
+        className="w-full text-xs text-gray-400 hover:text-gray-600 border border-dashed border-gray-200 rounded-lg py-2 hover:border-gray-300 transition-colors"
+      >
+        + Tilføj attribut til alle varianter
+      </button>
     </div>
   )
 }
