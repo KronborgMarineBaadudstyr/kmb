@@ -11,6 +11,7 @@ const navItems = [
   { href: '/products',      label: 'Produkter',                    icon: '📦' },
   { href: '/pricing',       label: 'Prissætning',                  icon: '💰' },
   { href: '/inventory',     label: 'Lagerbeholdning',              icon: '📊' },
+  { href: '/changes',       label: 'Import-ændringer',             icon: '📋' },
   { href: '/sync',          label: 'Sync & Logs',                  icon: '🔄' },
 ]
 
