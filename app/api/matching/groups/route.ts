@@ -26,7 +26,12 @@ export async function GET(request: Request) {
 
   if (status !== 'all') query = query.eq('status', status)
   if (confidence)       query = query.eq('match_confidence', confidence)
-  if (method)           query = query.eq('match_method', method)
+  if (method) {
+    // method kan være kommasepareret: 'variant,parent_sku'
+    const methods = method.split(',').map(m => m.trim()).filter(Boolean)
+    if (methods.length === 1) query = query.eq('match_method', methods[0])
+    else                      query = query.in('match_method', methods)
+  }
 
   const { data: groups, error: gErr, count } = await query
   if (gErr) return NextResponse.json({ error: gErr.message }, { status: 500 })
@@ -69,7 +74,7 @@ export async function GET(request: Request) {
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'pending_review'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'high').eq('match_method', 'ean').eq('status', 'pending_review'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'medium').eq('status', 'pending_review'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'variant').eq('status', 'pending_review'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).in('match_method', ['variant', 'parent_sku']).eq('status', 'pending_review'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'single').eq('status', 'pending_review'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'rejected'),

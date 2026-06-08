@@ -3,6 +3,9 @@ import { XMLParser } from 'fast-xml-parser'
 import * as ftp from 'basic-ftp'
 import { Writable } from 'stream'
 import { flagRecentlyImportedForReview } from '@/lib/review-checker'
+import { syncImagesToProduct } from './image-sync'
+import { enrichMatchedProduct } from './product-enrichment'
+import { batchEanLookup, type EanMatch } from './ean-lookup'
 
 const FILES = {
   products: '/productfeed.xml',
@@ -272,21 +275,16 @@ export async function importKapHorn(
 
       // Batch EAN lookup
       const eans = batch.map(p => normalizeEan(p.ean13)).filter((e): e is string => !!e)
-      const { data: byEan } = eans.length > 0
-        ? await supabase.from('products').select('id, ean').in('ean', eans)
-        : { data: [] }
-      const productByEan = Object.fromEntries(
-        (byEan ?? []).filter(p => p.ean).map(p => [String(p.ean), p])
-      )
+      const productByEan = await batchEanLookup(supabase, eans, SUPPLIER_ID)
 
       for (const p of batch) {
         const sku = String(p['Baltic-Child-Vnr'] ?? '').trim()
         if (!sku) { processed++; continue }
 
-        const ean            = normalizeEan(p.ean13)
-        const vejlExcl       = vejlExclVat(p.VejlInclMoms)
-        const matchedProduct = ean ? (productByEan[ean] ?? null) : null
-        const existing       = existingBySku[sku]
+        const ean      = normalizeEan(p.ean13)
+        const vejlExcl = vejlExclVat(p.VejlInclMoms)
+        const match    = ean ? (productByEan[ean] ?? null) : null
+        const existing = existingBySku[sku]
 
         const categories: string[] = []
         if (p.category)          categories.push(String(p.category).trim())
@@ -300,67 +298,130 @@ export async function importKapHorn(
         // Build supplier_files — direkte links til PDFs på khsport2.dk (offentlige)
         const supplierFiles = buildSupplierFiles(p)
 
-        // Build supplier_images
-        const imageUrl = String(p.ImageURL ?? '').trim()
-        const supplierImages = imageUrl
-          ? [{ url: imageUrl, alt: String(p.HeadLinePlain ?? '').trim(), is_primary: true }]
-          : []
+        // Build supplier_images — både primær og MPS-billede
+        const imageUrl    = String(p.ImageURL     ?? '').trim()
+        const imageMpsUrl = String(p.ImageURL_MPS ?? '').trim()
+        const headLine    = String(p.HeadLinePlain ?? '').trim()
+        const supplierImages: Array<{ url: string; alt: string; is_primary: boolean }> = []
+        if (imageUrl)    supplierImages.push({ url: imageUrl,    alt: headLine, is_primary: true  })
+        if (imageMpsUrl && imageMpsUrl !== imageUrl)
+                         supplierImages.push({ url: imageMpsUrl, alt: headLine, is_primary: false })
+
+        // Variant-attributter fra Kap-Horn feed
+        const khVariantAttributes: Array<{ name: string; value: string }> = []
+        const farve = strOrNull(p.Farve)
+        const size  = strOrNull(p['Size1-2']) || strOrNull(p.Size1)
+        if (farve) khVariantAttributes.push({ name: 'Farve',     value: farve })
+        if (size)  khVariantAttributes.push({ name: 'Størrelse', value: size  })
+
+        // Specifikationer fra SpecPlain (struktureret tekst)
+        const specFromFeed: Record<string, string> = {}
+        const specText = strOrNull(p.SpecPlain)
+        if (specText) specFromFeed['Specifikationer (KH)'] = specText
 
         const supplierData = {
           supplier_id:             SUPPLIER_ID,
           supplier_sku:            sku,
-          supplier_product_name:   strOrNull(p.HeadLinePlain) ?? sku,
+          supplier_product_name:   headLine || sku,
           purchase_price:          null,   // Not in feed
           recommended_sales_price: vejlExcl,
           moq:                     toNum(p.Pack) ?? 1,
           supplier_images:         supplierImages,
           supplier_files:          supplierFiles,
+          // Nye dedikerede kolonner
+          manufacturer_sku:        strOrNull(p['KapHorn-Child-Vnr']) || strOrNull(p['MPS-Child-Vnr']),
+          supplier_parent_sku:     strOrNull(p['Baltic-Parent-Vnr-Pointer']),
+          supplier_grandparent_sku: strOrNull(p['GrandParent']),
+          supplier_variant_attributes: khVariantAttributes.length > 0 ? khVariantAttributes : null,
+          accessories_skus:        accessories.length > 0 ? accessories : null,
+          related_skus:            related.length    > 0 ? related    : null,
           extra_data: {
             ean,
-            kh_sku:       strOrNull(p['KapHorn-Child-Vnr']),
-            mps_sku:      strOrNull(p['MPS-Child-Vnr']),
-            parent_sku:   strOrNull(p['Baltic-Parent-Vnr-Pointer']),
+            mps_sku:        strOrNull(p['MPS-Child-Vnr']),
             vejl_incl_moms: toNum(p.VejlInclMoms),
-            short_desc:   strOrNull(p.ShortPlain),
-            long_desc:    strOrNull(p.LongPlain),
-            spec:         strOrNull(p.SpecPlain),
             long_spec_html: strOrNull(p.LongSpecPdfHtml),
-            weight_kg:    toNum(p['weight-kg']),
-            categories,
-            color:        strOrNull(p.Farve),
-            size:         strOrNull(p['Size1-2']),
-            accessories,
-            related,
           },
           variant_id: null,
           is_active:  true,
         }
 
-        if (matchedProduct) {
+        if (match) {
+          const enrichData = {
+            dimensions:       { weight: toNum(p['weight-kg']) },
+            descriptions:     {
+              description:       strOrNull(p.LongPlain),
+              short_description: strOrNull(p.ShortPlain),
+            },
+            categories,
+            manufacturerSku:  strOrNull(p['KapHorn-Child-Vnr']) || strOrNull(p['MPS-Child-Vnr']),
+            specifications:   specFromFeed,
+            variantAttributes: khVariantAttributes,
+          }
+
           if (existing) {
             const { error } = await supabase.from('product_suppliers')
               .update({ ...supplierData, priority: existing.priority, supplier_stock_updated_at: new Date().toISOString() })
               .eq('id', existing.id)
-            if (error) errors++; else updated++
+            if (error) { errors++ } else {
+              updated++
+              await Promise.all([
+                supplierImages.length > 0 ? syncImagesToProduct(match.productId, supplierImages, 'kaphorn', supabase) : Promise.resolve(),
+                enrichMatchedProduct(match.productId, enrichData, supabase),
+              ])
+              const sRow = existingStaging[sku]
+              if (sRow && ['pending_review', 'needs_review'].includes(sRow.status)) {
+                await supabase.from('supplier_product_staging')
+                  .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                  .eq('id', sRow.id)
+              }
+            }
           } else {
             const { error } = await supabase.from('product_suppliers')
-              .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-            if (error) errors++; else matched++
+              .insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
+            if (error) { errors++ } else {
+              matched++
+              await Promise.all([
+                supplierImages.length > 0 ? syncImagesToProduct(match.productId, supplierImages, 'kaphorn', supabase) : Promise.resolve(),
+                enrichMatchedProduct(match.productId, enrichData, supabase),
+              ])
+              const sRow = existingStaging[sku]
+              if (sRow && ['pending_review', 'needs_review'].includes(sRow.status)) {
+                await supabase.from('supplier_product_staging')
+                  .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                  .eq('id', sRow.id)
+              }
+            }
           }
         } else {
           const stagingRow = existingStaging[sku]
 
+          const khRawData = {
+            supplier_sku:            sku,
+            supplier_product_name:   supplierData.supplier_product_name,
+            purchase_price:          null,
+            recommended_sales_price: vejlExcl,
+            manufacturer_sku:        supplierData.manufacturer_sku,
+            supplier_parent_sku:     supplierData.supplier_parent_sku,
+            supplier_grandparent_sku: supplierData.supplier_grandparent_sku,
+            supplier_variant_attributes: khVariantAttributes.length > 0 ? khVariantAttributes : null,
+            accessories_skus:        accessories.length > 0 ? accessories : null,
+            related_skus:            related.length    > 0 ? related    : null,
+            supplier_images:         supplierImages,
+            supplier_files:          supplierFiles,
+            short_description:       strOrNull(p.ShortPlain),
+            description:             strOrNull(p.LongPlain),
+            spec:                    specText,
+            weight_kg:               toNum(p['weight-kg']),
+            categories,
+            color:                   farve,
+            size:                    size,
+            vejl_incl_moms:          toNum(p.VejlInclMoms),
+            ...supplierData.extra_data,
+          }
+
           if (stagingRow && stagingRow.status !== 'pending_review') {
             await supabase.from('supplier_product_staging')
-              .update({
-                raw_data: {
-                  supplier_sku: sku, supplier_product_name: supplierData.supplier_product_name,
-                  recommended_sales_price: vejlExcl, purchase_price: null,
-                  supplier_images: supplierImages, supplier_files: supplierFiles,
-                  ...supplierData.extra_data,
-                },
-                updated_at: new Date().toISOString(),
-              })
+              .update({ raw_data: khRawData, updated_at: new Date().toISOString() })
               .eq('id', stagingRow.id)
             skipped++
             processed++
@@ -369,16 +430,8 @@ export async function importKapHorn(
 
           const stagingUpsert = {
             supplier_id:          SUPPLIER_ID,
-            raw_data: {
-              supplier_sku:            sku,
-              supplier_product_name:   supplierData.supplier_product_name,
-              purchase_price:          null,
-              recommended_sales_price: vejlExcl,
-              supplier_images:         supplierImages,
-              supplier_files:          supplierFiles,
-              ...supplierData.extra_data,
-            },
-            normalized_name:      strOrNull(p.HeadLinePlain),
+            raw_data:             khRawData,
+            normalized_name:      headLine || null,
             normalized_ean:       ean,
             normalized_sku:       sku,
             normalized_unit:      null,

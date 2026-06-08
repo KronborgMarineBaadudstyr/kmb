@@ -84,12 +84,15 @@ export async function createProductFromGroup(
   const internalSku = generateInternalSku()
 
   // 5. Create product
+  // NB: DB-triggeren trg_auto_original_number sætter automatisk original_number
+  //     baseret på: manufacturer_sku > ean > internal_sku
   const { data: product, error: pErr } = await db
     .from('products')
     .insert({
       internal_sku:      internalSku,
       name:              chosenName,
       ean:               g.suggested_ean ?? primary.normalized_ean ?? null,
+      manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
       status:            'draft',
       description:       typeof raw.description       === 'string' ? raw.description       : null,
       short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
@@ -232,12 +235,14 @@ export async function createProductFromGroupWithVariants(
     : (Array.isArray(raw.categories) ? (raw.categories as string[]) : [])
 
   // 6. Create product
+  // NB: DB-triggeren trg_auto_original_number sætter automatisk original_number
   const { data: product, error: pErr } = await db
     .from('products')
     .insert({
       internal_sku:      internalSku,
       name:              chosenBaseName,
       ean:               g.suggested_ean ?? primary.normalized_ean ?? null,
+      manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
       status:            'draft',
       description:       typeof raw.description       === 'string' ? raw.description       : null,
       short_description: typeof raw.short_description === 'string' ? raw.short_description : null,

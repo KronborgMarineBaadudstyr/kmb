@@ -22,7 +22,7 @@ export async function GET(request: Request) {
   const allowedSortCols = ['name', 'internal_sku', 'sales_price', 'own_stock_quantity', 'created_at', 'updated_at']
   const sortCol = allowedSortCols.includes(sort) ? sort : 'name'
 
-  // Filter by supplier via product_suppliers join
+  // ── Supplier filter: resolve product IDs ─────────────────────────────────────
   let supplierProductIds: string[] | null = null
   if (supplierId) {
     const { data: spRows } = await supabase
@@ -35,6 +35,55 @@ export async function GET(request: Request) {
     supplierProductIds = [...new Set((spRows ?? []).map(r => r.product_id).filter(Boolean))]
     if (supplierProductIds.length === 0) {
       return NextResponse.json({ data: [], total: 0, page, per_page: perPage, total_pages: 0 })
+    }
+  }
+
+  // ── Cross-table search: collect extra product IDs ─────────────────────────
+  // Searches across: product_variants (sku + ean), variant_barcodes (ean),
+  //                  product_suppliers (supplier_sku + product_name)
+  let crossTableIds: Set<string> | null = null
+  if (search) {
+    const q = search
+    const [variantRows, barcodeRows, supplierSkuRows] = await Promise.all([
+      supabase
+        .from('product_variants')
+        .select('product_id')
+        .or(`internal_variant_sku.ilike.%${q}%,ean.ilike.%${q}%`)
+        .not('product_id', 'is', null),
+      supabase
+        .from('variant_barcodes')
+        .select('variant_id')
+        .ilike('ean', `%${q}%`),
+      supabase
+        .from('product_suppliers')
+        .select('product_id, variant_id')
+        .or(`supplier_sku.ilike.%${q}%,supplier_product_name.ilike.%${q}%`)
+        .not('product_id', 'is', null),
+    ])
+
+    // For variant_barcodes we need to map variant_id → product_id
+    const variantIds = [
+      ...(barcodeRows.data ?? []).map(r => r.variant_id as string),
+    ].filter(Boolean)
+
+    let barcodeProductIds: string[] = []
+    if (variantIds.length > 0) {
+      const { data: vRows } = await supabase
+        .from('product_variants')
+        .select('id, product_id')
+        .in('id', variantIds)
+        .not('product_id', 'is', null)
+      barcodeProductIds = (vRows ?? []).map(r => r.product_id as string).filter(Boolean)
+    }
+
+    const allCross = [
+      ...(variantRows.data ?? []).map(r => r.product_id as string),
+      ...barcodeProductIds,
+      ...(supplierSkuRows.data ?? []).map(r => r.product_id as string),
+    ].filter(Boolean)
+
+    if (allCross.length > 0) {
+      crossTableIds = new Set(allCross)
     }
   }
 
@@ -60,6 +109,7 @@ export async function GET(request: Request) {
       unit,
       unit_size,
       boat_type,
+      hide_when_out_of_stock,
       created_at,
       updated_at,
       product_images ( url, alt_text, is_primary, position )
@@ -67,7 +117,17 @@ export async function GET(request: Request) {
     .order(sortCol, { ascending: order })
     .range(from, to)
 
-  if (search)             query = query.or(`name.ilike.%${search}%,internal_sku.ilike.%${search}%,woo_bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%`)
+  if (search) {
+    // Direct product-table fields
+    const directOr = `name.ilike.%${search}%,internal_sku.ilike.%${search}%,woo_bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%,manufacturer_sku.ilike.%${search}%,brand.ilike.%${search}%`
+    if (crossTableIds && crossTableIds.size > 0) {
+      // Combine: product fields OR id in cross-table matches
+      const idList = [...crossTableIds].join(',')
+      query = query.or(`${directOr},id.in.(${idList})`)
+    } else {
+      query = query.or(directOr)
+    }
+  }
   if (status)             query = query.eq('status', status)
   if (category)           query = query.contains('categories', [category])
   if (supplierProductIds) query = query.in('id', supplierProductIds)

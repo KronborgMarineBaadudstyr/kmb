@@ -1,6 +1,8 @@
 import * as XLSX from 'xlsx'
 import { createServiceClient } from '@/lib/supabase/server'
 import { flagRecentlyImportedForReview } from '@/lib/review-checker'
+import { enrichMatchedProduct } from './product-enrichment'
+import { batchEanLookup, type EanMatch } from './ean-lookup'
 
 export type HfIndustriImportProgress = {
   stage:     'parsing' | 'importing' | 'done' | 'error'
@@ -200,13 +202,9 @@ export async function importHfIndustri(
 
     // Batch EAN-opslag
     const eans = batch.map(p => p.ean).filter((e): e is string => !!e)
-    const { data: byEan } = eans.length > 0
-      ? await supabase.from('products').select('id, ean, categories').in('ean', eans)
-      : { data: [] }
-
-    const productByEan = Object.fromEntries(
-      (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
-    )
+    const productByEan = eans.length > 0
+      ? await batchEanLookup(supabase, eans, SUPPLIER_ID)
+      : {}
 
     const ops: Promise<void>[] = []
 
@@ -217,40 +215,55 @@ export async function importHfIndustri(
         supplier_product_name:   p.varenavn,
         purchase_price:          p.indkoeb,
         recommended_sales_price: p.vejlPris,
+        // Ny dedikeret kolonne
+        unit:                    p.enhed || null,
         extra_data: {
           category: p.category,
-          enhed:    p.enhed,
           ean:      p.ean,
         },
         variant_id: null,
         is_active:  true,
       }
 
-      const matchedProduct = p.ean ? (productByEan[p.ean] ?? null) : null
+      const match = p.ean ? (productByEan[p.ean] ?? null) : null
 
       processed++
 
-      if (matchedProduct) {
+      if (match) {
         const existing = existingBySku[p.varenummer]
+
+        const enrichData = {
+          categories: [p.category],
+        }
 
         if (existing) {
           updated++
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
-          ).then(({ error }) => { if (error) { errors++; updated-- } }))
+          ).then(async ({ error }) => {
+            if (error) { errors++; updated--; return }
+            await enrichMatchedProduct(match.productId, enrichData, supabase)
+            const sRow = existingStaging[p.varenummer]
+            if (sRow && ['pending_review', 'needs_review'].includes(sRow.status)) {
+              await supabase.from('supplier_product_staging')
+                .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                .eq('id', sRow.id)
+            }
+          }))
         } else {
           matched++
           ops.push(Promise.resolve(
-            supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          ).then(({ error }) => { if (error) { errors++; matched-- } }))
-        }
-
-        // Tilføj sheet-navn som kategori på produktet hvis det ikke allerede er der
-        const existingCats: string[] = matchedProduct.categories ?? []
-        if (!existingCats.includes(p.category)) {
-          ops.push(Promise.resolve(
-            supabase.from('products').update({ categories: [...existingCats, p.category] }).eq('id', matchedProduct.id)
-          ).then(({ error }) => { if (error) errors++ }))
+            supabase.from('product_suppliers').insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
+          ).then(async ({ error }) => {
+            if (error) { errors++; matched--; return }
+            await enrichMatchedProduct(match.productId, enrichData, supabase)
+            const sRow = existingStaging[p.varenummer]
+            if (sRow && ['pending_review', 'needs_review'].includes(sRow.status)) {
+              await supabase.from('supplier_product_staging')
+                .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                .eq('id', sRow.id)
+            }
+          }))
         }
       } else {
         // Ingen match → staging
@@ -300,17 +313,16 @@ export async function importHfIndustri(
 
     await Promise.all(ops)
 
-    // Opdater last_synced_at løbende
-    await supabase
-      .from('suppliers')
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq('id', SUPPLIER_ID)
-
     onProgress({
       stage: 'importing', total, processed, matched, staged, updated, errors,
       message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} — ${matched} matchet, ${updated} opdateret, ${staged} til gennemgang`,
     })
   }
+
+  await supabase
+    .from('suppliers')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('id', SUPPLIER_ID)
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 

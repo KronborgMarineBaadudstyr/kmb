@@ -12,6 +12,11 @@ const navItems = [
   { href: '/pricing',       label: 'Prissætning',                  icon: '💰' },
   { href: '/inventory',     label: 'Lagerbeholdning',              icon: '📊' },
   { href: '/changes',       label: 'Import-ændringer',             icon: '📋' },
+  { href: '/navigation',    label: 'Båd-navigation',               icon: '⚓' },
+  { href: '/bundles',       label: 'Bundler & Kampagner',          icon: '🏷️' },
+  { href: '/brands',            label: 'Brands',                       icon: '🔖' },
+  { href: '/category-filters', label: 'Kategori-søgefiltre',          icon: '🔍' },
+  { href: '/lovesaling',        label: 'Lovesaling — Brand',           icon: '🌊' },
   { href: '/sync',          label: 'Sync & Logs',                  icon: '🔄' },
 ]
 

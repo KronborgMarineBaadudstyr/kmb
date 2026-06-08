@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-const ALLOWED_FIELDS = ['attributes', 'ean', 'sales_price', 'sale_price', 'own_stock_quantity', 'own_stock_reserved', 'weight', 'status']
+const ALLOWED_FIELDS = ['attributes', 'ean', 'sales_price', 'sale_price', 'own_stock_quantity', 'own_stock_reserved', 'weight', 'status', 'hide_when_out_of_stock']
 
 // PATCH /api/products/variants/[variantId]
 export async function PATCH(

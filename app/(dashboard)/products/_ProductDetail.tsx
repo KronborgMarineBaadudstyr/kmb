@@ -8,7 +8,7 @@ export type Supplier = { id: string; name: string; contact_email: string | null;
 export type ProductSupplier = {
   id: string; priority: number; is_active: boolean
   variant_id: string | null
-  supplier_sku: string; supplier_product_name: string | null
+  supplier_sku: string; manufacturer_sku: string | null; supplier_product_name: string | null
   purchase_price: number | null; recommended_sales_price: number | null
   delivery_days_min: number | null; delivery_days_max: number | null
   moq: number; supplier_stock_quantity: number; supplier_stock_reserved: number
@@ -16,13 +16,18 @@ export type ProductSupplier = {
   extra_data: Record<string, unknown> | null
   updated_at: string; suppliers: Supplier
 }
+export type VariantBarcode = {
+  id: string; ean: string; is_primary: boolean; note: string | null; created_at: string
+}
 export type Variant = {
   id: string; internal_variant_sku: string
   attributes: { name: string; value: string }[]
   own_stock_quantity: number; own_stock_reserved: number
   sales_price: number | null; sale_price: number | null; ean: string | null
   weight: number | null
+  hide_when_out_of_stock: boolean
   woo_variation_id: number | null; status: string
+  variant_barcodes?: VariantBarcode[]
   supplier?: {
     name: string; supplier_sku: string; supplier_product_name: string | null
     purchase_price: number | null
@@ -64,15 +69,32 @@ export type Product = {
   meta_description: string | null
   status: string
   woo_sync_status: string | null
+  hide_when_out_of_stock: boolean
   created_at: string
   updated_at: string
   last_synced_woo_at: string | null
   last_synced_pos_at: string | null
+  original_number: string | null
+  original_number_source: string | null
   manufacturers: { id: string; name: string; country: string | null; website: string | null } | null
   product_images: ProductImage[]
   product_files: ProductFile[]
   product_variants: Variant[]
   product_suppliers: ProductSupplier[]
+}
+
+export type Campaign = {
+  id: string
+  name: string
+  type: 'individual' | 'bundle_qty' | 'bundle_kit'
+  discount_type: 'percentage' | 'fixed_price' | 'fixed_amount'
+  discount_value: number | null
+  bundle_qty: number | null
+  kit_price: number | null
+  start_date: string | null
+  end_date: string | null
+  status: string
+  campaign_products: { product_id: string; sale_price: number | null }[]
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -252,8 +274,401 @@ function SaveVariantButton({ onSave }: { onSave: () => Promise<void> }) {
   )
 }
 
+// ─── Original number selector ─────────────────────────────────────────────────
+// Shows all available ID fields across product + suppliers + variants.
+// User clicks ☆ on any to designate it as the external "original number".
+function OriginalNumberSelector({ product, suppliers, variants, onSet }: {
+  product:   Pick<Product, 'internal_sku' | 'ean' | 'manufacturer_sku' | 'woo_bestillingsnummer' | 'original_number' | 'original_number_source'>
+  suppliers: ProductSupplier[]
+  variants:  Variant[]
+  onSet:     (value: string, source: string) => Promise<void>
+}) {
+  const [setting, setSetting] = useState<string | null>(null)
+
+  async function pick(value: string, source: string) {
+    setSetting(source)
+    await onSet(value, source)
+    setSetting(null)
+  }
+
+  const current = product.original_number
+
+  // Build flat list of all ID options
+  const ids: { value: string; label: string; source: string }[] = []
+
+  if (product.internal_sku)
+    ids.push({ value: product.internal_sku,       label: 'Internt varenr.',      source: 'internal_sku' })
+  if (product.ean)
+    ids.push({ value: product.ean,                label: 'EAN / stregkode',      source: 'ean' })
+  if (product.manufacturer_sku)
+    ids.push({ value: product.manufacturer_sku,   label: 'Producent SKU',        source: 'manufacturer_sku' })
+  if (product.woo_bestillingsnummer)
+    ids.push({ value: product.woo_bestillingsnummer, label: 'Bestillingsnr.',    source: 'woo_bestillingsnummer' })
+
+  for (const s of suppliers) {
+    if (s.supplier_sku)
+      ids.push({ value: s.supplier_sku, label: `${s.suppliers.name} — lev.nr.`, source: `supplier_sku:${s.id}` })
+    if (s.manufacturer_sku && s.manufacturer_sku !== product.manufacturer_sku)
+      ids.push({ value: s.manufacturer_sku, label: `${s.suppliers.name} — prod.nr.`, source: `mfr_sku:${s.id}` })
+  }
+
+  for (const v of variants) {
+    const attrLabel = v.attributes.filter(a => a.value).map(a => a.value).join(' / ') || v.internal_variant_sku
+    ids.push({ value: v.internal_variant_sku, label: `Variant SKU (${attrLabel})`, source: `variant_sku:${v.id}` })
+    const primaryBarcode = v.variant_barcodes?.find(b => b.is_primary)
+    if (primaryBarcode)
+      ids.push({ value: primaryBarcode.ean, label: `Variant EAN (${attrLabel})`, source: `variant_ean:${v.id}` })
+  }
+
+  const sourceLabel = (src: string | null) => {
+    if (!src) return ''
+    if (src === 'internal_sku')          return 'Internt varenr.'
+    if (src === 'ean')                   return 'EAN'
+    if (src === 'manufacturer_sku')      return 'Producent SKU'
+    if (src === 'woo_bestillingsnummer') return 'Bestillingsnr.'
+    if (src === 'manual')                return 'Manuel'
+    if (src.startsWith('supplier_sku:')) return 'Leverandør-nr.'
+    if (src.startsWith('mfr_sku:'))      return 'Lev. producent-nr.'
+    if (src.startsWith('variant_sku:'))  return 'Variant SKU'
+    if (src.startsWith('variant_ean:'))  return 'Variant EAN'
+    return src
+  }
+
+  return (
+    <div>
+      {current ? (
+        <div className="flex items-center gap-2 mb-3 px-2.5 py-2 bg-blue-50 rounded-lg border border-blue-200">
+          <span className="text-blue-500 text-base leading-none">★</span>
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-mono font-semibold text-blue-800">{current}</span>
+            <span className="text-xs text-blue-400 ml-1.5">({sourceLabel(product.original_number_source)})</span>
+          </div>
+          <button onClick={() => pick('', 'manual')}
+            className="text-xs text-blue-400 hover:text-red-400 transition-colors" title="Fjern originalnummer">×</button>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-400 mb-2">Intet originalnummer sat — klik ☆ for at vælge</p>
+      )}
+      <div className="space-y-0.5">
+        {ids.map(id => {
+          const isCurrent = id.value === current
+          const isSetting = setting === id.source
+          return (
+            <div key={id.source} className={`flex items-center gap-2 rounded px-2 py-1.5 group transition-colors
+              ${isCurrent ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+              <button
+                onClick={() => !isCurrent && pick(id.value, id.source)}
+                disabled={isSetting || isCurrent}
+                className={`shrink-0 text-base leading-none transition-colors ${
+                  isCurrent  ? 'text-blue-500 cursor-default' :
+                  isSetting  ? 'text-gray-300' :
+                  'text-gray-200 group-hover:text-blue-400 hover:text-blue-500'
+                }`}
+                title={isCurrent ? 'Aktivt originalnummer' : 'Sæt som originalnummer'}>
+                {isSetting ? '…' : isCurrent ? '★' : '☆'}
+              </button>
+              <span className="text-xs text-gray-400 shrink-0 w-32 truncate" title={id.label}>{id.label}</span>
+              <span className={`text-xs font-mono truncate flex-1 min-w-0 ${isCurrent ? 'text-blue-700 font-semibold' : 'text-gray-700'}`}>
+                {id.value}
+              </span>
+            </div>
+          )
+        })}
+        {ids.length === 0 && (
+          <p className="text-xs text-gray-300 py-2">Ingen ID-felter tilgængelige</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Barcode manager for a single variant ─────────────────────────────────────
+function BarcodeManager({ variant, onUpdate }: {
+  variant: Variant
+  onUpdate: (barcodes: VariantBarcode[]) => void
+}) {
+  const [barcodes, setBarcodes]   = useState<VariantBarcode[]>(
+    () => [...(variant.variant_barcodes ?? [])].sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0))
+  )
+  const [adding,   setAdding]     = useState(false)
+  const [newEan,   setNewEan]     = useState('')
+  const [newNote,  setNewNote]    = useState('')
+  const [saving,   setSaving]     = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editNote, setEditNote]   = useState('')
+
+  // Keep in sync if parent reloads
+  useEffect(() => {
+    setBarcodes([...(variant.variant_barcodes ?? [])].sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0)))
+  }, [variant.variant_barcodes])
+
+  async function addBarcode() {
+    if (!newEan.trim()) return
+    setSaving(true)
+    const isPrimary = barcodes.length === 0
+    const res = await fetch(`/api/products/variants/${variant.id}/barcodes`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ean: newEan.trim(), is_primary: isPrimary, note: newNote.trim() || undefined }),
+    })
+    const json = await res.json()
+    if (!json.error) {
+      const updated = isPrimary
+        ? [json.data]
+        : [...barcodes, json.data]
+      setBarcodes(updated)
+      onUpdate(updated)
+      setNewEan(''); setNewNote(''); setAdding(false)
+    }
+    setSaving(false)
+  }
+
+  async function setPrimary(id: string) {
+    const res = await fetch(`/api/products/variants/${variant.id}/barcodes/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_primary: true }),
+    })
+    const json = await res.json()
+    if (!json.error) {
+      const updated = barcodes.map(b => ({ ...b, is_primary: b.id === id }))
+      setBarcodes(updated)
+      onUpdate(updated)
+    }
+  }
+
+  async function saveNote(id: string) {
+    await fetch(`/api/products/variants/${variant.id}/barcodes/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ note: editNote.trim() || null }),
+    })
+    const updated = barcodes.map(b => b.id === id ? { ...b, note: editNote.trim() || null } : b)
+    setBarcodes(updated)
+    onUpdate(updated)
+    setEditingId(null)
+  }
+
+  async function deleteBarcode(id: string) {
+    await fetch(`/api/products/variants/${variant.id}/barcodes/${id}`, { method: 'DELETE' })
+    const updated = barcodes.filter(b => b.id !== id)
+    // If we deleted the primary, promote oldest
+    if (!updated.some(b => b.is_primary) && updated.length > 0) updated[0].is_primary = true
+    setBarcodes(updated)
+    onUpdate(updated)
+  }
+
+  const inputCls = 'px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white'
+
+  return (
+    <div className="space-y-1.5">
+      {barcodes.map(b => (
+        <div key={b.id} className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 group ${b.is_primary ? 'bg-blue-50' : 'bg-gray-50'}`}>
+          <span className={`font-mono text-xs flex-1 min-w-0 truncate ${b.is_primary ? 'text-blue-700 font-semibold' : 'text-gray-700'}`}>
+            {b.ean}
+          </span>
+          {b.is_primary && (
+            <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full shrink-0">primær</span>
+          )}
+          {editingId === b.id ? (
+            <>
+              <input value={editNote} onChange={e => setEditNote(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveNote(b.id); if (e.key === 'Escape') setEditingId(null) }}
+                placeholder="Batch / note…" className={inputCls + ' w-28'} autoFocus />
+              <button onClick={() => saveNote(b.id)} className="text-xs text-blue-500 hover:underline shrink-0">Gem</button>
+            </>
+          ) : (
+            <button onClick={() => { setEditingId(b.id); setEditNote(b.note ?? '') }}
+              className="text-xs text-gray-300 hover:text-gray-500 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Rediger note">
+              {b.note ? <span className="text-gray-400 not-italic normal-case">{b.note}</span> : '✏️'}
+            </button>
+          )}
+          {!b.is_primary && (
+            <button onClick={() => setPrimary(b.id)} title="Sæt som primær"
+              className="text-xs text-gray-300 hover:text-blue-500 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">★</button>
+          )}
+          <button onClick={() => deleteBarcode(b.id)} title="Slet stregkode"
+            className="text-gray-200 hover:text-red-400 text-sm leading-none shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+        </div>
+      ))}
+
+      {adding ? (
+        <div className="flex gap-1.5 items-center mt-1">
+          <input value={newEan} onChange={e => setNewEan(e.target.value)} placeholder="EAN / stregkode"
+            onKeyDown={e => { if (e.key === 'Enter') addBarcode(); if (e.key === 'Escape') { setAdding(false); setNewEan(''); setNewNote('') } }}
+            className={inputCls + ' flex-1 font-mono'} autoFocus />
+          <input value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Batch / note (valgfrit)"
+            onKeyDown={e => { if (e.key === 'Enter') addBarcode() }}
+            className={inputCls + ' w-36'} />
+          <button onClick={addBarcode} disabled={!newEan.trim() || saving}
+            className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 shrink-0">
+            {saving ? '…' : 'Tilføj'}
+          </button>
+          <button onClick={() => { setAdding(false); setNewEan(''); setNewNote('') }}
+            className="text-gray-400 hover:text-gray-600 text-sm shrink-0">×</button>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="text-xs text-blue-500 hover:underline">
+          + Tilføj stregkode
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─── Economics box ─────────────────────────────────────────────────────────────
+function EconomicsBox({ salesPrice, purchasePrice, salePrice, campaigns }: {
+  salesPrice:   number | null
+  purchasePrice: number | null
+  salePrice:    number | null
+  campaigns:    Campaign[]
+}) {
+  const sp = salesPrice
+  const cp = purchasePrice
+  const effectivePrice = salePrice != null && salePrice < (sp ?? Infinity) ? salePrice : sp
+
+  const markup  = sp != null && cp != null && cp > 0 ? ((sp - cp) / cp * 100) : null
+  const margin  = sp != null && cp != null && sp > 0 ? ((sp - cp) / sp * 100) : null
+  const gross   = sp != null && cp != null ? (sp - cp) : null
+
+  const now = new Date()
+  const activeCampaigns = campaigns.filter(c => {
+    if (c.status !== 'active') return false
+    if (c.start_date && new Date(c.start_date) > now) return false
+    if (c.end_date   && new Date(c.end_date)   < now) return false
+    return true
+  })
+  const upcomingCampaigns = campaigns.filter(c =>
+    c.status === 'active' && c.start_date && new Date(c.start_date) > now
+  )
+
+  function customerSaving(c: Campaign): number | null {
+    if (!sp) return null
+    switch (c.discount_type) {
+      case 'percentage':   return c.discount_value != null ? sp * c.discount_value / 100 : null
+      case 'fixed_amount': return c.discount_value
+      case 'fixed_price': {
+        const cp2 = c.campaign_products[0]?.sale_price
+        return cp2 != null ? sp - cp2 : null
+      }
+    }
+  }
+
+  function campaignBadgeColor(c: Campaign) {
+    switch (c.type) {
+      case 'bundle_qty': return 'bg-orange-50 text-orange-700 border-orange-200'
+      case 'bundle_kit': return 'bg-purple-50 text-purple-700 border-purple-200'
+      default:           return 'bg-blue-50 text-blue-700 border-blue-200'
+    }
+  }
+  function campaignTypeLabel(c: Campaign) {
+    switch (c.type) {
+      case 'bundle_qty': return `Køb ${c.bundle_qty ?? '?'}+ stk.`
+      case 'bundle_kit': return 'Samlet pris'
+      default:           return 'Kampagne'
+    }
+  }
+
+  if (sp == null && cp == null && activeCampaigns.length === 0 && upcomingCampaigns.length === 0) return null
+
+  return (
+    <div className="px-3 py-3 border-t border-gray-100 space-y-2.5">
+      {/* ── Economics ── */}
+      {(sp != null || cp != null) && (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Økonomi</p>
+          <div className="grid grid-cols-3 gap-2">
+            {markup != null && (
+              <div className="bg-gray-50 rounded-lg px-2.5 py-2 text-center">
+                <p className={`text-sm font-bold tabular-nums ${markup > 0 ? 'text-green-700' : 'text-red-600'}`}>
+                  {markup.toFixed(1)}%
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">Avance</p>
+              </div>
+            )}
+            {margin != null && (
+              <div className="bg-gray-50 rounded-lg px-2.5 py-2 text-center">
+                <p className={`text-sm font-bold tabular-nums ${margin > 0 ? 'text-blue-700' : 'text-red-600'}`}>
+                  {margin.toFixed(1)}%
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">Dækningsgrad</p>
+              </div>
+            )}
+            {gross != null && (
+              <div className="bg-gray-50 rounded-lg px-2.5 py-2 text-center">
+                <p className={`text-sm font-bold tabular-nums ${gross > 0 ? 'text-gray-800' : 'text-red-600'}`}>
+                  {gross.toLocaleString('da-DK', { maximumFractionDigits: 2 })} kr
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">DB pr. stk.</p>
+              </div>
+            )}
+          </div>
+          {effectivePrice != null && cp != null && effectivePrice !== sp && (
+            <p className="text-xs text-orange-600 mt-1.5">
+              Med tilbudspris: avance {cp > 0 ? ((effectivePrice - cp) / cp * 100).toFixed(1) : '—'}%,
+              DG {effectivePrice > 0 ? ((effectivePrice - cp) / effectivePrice * 100).toFixed(1) : '—'}%
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* ── Campaigns ── */}
+      {(activeCampaigns.length > 0 || upcomingCampaigns.length > 0) && (
+        <div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Kampagner</p>
+          <div className="space-y-2">
+            {[...activeCampaigns, ...upcomingCampaigns].map(c => {
+              const saving = customerSaving(c)
+              const isActive = activeCampaigns.includes(c)
+              return (
+                <div key={c.id} className={`rounded-lg border px-3 py-2 ${campaignBadgeColor(c)}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-semibold truncate">{c.name}</span>
+                        <span className="text-xs opacity-70 border rounded px-1.5 py-0.5 font-medium shrink-0">
+                          {campaignTypeLabel(c)}
+                        </span>
+                        {!isActive && (
+                          <span className="text-xs bg-yellow-100 text-yellow-700 border border-yellow-200 rounded px-1.5 py-0.5 shrink-0">
+                            Kommende
+                          </span>
+                        )}
+                      </div>
+                      {(c.start_date || c.end_date) && (
+                        <p className="text-xs opacity-60 mt-0.5">
+                          {c.start_date ? new Date(c.start_date).toLocaleDateString('da-DK') : ''}
+                          {c.start_date && c.end_date ? ' – ' : ''}
+                          {c.end_date ? new Date(c.end_date).toLocaleDateString('da-DK') : ''}
+                        </p>
+                      )}
+                    </div>
+                    {saving != null && (
+                      <div className="text-right shrink-0">
+                        <p className="text-sm font-bold tabular-nums">
+                          {c.discount_type === 'percentage'
+                            ? `-${c.discount_value}%`
+                            : `-${saving.toLocaleString('da-DK', { maximumFractionDigits: 2 })} kr`}
+                        </p>
+                        <p className="text-xs opacity-60">besparelse</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Variant editor ────────────────────────────────────────────────────────────
-function VariantsEditor({ variants, onChange }: { variants: Variant[]; onChange: (updated: Variant[]) => void }) {
+function VariantsEditor({ variants, onChange, campaigns }: {
+  variants:  Variant[]
+  onChange:  (updated: Variant[]) => void
+  campaigns: Campaign[]
+}) {
   const [savingId,     setSavingId]     = useState<string | null>(null)
   const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
 
@@ -305,10 +720,12 @@ function VariantsEditor({ variants, onChange }: { variants: Variant[]; onChange:
   return (
     <div className="space-y-3">
       {variants.map((v, i) => {
-        const isSaving   = savingId === v.id
-        const isOpen     = expandedIdxs.has(i)
-        const sup        = v.supplier
-        const totalStock = v.own_stock_quantity + (sup?.supplier_stock_quantity ?? 0)
+        const isSaving    = savingId === v.id
+        const isOpen      = expandedIdxs.has(i)
+        const sup         = v.supplier
+        const totalStock  = v.own_stock_quantity + (sup?.supplier_stock_quantity ?? 0)
+        const barcodes    = v.variant_barcodes ?? []
+        const primaryEan  = barcodes.find(b => b.is_primary)?.ean ?? v.ean
 
         return (
           <div key={v.id} className={`border rounded-lg overflow-hidden transition-colors ${isSaving ? 'border-blue-200' : 'border-gray-200'}`}>
@@ -334,7 +751,11 @@ function VariantsEditor({ variants, onChange }: { variants: Variant[]; onChange:
                     <span className="text-xs text-gray-400">Salg: <span className="text-gray-700 font-medium">{v.sales_price.toLocaleString('da-DK')} kr</span></span>
                   )}
                   <span className={`text-xs font-medium ${totalStock > 0 ? 'text-green-600' : 'text-gray-300'}`}>Lager: {totalStock} stk</span>
-                  {v.ean && <span className="text-xs text-gray-400 font-mono">{v.ean}</span>}
+                  {primaryEan && (
+                    <span className="text-xs text-gray-400 font-mono" title={barcodes.length > 1 ? `${barcodes.length} stregkoder` : undefined}>
+                      {primaryEan}{barcodes.length > 1 ? <span className="text-gray-300 ml-0.5">+{barcodes.length - 1}</span> : null}
+                    </span>
+                  )}
                 </div>
               </div>
               <button onClick={() => toggleExpand(i)} className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-1.5 py-1" title={isOpen ? 'Skjul' : 'Rediger'}>
@@ -368,17 +789,47 @@ function VariantsEditor({ variants, onChange }: { variants: Variant[]; onChange:
                     <NumericInput value={v.sale_price} suffix=" kr" onSave={val => patchVariant(v, { sale_price: val })} placeholder="—" />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-400 mb-1">EAN</label>
-                    <AttrValueInput value={v.ean ?? ''} placeholder="Stregkode" onSave={val => patchVariant(v, { ean: val || null })} mono />
-                  </div>
-                  <div>
                     <label className="block text-xs text-gray-400 mb-1">Vægt (kg)</label>
                     <NumericInput value={v.weight ?? null} suffix=" kg" onSave={val => patchVariant(v, { weight: val as number | null })} placeholder="—" />
                   </div>
                 </div>
+                <div className="px-3 py-2 border-t border-gray-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-gray-600">Skjul ved 0 på lokalt lager</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {v.hide_when_out_of_stock
+                        ? v.own_stock_quantity === 0 ? '🚫 Skjult nu' : '👁 Lager-styret'
+                        : '✓ Altid synlig'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => patchVariant(v, { hide_when_out_of_stock: !v.hide_when_out_of_stock })}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                      v.hide_when_out_of_stock ? 'bg-yellow-400' : 'bg-gray-200'
+                    }`}>
+                    <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow-sm transition-transform ${
+                      v.hide_when_out_of_stock ? 'translate-x-[18px]' : 'translate-x-[2px]'
+                    }`} />
+                  </button>
+                </div>
+                <div className="px-3 py-3 border-t border-gray-100">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                    Stregkoder{barcodes.length > 0 ? ` (${barcodes.length})` : ''}
+                  </p>
+                  <BarcodeManager
+                    variant={v}
+                    onUpdate={updated => onChange(variants.map((vv, vi) => vi === i ? { ...vv, variant_barcodes: updated } : vv))}
+                  />
+                </div>
+                <EconomicsBox
+                  salesPrice={v.sales_price}
+                  purchasePrice={sup?.purchase_price ?? null}
+                  salePrice={v.sale_price}
+                  campaigns={campaigns}
+                />
                 <div className="px-3 py-2 border-t border-gray-100 flex justify-end">
                   <SaveVariantButton onSave={async () => {
-                    await patchVariant(v, { attributes: v.attributes, sales_price: v.sales_price, sale_price: v.sale_price, ean: v.ean, weight: v.weight })
+                    await patchVariant(v, { attributes: v.attributes, sales_price: v.sales_price, sale_price: v.sale_price, weight: v.weight })
                     toggleExpand(i)
                   }} />
                 </div>
@@ -422,19 +873,21 @@ export function ProductDetail({
   onClose?: () => void
   onBack?: () => void
 }) {
-  const [product, setProduct]   = useState<Product | null>(null)
-  const [loading, setLoading]   = useState(true)
+  const [product,   setProduct]  = useState<Product | null>(null)
+  const [loading,   setLoading]  = useState(true)
   const [activeImg, setActiveImg] = useState(0)
-  const [error, setError]       = useState<string | null>(null)
-  const [saving, setSaving]     = useState<Set<string>>(new Set())
+  const [error,     setError]    = useState<string | null>(null)
+  const [saving,    setSaving]   = useState<Set<string>>(new Set())
   const [statusSaving, setStatusSaving] = useState(false)
-  const [variants, setVariants] = useState<Variant[]>([])
+  const [variants,  setVariants] = useState<Variant[]>([])
+  const [campaigns, setCampaigns] = useState<Campaign[]>([])
 
   useEffect(() => {
     setLoading(true)
     setError(null)
     setProduct(null)
     setVariants([])
+    setCampaigns([])
     setActiveImg(0)
     fetch(`/api/products/${productId}`)
       .then(r => r.json())
@@ -443,6 +896,12 @@ export function ProductDetail({
         else { setProduct(j.data); setVariants(j.data?.product_variants ?? []) }
       })
       .finally(() => setLoading(false))
+
+    // Fetch campaigns for this product
+    fetch(`/api/campaigns?product_id=${productId}`)
+      .then(r => r.ok ? r.json() : { data: [] })
+      .then(j => setCampaigns(j.data ?? []))
+      .catch(() => {})
   }, [productId])
 
   async function patchField(fields: Record<string, unknown>, key?: string) {
@@ -554,7 +1013,7 @@ export function ProductDetail({
 
   const variantsSection = (
     <Section title={`Varianter (${variants.length})`}>
-      <VariantsEditor variants={variants} onChange={setVariants} />
+      <VariantsEditor variants={variants} onChange={setVariants} campaigns={campaigns} />
     </Section>
   )
 
@@ -613,6 +1072,41 @@ export function ProductDetail({
     </Section>
   )
 
+  const visibilitySection = (
+    <Section title="Shop-synlighed">
+      <div className="space-y-3">
+        {/* Product-level toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-800">Skjul ved 0 på lokalt lager</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {product.hide_when_out_of_stock
+                ? product.own_stock_quantity === 0
+                  ? '🚫 Skjult i shop nu — lokalt lager er 0'
+                  : `👁 Lager-styret — synlig (${product.own_stock_quantity} stk. på lager)`
+                : '✓ Altid synlig uanset lager'}
+            </p>
+          </div>
+          <button
+            onClick={() => patchField({ hide_when_out_of_stock: !product.hide_when_out_of_stock }, 'hide_when_out_of_stock')}
+            disabled={saving.has('hide_when_out_of_stock')}
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none disabled:opacity-50 ${
+              product.hide_when_out_of_stock ? 'bg-yellow-400' : 'bg-gray-200'
+            }`}>
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+              product.hide_when_out_of_stock ? 'translate-x-6' : 'translate-x-1'
+            }`} />
+          </button>
+        </div>
+        {product.hide_when_out_of_stock && (
+          <p className="text-xs text-yellow-700 bg-yellow-50 rounded-lg px-3 py-2 border border-yellow-200">
+            Produktet er aktivt synlighedsstyret. Indstil samme på varianter nedenfor hvis ønsket.
+          </p>
+        )}
+      </div>
+    </Section>
+  )
+
   const stockSection = (
     <Section title="Lagerbeholdning">
       <div className="flex justify-between items-center pb-3 mb-2 border-b border-gray-100">
@@ -666,6 +1160,17 @@ export function ProductDetail({
         <InlineField label="Slug" value={product.slug} mono
           onSave={v => patchField({ slug: v }, 'slug')} saving={saving.has('slug')} />
       </dl>
+    </Section>
+  )
+
+  const originalNumberSection = (
+    <Section title="Original nummer (eksternt)">
+      <OriginalNumberSelector
+        product={product}
+        suppliers={suppls}
+        variants={variants}
+        onSet={(value, source) => patchField({ original_number: value || null, original_number_source: value ? source : null }, 'original_number')}
+      />
     </Section>
   )
 
@@ -784,9 +1289,11 @@ export function ProductDetail({
             {descriptionSection}
             {variantsSection}
             {suppliersSection}
+            {visibilitySection}
             {stockSection}
             {pricesSection}
             {identSection}
+            {originalNumberSection}
             {dimsSection}
             {catSection}
             {metaSection}
@@ -838,9 +1345,11 @@ export function ProductDetail({
             )}
           </div>
           <div className="space-y-4">
+            {visibilitySection}
             {stockSection}
             {pricesSection}
             {identSection}
+            {originalNumberSection}
             {product.manufacturers && (
               <Section title="Producent">
                 <dl>

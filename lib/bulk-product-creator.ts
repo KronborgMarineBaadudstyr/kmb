@@ -20,9 +20,9 @@ function findProductType(name: string, types: ProductType[]): ProductType | null
 }
 
 type StagingRow = {
-  id:             string
-  match_group_id: string
-  supplier_id:    string
+  id:              string
+  match_group_id:  string
+  supplier_id:     string
   normalized_name: string
   normalized_ean:  string | null
   normalized_sku:  string
@@ -33,15 +33,21 @@ type GroupRow = {
   id:             string
   suggested_name: string | null
   suggested_ean:  string | null
+  match_method:   string | null
 }
+
+// ── Variant methods — these create product_variants instead of flat product_suppliers ──
+const VARIANT_METHODS = new Set(['parent_sku', 'variant'])
 
 type PreparedProduct = {
   groupId:    string
   members:    StagingRow[]
+  isVariant:  boolean
   dbRow: {
     internal_sku:      string
     name:              string
     ean:               string | null
+    manufacturer_sku:  string | null
     status:            string
     description:       string | null
     short_description: string | null
@@ -55,11 +61,14 @@ type PreparedProduct = {
   }
 }
 
-
 function generateSku(idx: number): string {
   const ts   = Date.now().toString(36).toUpperCase()
   const hex  = idx.toString(16).toUpperCase().padStart(4, '0')
   return `KMB-${ts}-${hex}`
+}
+
+function generateVariantSku(productSku: string, variantIdx: number): string {
+  return `${productSku}-V${String(variantIdx + 1).padStart(2, '0')}`
 }
 
 function completenessScore(raw: RawData): number {
@@ -77,6 +86,36 @@ function completenessScore(raw: RawData): number {
   return score
 }
 
+// ── Extract variant attributes from raw_data ────────────────────────────────
+// Supplier feeds store e.g. [{name:'Størrelse',value:'L'},{name:'Farve',value:'Rød'}]
+// in supplier_variant_attributes. We also try to infer from normalized_name diffs.
+function extractVariantAttributes(
+  raw: RawData,
+): Array<{ name: string; value: string }> {
+  const attrs = raw.supplier_variant_attributes
+  if (Array.isArray(attrs) && attrs.length > 0) {
+    return (attrs as Array<{ name?: string; value?: string }>)
+      .filter(a => a.name && a.value)
+      .map(a => ({ name: String(a.name), value: String(a.value) }))
+  }
+  return []
+}
+
+// ── Build a base product name from variant group members ────────────────────
+// Finds the longest common prefix OR uses suggested_name.
+function inferBaseName(members: StagingRow[], suggestedName: string | null): string {
+  if (suggestedName?.trim()) return suggestedName.trim()
+
+  const names = members.map(m => (m.normalized_name ?? '').trim()).filter(Boolean)
+  if (names.length === 0) return ''
+  if (names.length === 1) return names[0]
+
+  // Shortest name is usually the parent name (variants add size/color suffix)
+  return names.reduce((shortest, n) =>
+    n.length > 0 && n.length < shortest.length ? n : shortest
+  )
+}
+
 // Bulk-create products for up to `limit` confirmed groups without a product.
 // Uses 6 total DB round-trips regardless of how many products are created.
 export async function bulkCreateProductsFromGroups(
@@ -90,10 +129,10 @@ export async function bulkCreateProductsFromGroups(
     .select('id, keywords, our_category, our_subcategory')
   const productTypes = (ptData ?? []) as ProductType[]
 
-  // 1. Load confirmed groups
+  // 1. Load confirmed groups (including match_method for variant detection)
   const { data: groupData, error: gErr } = await supabase
     .from('staging_match_groups')
-    .select('id, suggested_name, suggested_ean')
+    .select('id, suggested_name, suggested_ean, match_method')
     .eq('status', 'confirmed')
     .is('product_id', null)
     .limit(limit)
@@ -130,19 +169,20 @@ export async function bulkCreateProductsFromGroups(
     const members = membersByGroup.get(group.id) ?? []
     if (members.length === 0) { skipped.push(group.id); continue }
 
-    const name = group.suggested_name?.trim() ||
-      [...members].sort((a, b) => (b.normalized_name?.length ?? 0) - (a.normalized_name?.length ?? 0))[0]
-        ?.normalized_name?.trim() || ''
+    const isVariant = VARIANT_METHODS.has(group.match_method ?? '')
+
+    const name = isVariant
+      ? inferBaseName(members, group.suggested_name)
+      : (group.suggested_name?.trim() ||
+          [...members].sort((a, b) => (b.normalized_name?.length ?? 0) - (a.normalized_name?.length ?? 0))[0]
+            ?.normalized_name?.trim() || '')
 
     if (!name) { skipped.push(group.id); continue }
 
     const primary = [...members].sort((a, b) => completenessScore(b.raw_data) - completenessScore(a.raw_data))[0]
     const raw     = primary.raw_data
 
-    // Use new category assignment (product name → standard category + subcategory + boat_type)
-    const assigned = assignProductCategory(name)
-
-    // Fallback: product type keyword match for category if assignProductCategory found nothing
+    const assigned    = assignProductCategory(name)
     const matchedType = assigned.category ? null : findProductType(name, productTypes)
     const categories: string[] = assigned.category
       ? [assigned.category, assigned.subcategory].filter((c): c is string => !!c)
@@ -152,12 +192,14 @@ export async function bulkCreateProductsFromGroups(
     const boatType: string[] = assigned.boatType
 
     prepared.push({
-      groupId: group.id,
+      groupId:   group.id,
       members,
+      isVariant,
       dbRow: {
         internal_sku:      generateSku(idx),
         name,
-        ean:               group.suggested_ean ?? primary.normalized_ean ?? null,
+        ean:               isVariant ? null : (group.suggested_ean ?? primary.normalized_ean ?? null),
+        manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
         status:            'draft',
         description:       typeof raw.description       === 'string' ? raw.description       : null,
         short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
@@ -180,29 +222,31 @@ export async function bulkCreateProductsFromGroups(
     .select('id, name')
     .in('name', prepared.map(p => p.dbRow.name))
 
-  const existingNameMap = new Map<string, string>() // lower name → product id
+  const existingNameMap = new Map<string, string>()
   for (const ep of existingByName ?? []) {
     existingNameMap.set((ep.name as string).toLowerCase().trim(), ep.id as string)
   }
 
-  // Split: groups whose name already has a product (link) vs new ones (insert)
-  const toLink:   PreparedProduct[] = []
-  const toInsert: PreparedProduct[] = []
+  const toLink:          PreparedProduct[] = []
+  const toInsertSimple:  PreparedProduct[] = []  // flat product_suppliers per member
+  const toInsertVariant: PreparedProduct[] = []  // product_variants per member
+
   for (const p of prepared) {
     const existingId = existingNameMap.get(p.dbRow.name.toLowerCase().trim())
     if (existingId) {
       toLink.push({ ...p, _existingProductId: existingId } as PreparedProduct & { _existingProductId: string })
+    } else if (p.isVariant) {
+      toInsertVariant.push(p)
     } else {
-      toInsert.push(p)
+      toInsertSimple.push(p)
     }
   }
 
-  // Link groups that already have a matching product (add missing suppliers, mark matched)
+  // ── 4b. Link groups to existing products ──────────────────────────────────
   const now0 = new Date().toISOString()
   for (const p of toLink) {
     const productId = (p as PreparedProduct & { _existingProductId: string })._existingProductId
 
-    // Get existing supplier IDs on this product
     const { data: existingSuppliers } = await supabase
       .from('product_suppliers')
       .select('supplier_id')
@@ -239,108 +283,227 @@ export async function bulkCreateProductsFromGroups(
       )
     }
 
-    // Mark staging rows as matched
     const stagingIds = p.members.map(m => m.id)
     for (let i = 0; i < stagingIds.length; i += 500) {
       await supabase.from('supplier_product_staging')
         .update({ status: 'matched', updated_at: now0 })
         .in('id', stagingIds.slice(i, i + 500))
     }
-
-    // Update group → product_created
     await supabase.from('staging_match_groups')
       .update({ status: 'product_created', product_id: productId, updated_at: now0 })
       .eq('id', p.groupId)
 
-    skipped.push(p.groupId) // count as "skipped creation" (linked instead)
+    skipped.push(p.groupId)
   }
 
-  if (toInsert.length === 0) return { created: 0, skipped: skipped.length, remaining: 0 }
+  // ── 5a. Bulk insert simple (non-variant) products ─────────────────────────
+  let totalCreatedSimple = 0
 
-  // 4b. Bulk insert genuinely new products
-  const { data: insertedProducts, error: pErr } = await supabase
-    .from('products')
-    .insert(toInsert.map(p => p.dbRow))
-    .select('id, internal_sku')
+  if (toInsertSimple.length > 0) {
+    const { data: insertedProducts, error: pErr } = await supabase
+      .from('products')
+      .insert(toInsertSimple.map(p => p.dbRow))
+      .select('id, internal_sku')
 
-  if (pErr) throw new Error(`Produkt bulk-insert fejlede: ${pErr.message}`)
+    if (pErr) throw new Error(`Produkt bulk-insert fejlede: ${pErr.message}`)
 
-  const skuToId = new Map<string, string>()
-  for (const p of (insertedProducts ?? []) as { id: string; internal_sku: string }[]) {
-    skuToId.set(p.internal_sku, p.id)
-  }
-
-  // 5. Build and bulk-insert product_suppliers
-  const groupIdToProductId = new Map<string, string>()
-  const supplierInserts: Record<string, unknown>[] = []
-  const allStagingIds: string[] = []
-
-  for (const p of toInsert) {
-    const productId = skuToId.get(p.dbRow.internal_sku)
-    if (!productId) continue
-    groupIdToProductId.set(p.groupId, productId)
-
-    const ordered = [...p.members].sort((a, b) => {
-      if (!!a.normalized_ean !== !!b.normalized_ean) return a.normalized_ean ? -1 : 1
-      const aPrice = typeof a.raw_data.purchase_price === 'number' ? a.raw_data.purchase_price : Infinity
-      const bPrice = typeof b.raw_data.purchase_price === 'number' ? b.raw_data.purchase_price : Infinity
-      return aPrice - bPrice
-    })
-
-    for (let i = 0; i < ordered.length; i++) {
-      const m = ordered[i]
-      allStagingIds.push(m.id)
-      supplierInserts.push({
-        product_id:              productId,
-        supplier_id:             m.supplier_id,
-        supplier_sku:            m.normalized_sku,
-        supplier_product_name:   typeof m.raw_data.supplier_product_name === 'string'
-                                   ? m.raw_data.supplier_product_name : m.normalized_name,
-        purchase_price:          typeof m.raw_data.purchase_price === 'number' && isFinite(m.raw_data.purchase_price) ? m.raw_data.purchase_price : null,
-        recommended_sales_price: typeof m.raw_data.recommended_sales_price === 'number' && isFinite(m.raw_data.recommended_sales_price) ? m.raw_data.recommended_sales_price : null,
-        supplier_stock_quantity: typeof m.raw_data.supplier_stock_quantity === 'number' ? Math.max(0, Math.round(m.raw_data.supplier_stock_quantity)) : 0,
-        supplier_stock_reserved: 0,
-        supplier_images: Array.isArray(m.raw_data.supplier_images) ? m.raw_data.supplier_images : [],
-        supplier_files:  Array.isArray(m.raw_data.supplier_files)  ? m.raw_data.supplier_files  : [],
-        priority:    i + 1,
-        item_status: 'active',
-        is_active:   true,
-      })
+    const skuToId = new Map<string, string>()
+    for (const p of (insertedProducts ?? []) as { id: string; internal_sku: string }[]) {
+      skuToId.set(p.internal_sku, p.id)
     }
-  }
 
-  for (let i = 0; i < supplierInserts.length; i += 500) {
-    const { error } = await supabase.from('product_suppliers').insert(supplierInserts.slice(i, i + 500))
-    if (error) console.error('[bulk-creator] product_suppliers error:', error.message)
-  }
+    const groupIdToProductId = new Map<string, string>()
+    const supplierInserts: Record<string, unknown>[] = []
+    const allStagingIds: string[] = []
 
-  // 6. Bulk update staging → matched
-  const now = new Date().toISOString()
-  for (let i = 0; i < allStagingIds.length; i += 500) {
-    await supabase
-      .from('supplier_product_staging')
-      .update({ status: 'matched', updated_at: now })
-      .in('id', allStagingIds.slice(i, i + 500))
-  }
+    for (const p of toInsertSimple) {
+      const productId = skuToId.get(p.dbRow.internal_sku)
+      if (!productId) continue
+      groupIdToProductId.set(p.groupId, productId)
 
-  // 7. Update groups → product_created (batch by 100 individual updates)
-  const groupUpdates = Array.from(groupIdToProductId.entries())
-  for (let i = 0; i < groupUpdates.length; i += 100) {
-    await Promise.all(
-      groupUpdates.slice(i, i + 100).map(([groupId, productId]) =>
-        supabase.from('staging_match_groups')
-          .update({ status: 'product_created', product_id: productId, updated_at: now })
-          .eq('id', groupId)
+      const ordered = [...p.members].sort((a, b) => {
+        if (!!a.normalized_ean !== !!b.normalized_ean) return a.normalized_ean ? -1 : 1
+        const aPrice = typeof a.raw_data.purchase_price === 'number' ? a.raw_data.purchase_price : Infinity
+        const bPrice = typeof b.raw_data.purchase_price === 'number' ? b.raw_data.purchase_price : Infinity
+        return aPrice - bPrice
+      })
+
+      for (let i = 0; i < ordered.length; i++) {
+        const m = ordered[i]
+        allStagingIds.push(m.id)
+        supplierInserts.push({
+          product_id:              productId,
+          supplier_id:             m.supplier_id,
+          supplier_sku:            m.normalized_sku,
+          supplier_product_name:   typeof m.raw_data.supplier_product_name === 'string'
+                                     ? m.raw_data.supplier_product_name : m.normalized_name,
+          purchase_price:          typeof m.raw_data.purchase_price === 'number' && isFinite(m.raw_data.purchase_price) ? m.raw_data.purchase_price : null,
+          recommended_sales_price: typeof m.raw_data.recommended_sales_price === 'number' && isFinite(m.raw_data.recommended_sales_price) ? m.raw_data.recommended_sales_price : null,
+          supplier_stock_quantity: typeof m.raw_data.supplier_stock_quantity === 'number' ? Math.max(0, Math.round(m.raw_data.supplier_stock_quantity)) : 0,
+          supplier_stock_reserved: 0,
+          supplier_images: Array.isArray(m.raw_data.supplier_images) ? m.raw_data.supplier_images : [],
+          supplier_files:  Array.isArray(m.raw_data.supplier_files)  ? m.raw_data.supplier_files  : [],
+          priority:    i + 1,
+          item_status: 'active',
+          is_active:   true,
+        })
+      }
+    }
+
+    for (let i = 0; i < supplierInserts.length; i += 500) {
+      const { error } = await supabase.from('product_suppliers').insert(supplierInserts.slice(i, i + 500))
+      if (error) console.error('[bulk-creator] product_suppliers error:', error.message)
+    }
+
+    const now = new Date().toISOString()
+    for (let i = 0; i < allStagingIds.length; i += 500) {
+      await supabase.from('supplier_product_staging')
+        .update({ status: 'matched', updated_at: now })
+        .in('id', allStagingIds.slice(i, i + 500))
+    }
+
+    const groupUpdates = Array.from(groupIdToProductId.entries())
+    for (let i = 0; i < groupUpdates.length; i += 100) {
+      await Promise.all(
+        groupUpdates.slice(i, i + 100).map(([groupId, productId]) =>
+          supabase.from('staging_match_groups')
+            .update({ status: 'product_created', product_id: productId, updated_at: now })
+            .eq('id', groupId)
+        )
       )
-    )
+    }
+
+    totalCreatedSimple = toInsertSimple.length
   }
 
-  // 8. Count remaining
+  // ── 5b. Insert variant products (parent_sku / variant groups) ─────────────
+  // Each group → 1 product + N product_variants + N product_suppliers (with variant_id)
+  let totalCreatedVariant = 0
+
+  if (toInsertVariant.length > 0) {
+    const { data: insertedVariantProducts, error: pvErr } = await supabase
+      .from('products')
+      .insert(toInsertVariant.map(p => p.dbRow))
+      .select('id, internal_sku')
+
+    if (pvErr) throw new Error(`Variant produkt bulk-insert fejlede: ${pvErr.message}`)
+
+    const skuToId = new Map<string, string>()
+    for (const p of (insertedVariantProducts ?? []) as { id: string; internal_sku: string }[]) {
+      skuToId.set(p.internal_sku, p.id)
+    }
+
+    const now = new Date().toISOString()
+    const variantGroupToProductId = new Map<string, string>()
+    const allVariantStagingIds: string[] = []
+
+    for (const p of toInsertVariant) {
+      const productId = skuToId.get(p.dbRow.internal_sku)
+      if (!productId) continue
+      variantGroupToProductId.set(p.groupId, productId)
+
+      // Sort members: by supplier_variant_attributes presence, then by name
+      const ordered = [...p.members].sort((a, b) => {
+        const aAttrs = Array.isArray(a.raw_data.supplier_variant_attributes)
+          ? (a.raw_data.supplier_variant_attributes as unknown[]).length : 0
+        const bAttrs = Array.isArray(b.raw_data.supplier_variant_attributes)
+          ? (b.raw_data.supplier_variant_attributes as unknown[]).length : 0
+        if (aAttrs !== bAttrs) return bAttrs - aAttrs
+        return (a.normalized_name ?? '').localeCompare(b.normalized_name ?? '', 'da')
+      })
+
+      // Insert product_variants for this product — one per member
+      const variantRows = ordered.map((m, i) => ({
+        product_id:           productId,
+        internal_variant_sku: generateVariantSku(p.dbRow.internal_sku, i),
+        attributes:           extractVariantAttributes(m.raw_data),
+        ean:                  m.normalized_ean ?? null,
+        own_stock_quantity:   0,
+        own_stock_reserved:   0,
+        status:               'active',
+      }))
+
+      const { data: insertedVariants, error: vErr } = await supabase
+        .from('product_variants')
+        .insert(variantRows)
+        .select('id, internal_variant_sku')
+
+      if (vErr) {
+        console.error(`[bulk-creator] product_variants insert error for group ${p.groupId}:`, vErr.message)
+        continue
+      }
+
+      // Map internal_variant_sku → variant id
+      const variantSkuToId = new Map<string, string>()
+      for (const v of (insertedVariants ?? []) as { id: string; internal_variant_sku: string }[]) {
+        variantSkuToId.set(v.internal_variant_sku, v.id)
+      }
+
+      // Insert product_suppliers — one per variant, with variant_id
+      const supplierRows = ordered.map((m, i) => {
+        const variantSku = generateVariantSku(p.dbRow.internal_sku, i)
+        const variantId  = variantSkuToId.get(variantSku) ?? null
+        return {
+          product_id:              productId,
+          variant_id:              variantId,
+          supplier_id:             m.supplier_id,
+          supplier_sku:            m.normalized_sku,
+          manufacturer_sku:        typeof m.raw_data.manufacturer_sku === 'string' ? m.raw_data.manufacturer_sku : null,
+          supplier_product_name:   typeof m.raw_data.supplier_product_name === 'string'
+                                     ? m.raw_data.supplier_product_name : m.normalized_name,
+          purchase_price:          typeof m.raw_data.purchase_price === 'number' && isFinite(m.raw_data.purchase_price) ? m.raw_data.purchase_price : null,
+          recommended_sales_price: typeof m.raw_data.recommended_sales_price === 'number' && isFinite(m.raw_data.recommended_sales_price) ? m.raw_data.recommended_sales_price : null,
+          supplier_stock_quantity: typeof m.raw_data.supplier_stock_quantity === 'number' ? Math.max(0, Math.round(m.raw_data.supplier_stock_quantity)) : 0,
+          supplier_stock_reserved: 0,
+          supplier_images: Array.isArray(m.raw_data.supplier_images) ? m.raw_data.supplier_images : [],
+          supplier_files:  Array.isArray(m.raw_data.supplier_files)  ? m.raw_data.supplier_files  : [],
+          unit:            typeof m.raw_data.unit === 'string' ? m.raw_data.unit : null,
+          priority:        i + 1,
+          item_status:     typeof m.raw_data.supplier_stock_quantity === 'number' && m.raw_data.supplier_stock_quantity > 0 ? 'active' : 'out_of_stock',
+          is_active:       true,
+        }
+      })
+
+      const { error: sErr } = await supabase.from('product_suppliers').insert(supplierRows)
+      if (sErr) console.error(`[bulk-creator] variant product_suppliers error:`, sErr.message)
+
+      // Mark staging rows matched
+      const stagingIds = p.members.map(m => m.id)
+      allVariantStagingIds.push(...stagingIds)
+    }
+
+    // Bulk update staging
+    for (let i = 0; i < allVariantStagingIds.length; i += 500) {
+      await supabase.from('supplier_product_staging')
+        .update({ status: 'matched', updated_at: now })
+        .in('id', allVariantStagingIds.slice(i, i + 500))
+    }
+
+    // Update groups
+    const variantGroupUpdates = Array.from(variantGroupToProductId.entries())
+    for (let i = 0; i < variantGroupUpdates.length; i += 100) {
+      await Promise.all(
+        variantGroupUpdates.slice(i, i + 100).map(([groupId, productId]) =>
+          supabase.from('staging_match_groups')
+            .update({ status: 'product_created', product_id: productId, updated_at: now })
+            .eq('id', groupId)
+        )
+      )
+    }
+
+    totalCreatedVariant = toInsertVariant.length
+  }
+
+  // 6. Count remaining
   const { count: remaining } = await supabase
     .from('staging_match_groups')
     .select('*', { count: 'exact', head: true })
     .eq('status', 'confirmed')
     .is('product_id', null)
 
-  return { created: toInsert.length, skipped: skipped.length, remaining: remaining ?? 0 }
+  return {
+    created:  totalCreatedSimple + totalCreatedVariant,
+    skipped:  skipped.length,
+    remaining: remaining ?? 0,
+  }
 }

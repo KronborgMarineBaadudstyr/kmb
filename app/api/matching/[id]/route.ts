@@ -6,12 +6,17 @@ export const dynamic = 'force-dynamic'
 type RouteParams = { params: Promise<{ id: string }> }
 
 // PATCH /api/matching/[id] — update suggested_name or status
+//
+// Ved status='rejected' kan body.bad_ean_supplier_ids angive hvilke leverandør-IDs
+// der har et fejlagtigt EAN i denne gruppe. De skrives til supplier_ean_exclusions
+// så fremtidige imports og pipeline-kørsel ikke matcher dem forkert igen.
 export async function PATCH(request: Request, { params }: RouteParams) {
   const { id } = await params
   const body   = await request.json() as {
-    suggested_name?: string
-    status?:         string
-    notes?:          string
+    suggested_name?:        string
+    status?:                string
+    notes?:                 string
+    bad_ean_supplier_ids?:  string[]  // leverandør-IDs med dokumenteret forkert EAN
   }
 
   const allowed = ['pending_review', 'confirmed', 'rejected', 'product_created']
@@ -33,6 +38,23 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Skriv fejl-EAN ekskluderinger hvis angivet (typisk ved afvisning)
+  if (
+    body.status === 'rejected' &&
+    body.bad_ean_supplier_ids?.length &&
+    data?.suggested_ean
+  ) {
+    const exclusions = body.bad_ean_supplier_ids.map(sid => ({
+      supplier_id: sid,
+      ean:         data.suggested_ean as string,
+      reason:      `Afvist gruppe ${id}: leverandørens EAN dokumenteret forkert`,
+    }))
+    // upsert — idempotent hvis samme (supplier_id, ean) allerede er registreret
+    await supabase
+      .from('supplier_ean_exclusions')
+      .upsert(exclusions, { onConflict: 'supplier_id,ean', ignoreDuplicates: true })
+  }
 
   return NextResponse.json({ ok: true, data })
 }

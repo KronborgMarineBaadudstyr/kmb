@@ -2,7 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 export type MatchingProgressEvent = {
-  stage:          'ean_phase' | 'fuzzy_phase' | 'variant_phase' | 'singles_phase' | 'done' | 'error'
+  stage:          'ean_phase' | 'fuzzy_phase' | 'parent_sku_phase' | 'variant_phase' | 'singles_phase' | 'done' | 'error'
   message:        string
   groups_created?: number
   rows_assigned?:  number
@@ -179,6 +179,88 @@ async function runFuzzyPhase(
   return { groupsCreated, rowsAssigned }
 }
 
+// ── Phase 2.2: Parent-SKU grouping — same supplier, explicit parent_sku relation ──
+// Finds staging rows that have raw_data.supplier_parent_sku set and groups them
+// by (supplier_id, supplier_parent_sku). These are explicit variant families
+// as declared by the supplier (Palby MasterItemId, Kap-Horn parent SKU, etc.).
+async function runParentSkuPhase(
+  supabase: SupabaseClient,
+  onProgress: ProgressCallback,
+): Promise<{ groupsCreated: number; rowsAssigned: number }> {
+  onProgress({ stage: 'parent_sku_phase', message: 'Parent-SKU variant-gruppering kører…' })
+
+  type Row = { id: string; supplier_id: string; normalized_name: string; raw_data: Record<string, unknown> }
+  const rows: Row[] = []
+  const PAGE = 1000
+
+  for (let p = 0; ; p++) {
+    const { data, error } = await supabase
+      .from('supplier_product_staging')
+      .select('id, supplier_id, normalized_name, raw_data')
+      .is('match_group_id', null)
+      .in('status', ['pending_review', 'needs_review'])
+      .range(p * PAGE, p * PAGE + PAGE - 1)
+
+    if (error) { console.error('[matching-engine] parent_sku phase fetch:', error.message); break }
+    if (!data || data.length === 0) break
+    rows.push(...(data as Row[]))
+    if (data.length < PAGE) break
+  }
+
+  // Group by (supplier_id, supplier_parent_sku) — only rows that declare a parent
+  const buckets = new Map<string, string[]>()
+  const nameMap = new Map<string, string>()
+
+  for (const row of rows) {
+    nameMap.set(row.id, row.normalized_name ?? '')
+    const parentSku = typeof row.raw_data?.supplier_parent_sku === 'string' && row.raw_data.supplier_parent_sku
+      ? row.raw_data.supplier_parent_sku as string
+      : null
+    if (!parentSku) continue
+
+    const key = `${row.supplier_id}||${parentSku}`
+    if (!buckets.has(key)) buckets.set(key, [])
+    buckets.get(key)!.push(row.id)
+  }
+
+  let groupsCreated = 0
+  let rowsAssigned  = 0
+
+  for (const [, members] of buckets) {
+    if (members.length < 2) continue  // loner variant — handled in singles phase
+
+    // Shortest name is most likely the base product name
+    const suggestedName = members
+      .map(id => nameMap.get(id) ?? '')
+      .reduce((best, n) => (n.length > 0 && n.length < best.length) ? n : best)
+
+    const { data: group, error: gErr } = await supabase
+      .from('staging_match_groups')
+      .insert({
+        match_confidence: 'high',
+        match_method:     'parent_sku',
+        supplier_count:   1,
+        suggested_name:   suggestedName,
+        suggested_ean:    null,
+        status:           'pending_review',
+      })
+      .select('id')
+      .single()
+
+    if (gErr || !group) { console.error('[matching-engine] parent_sku group insert:', gErr?.message); continue }
+    groupsCreated++
+
+    const { error: uErr } = await supabase
+      .from('supplier_product_staging')
+      .update({ match_group_id: group.id })
+      .in('id', members)
+
+    if (!uErr) rowsAssigned += members.length
+  }
+
+  return { groupsCreated, rowsAssigned }
+}
+
 // ── Phase 2.5: Variant grouping — same supplier, identical normalized name ──
 // Finds staging rows that are NOT yet assigned a group, grouped by
 // (supplier_id, normalized_name). Groups of 2+ are same-product variants
@@ -303,25 +385,35 @@ export async function runMatchingEngine(
       rows_assigned:  ean.rowsAssigned + fuzzy.rowsAssigned,
     })
 
-    // Phase 2.5: Variant grouping (same supplier, identical name)
+    // Phase 2.2: Parent-SKU grouping (same supplier, explicit supplier_parent_sku relation)
+    const parentSku = await runParentSkuPhase(db, onProgress)
+
+    onProgress({
+      stage:          'parent_sku_phase',
+      message:        `Parent-SKU-fase færdig: ${parentSku.groupsCreated} variant-grupper (leverandør-deklarerede), ${parentSku.rowsAssigned} rækker tildelt`,
+      groups_created: ean.groupsCreated + fuzzy.groupsCreated + parentSku.groupsCreated,
+      rows_assigned:  ean.rowsAssigned + fuzzy.rowsAssigned + parentSku.rowsAssigned,
+    })
+
+    // Phase 2.5: Variant grouping (same supplier, identical name — fallback)
     const variants = await runVariantPhase(db, onProgress)
 
     onProgress({
       stage:          'variant_phase',
-      message:        `Variant-fase færdig: ${variants.groupsCreated} variant-grupper, ${variants.rowsAssigned} rækker tildelt`,
-      groups_created: ean.groupsCreated + fuzzy.groupsCreated + variants.groupsCreated,
-      rows_assigned:  ean.rowsAssigned + fuzzy.rowsAssigned + variants.rowsAssigned,
+      message:        `Navn-variant-fase færdig: ${variants.groupsCreated} variant-grupper, ${variants.rowsAssigned} rækker tildelt`,
+      groups_created: ean.groupsCreated + fuzzy.groupsCreated + parentSku.groupsCreated + variants.groupsCreated,
+      rows_assigned:  ean.rowsAssigned + fuzzy.rowsAssigned + parentSku.rowsAssigned + variants.rowsAssigned,
     })
 
     // Phase 3: Singles
     const singles = await runSinglesPhase(db, onProgress)
 
-    const totalGroups = ean.groupsCreated + fuzzy.groupsCreated + variants.groupsCreated + singles.groupsCreated
-    const totalRows   = ean.rowsAssigned  + fuzzy.rowsAssigned  + variants.rowsAssigned  + singles.rowsAssigned
+    const totalGroups = ean.groupsCreated + fuzzy.groupsCreated + parentSku.groupsCreated + variants.groupsCreated + singles.groupsCreated
+    const totalRows   = ean.rowsAssigned  + fuzzy.rowsAssigned  + parentSku.rowsAssigned  + variants.rowsAssigned  + singles.rowsAssigned
 
     onProgress({
       stage:          'done',
-      message:        `Matching færdig! ${totalGroups} grupper — ${ean.groupsCreated} EAN, ${fuzzy.groupsCreated} fuzzy, ${variants.groupsCreated} varianter, ${singles.groupsCreated} enkelt-leverandør. ${totalRows} rækker tildelt.`,
+      message:        `Matching færdig! ${totalGroups} grupper — ${ean.groupsCreated} EAN, ${fuzzy.groupsCreated} fuzzy, ${parentSku.groupsCreated} parent-SKU varianter, ${variants.groupsCreated} navn-varianter, ${singles.groupsCreated} enkelt-leverandør. ${totalRows} rækker tildelt.`,
       groups_created: totalGroups,
       rows_assigned:  totalRows,
     })

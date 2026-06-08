@@ -1,5 +1,8 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { flagRecentlyImportedForReview } from '@/lib/review-checker'
+import { syncImagesToProduct } from './image-sync'
+import { enrichMatchedProduct } from './product-enrichment'
+import { batchEanLookup, type EanMatch } from './ean-lookup'
 
 const API_URL = 'https://scanmarine.dk/api/produkter'
 
@@ -222,13 +225,7 @@ export async function importScanmarine(
 
     // Batch EAN-opslag
     const eans = batch.map(p => p.ean_number).filter(Boolean)
-    const { data: byEan } = eans.length > 0
-      ? await supabase.from('products').select('id, name, ean').in('ean', eans)
-      : { data: [] }
-
-    const productByEan = Object.fromEntries(
-      (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
-    )
+    const productByEan = await batchEanLookup(supabase, eans, SUPPLIER_ID)
 
     const ops: Promise<void>[] = []
 
@@ -248,58 +245,99 @@ export async function importScanmarine(
         supplier_stock_reserved: 0,
         item_status:             p.stock > 0 ? 'active' : 'out_of_stock',
         supplier_images:         images,
+        // Nye dedikerede kolonner
+        supplier_discount_pct:   p.product_discount ?? null,
         extra_data: {
           ean,
           short_description: p.product_s_desc || null,
           description:       p.product_desc   || null,
           weight:            p.weight,
-          discount:          p.product_discount,
         },
         variant_id: null,
         is_active:  true,
       }
 
-      const matchedProduct = ean ? (productByEan[ean] ?? null) : null
+      const match = ean ? (productByEan[ean] ?? null) : null
 
       processed++
 
-      if (matchedProduct) {
+      if (match) {
         const existing = existingBySku[p.product_number]
+
+        const enrichData = {
+          dimensions:   { weight: p.weight ?? null },
+          descriptions: {
+            description:       p.product_desc   || null,
+            short_description: p.product_s_desc || null,
+          },
+        }
 
         if (existing) {
           updated++
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
-          ).then(({ error }) => { if (error) { errors++; updated-- } }))
+          ).then(async ({ error }) => {
+            if (error) { errors++; updated--; return }
+            await Promise.all([
+              images.length > 0 ? syncImagesToProduct(match.productId, images, 'scanmarine', supabase) : Promise.resolve(),
+              enrichMatchedProduct(match.productId, enrichData, supabase),
+            ])
+            // Ryd op: marker staging-række som matched hvis den stadig afventer
+            const stagingRow = existingStaging[p.product_number]
+            if (stagingRow && ['pending_review', 'needs_review'].includes(stagingRow.status)) {
+              await supabase.from('supplier_product_staging')
+                .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                .eq('id', stagingRow.id)
+            }
+          }))
         } else {
           matched++
           ops.push(Promise.resolve(
-            supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          ).then(({ error }) => { if (error) { errors++; matched-- } }))
+            supabase.from('product_suppliers').insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
+          ).then(async ({ error }) => {
+            if (error) { errors++; matched--; return }
+            await Promise.all([
+              images.length > 0 ? syncImagesToProduct(match.productId, images, 'scanmarine', supabase) : Promise.resolve(),
+              enrichMatchedProduct(match.productId, enrichData, supabase),
+            ])
+            // Ryd op: marker staging-række som matched hvis den stadig afventer
+            const stagingRow = existingStaging[p.product_number]
+            if (stagingRow && ['pending_review', 'needs_review'].includes(stagingRow.status)) {
+              await supabase.from('supplier_product_staging')
+                .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                .eq('id', stagingRow.id)
+            }
+          }))
         }
       } else {
         // Ingen match → staging
         const stagingRow = existingStaging[p.product_number]
 
+        const scanRawData = {
+          supplier_sku:            p.product_number,
+          supplier_product_name:   p.product_name,
+          purchase_price:          null,
+          recommended_sales_price: p.product_price,
+          supplier_stock_quantity: p.stock,
+          supplier_discount_pct:   p.product_discount ?? null,
+          supplier_images:         images,
+          short_description:       p.product_s_desc || null,
+          description:             p.product_desc   || null,
+          weight:                  p.weight,
+          ean,
+        }
+
         if (stagingRow && stagingRow.status !== 'pending_review') {
           // Allerede behandlet — opdater kun rådata
           ops.push(Promise.resolve(
             supabase.from('supplier_product_staging')
-              .update({ raw_data: supplierData.extra_data, updated_at: new Date().toISOString() })
+              .update({ raw_data: scanRawData, updated_at: new Date().toISOString() })
               .eq('id', stagingRow.id)
           ).then(({ error }) => { if (error) errors++ }))
         } else {
           const stagingUpsertRow = {
             supplier_id:          SUPPLIER_ID,
-            raw_data: {
-              ...supplierData.extra_data,
-              supplier_sku:            p.product_number,
-              supplier_product_name:   p.product_name,
-              purchase_price:          null,
-              recommended_sales_price: p.product_price,
-              supplier_stock_quantity: p.stock,
-              supplier_images:         images,
-            },
+            raw_data:             scanRawData,
             normalized_name:      p.product_name,
             normalized_ean:       ean,
             normalized_sku:       p.product_number,
@@ -322,17 +360,17 @@ export async function importScanmarine(
 
     await Promise.all(ops)
 
-    // Opdater last_synced_at løbende
-    await supabase
-      .from('suppliers')
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq('id', SUPPLIER_ID)
-
     onProgress({
       stage: 'importing', total, processed, matched, staged, updated, errors,
       message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} — ${matched} matchet, ${updated} opdateret, ${staged} til gennemgang`,
     })
   }
+
+  // Opdater last_synced_at for leverandøren
+  await supabase
+    .from('suppliers')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('id', SUPPLIER_ID)
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 

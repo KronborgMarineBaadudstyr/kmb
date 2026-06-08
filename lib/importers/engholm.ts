@@ -1,6 +1,9 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { normalizeUnit, resolveUnit } from './unit-normalizer'
 import { flagRecentlyImportedForReview } from '@/lib/review-checker'
+import { syncImagesToProduct } from './image-sync'
+import { enrichMatchedProduct } from './product-enrichment'
+import { batchEanLookup, type EanMatch } from './ean-lookup'
 
 const SUPPLIER_ID = '37d879e5-c0f7-48ae-b514-168264c80f9f'
 const API_URL     = 'https://www.engholm.dk/api/products'
@@ -169,13 +172,7 @@ export async function importEngholm(
 
     // Hent Supabase-produkter via EAN for hele batchen på én gang
     const gtins = batch.map(p => p.gtin).filter(Boolean)
-    const { data: byEan } = gtins.length > 0
-      ? await supabase.from('products').select('id, name, ean').in('ean', gtins)
-      : { data: [] }
-
-    const productByEan = Object.fromEntries(
-      (byEan ?? []).filter(p => p.ean).map(p => [p.ean, p])
-    )
+    const productByEan = await batchEanLookup(supabase, gtins, SUPPLIER_ID)
 
     const ops: Promise<void>[] = []
 
@@ -183,6 +180,10 @@ export async function importEngholm(
       const decodedTitle   = decode(p.title)
       const decodedDetails = decodeDetails(p.details)
       const { unit, unit_size } = resolveUnit(p.unit, decodedDetails)
+
+      const engholmImages = p.image ? [{ url: p.image, alt: decodedTitle, is_primary: true }] : []
+      const engholmCategories = parseCategories(decode(p.category || ''))
+      const engholmDescription = decode(p.description || '') || null
 
       const supplierData = {
         supplier_id:             SUPPLIER_ID,
@@ -193,70 +194,119 @@ export async function importEngholm(
         supplier_stock_quantity: p.stock  ?? 0,
         supplier_stock_reserved: 0,
         item_status:             (p.stock ?? 0) > 0 ? 'active' : 'out_of_stock',
-        supplier_images:         p.image ? [{ url: p.image, alt: decodedTitle, is_primary: true }] : [],
+        supplier_images:         engholmImages,
+        // Nye dedikerede kolonner
+        manufacturer_sku:        p.nautiskVarenr || null,
+        unit:                    unit || null,
         extra_data: {
-          gtin:          p.gtin          || null,
-          nautiskVarenr: p.nautiskVarenr || null,
-          grouping:      p.grouping      || null,
-          unit_raw:      p.unit          || null,
-          unit_normalized: unit,
+          gtin:            p.gtin          || null,
+          grouping:        p.grouping      || null,
+          unit_raw:        p.unit          || null,
           unit_size,
-          description:   decode(p.description || ''),
-          category:      decode(p.category    || ''),
-          categories:    parseCategories(decode(p.category || '')),
-          lastUpdate:    p.lastUpdate     || null,
-          details:       decodedDetails,
+          category:        decode(p.category || ''),
+          lastUpdate:      p.lastUpdate    || null,
+          details:         decodedDetails,
         },
         variant_id: null,
         is_active:  true,
       }
 
       // ── Forsøg hård EAN-match ──
-      const matchedProduct = productByEan[p.gtin] ?? null
+      const match = p.gtin ? (productByEan[p.gtin] ?? null) : null
 
       processed++
 
-      if (matchedProduct) {
+      if (match) {
         // MATCH FUNDET — opdater/opret product_suppliers
         const existing = existingBySku[p.sku]
+
+        // Engholm's details-objekt er key-value specifikationer → products.specifications
+        const specsFromDetails: Record<string, string> = {}
+        for (const [k, v] of Object.entries(decodedDetails)) {
+          if (k && v && !['antal', 'enhed', 'pakke'].includes(k.toLowerCase())) {
+            specsFromDetails[k] = String(v)
+          }
+        }
+
+        const enrichData = {
+          descriptions:    { description: engholmDescription },
+          categories:      engholmCategories,
+          manufacturerSku: p.nautiskVarenr || null,
+          specifications:  specsFromDetails,
+        }
 
         if (existing) {
           // Bevar priority (intern indstilling) — overskriv ALT andet
           updated++
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
-          ).then(({ error }) => { if (error) { console.error(`[engholm] update ps sku=${p.sku}:`, error.message, error.details); errors++; updated-- } }))
+          ).then(async ({ error }) => {
+            if (error) { console.error(`[engholm] update ps sku=${p.sku}:`, error.message, error.details); errors++; updated--; return }
+            await Promise.all([
+              engholmImages.length > 0 ? syncImagesToProduct(match.productId, engholmImages, 'engholm', supabase) : Promise.resolve(),
+              enrichMatchedProduct(match.productId, enrichData, supabase),
+            ])
+            // Ryd op: marker staging-række som matched hvis den stadig afventer
+            const stagingRow = existingStaging[p.sku]
+            if (stagingRow && ['pending_review', 'needs_review'].includes(stagingRow.status)) {
+              await supabase.from('supplier_product_staging')
+                .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                .eq('id', stagingRow.id)
+            }
+          }))
         } else {
           // Ny tilknytning — sæt priority til 1 som default
           matched++
           ops.push(Promise.resolve(
-            supabase.from('product_suppliers').insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-          ).then(({ error }) => { if (error) { console.error(`[engholm] insert ps sku=${p.sku}:`, error.message, error.details); errors++; matched-- } }))
+            supabase.from('product_suppliers').insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
+          ).then(async ({ error }) => {
+            if (error) { console.error(`[engholm] insert ps sku=${p.sku}:`, error.message, error.details); errors++; matched--; return }
+            await Promise.all([
+              engholmImages.length > 0 ? syncImagesToProduct(match.productId, engholmImages, 'engholm', supabase) : Promise.resolve(),
+              enrichMatchedProduct(match.productId, enrichData, supabase),
+            ])
+            // Ryd op: marker staging-række som matched hvis den stadig afventer
+            const stagingRow = existingStaging[p.sku]
+            if (stagingRow && ['pending_review', 'needs_review'].includes(stagingRow.status)) {
+              await supabase.from('supplier_product_staging')
+                .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                .eq('id', stagingRow.id)
+            }
+          }))
         }
       } else {
         // INGEN HÅRD MATCH — send til staging
         const stagingRow = existingStaging[p.sku]
+        const engholmRawData = {
+          supplier_sku:            p.sku,
+          supplier_product_name:   decodedTitle,
+          purchase_price:          supplierData.purchase_price,
+          recommended_sales_price: supplierData.recommended_sales_price,
+          supplier_stock_quantity: supplierData.supplier_stock_quantity,
+          supplier_images:         engholmImages,
+          manufacturer_sku:        p.nautiskVarenr || null,
+          unit,
+          unit_size,
+          description:             engholmDescription,
+          category:                decode(p.category || ''),
+          categories:              engholmCategories,
+          gtin:                    p.gtin || null,
+          grouping:                p.grouping || null,
+          lastUpdate:              p.lastUpdate || null,
+          details:                 decodedDetails,
+        }
+
         if (stagingRow && stagingRow.status !== 'pending_review') {
           // Allerede behandlet manuelt — opdater kun rådata, rør ikke status
           ops.push(Promise.resolve(
             supabase.from('supplier_product_staging')
-              .update({ raw_data: supplierData.extra_data, normalized_unit: unit, normalized_unit_size: unit_size })
+              .update({ raw_data: engholmRawData, normalized_unit: unit, normalized_unit_size: unit_size })
               .eq('id', stagingRow.id)
           ).then(({ error }) => { if (error) { console.error(`[engholm] update staging (skipped) sku=${p.sku}:`, error.message, error.details); errors++ } }))
         } else {
-          // Fuzzy match-forslag (simpel variant — fuld pg_trgm bruges i API-ruten)
-          // Her gemmer vi bare raw_data og lader UI'en kalde fuzzy search bagefter
           const stagingUpsertRow = {
             supplier_id:         SUPPLIER_ID,
-            raw_data: {
-              ...supplierData.extra_data,
-              supplier_sku:            p.sku,
-              supplier_product_name:   decodedTitle,
-              purchase_price:          supplierData.purchase_price,
-              recommended_sales_price: supplierData.recommended_sales_price,
-              supplier_stock_quantity: supplierData.supplier_stock_quantity,
-              supplier_images:         supplierData.supplier_images,
-            },
+            raw_data:            engholmRawData,
             normalized_name:      decodedTitle,
             normalized_ean:       p.gtin  || null,
             normalized_sku:       p.sku,
@@ -279,17 +329,17 @@ export async function importEngholm(
 
     await Promise.all(ops)
 
-    // Opdater last_synced_at for leverandøren
-    await supabase
-      .from('suppliers')
-      .update({ last_synced_at: new Date().toISOString() })
-      .eq('id', SUPPLIER_ID)
-
     onProgress({
       stage: 'importing', total, processed, matched, staged, updated, errors,
       message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} — ${matched} matchet, ${updated} opdateret, ${staged} til gennemgang`,
     })
   }
+
+  // Opdater last_synced_at for leverandøren
+  await supabase
+    .from('suppliers')
+    .update({ last_synced_at: new Date().toISOString() })
+    .eq('id', SUPPLIER_ID)
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 

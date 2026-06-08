@@ -24,7 +24,7 @@ type MatchGroup = {
   id:               string
   status:           'pending_review' | 'confirmed' | 'rejected' | 'product_created'
   match_confidence: 'high' | 'medium' | 'low'
-  match_method:     'ean' | 'fuzzy_name' | 'manual' | 'single'
+  match_method:     'ean' | 'fuzzy_name' | 'parent_sku' | 'variant' | 'manual' | 'single'
   supplier_count:   number
   suggested_name:   string | null
   suggested_ean:    string | null
@@ -208,7 +208,7 @@ const TABS: { key: TabKey; label: string; status?: string; method?: string; conf
   { key: 'all',       label: 'Alle afventer',           status: 'pending_review' },
   { key: 'high',      label: 'EAN-match',               status: 'pending_review', confidence: 'high'   },
   { key: 'medium',    label: 'Fuzzy navn',              status: 'pending_review', confidence: 'medium' },
-  { key: 'variant',   label: 'Varianter',               status: 'pending_review', method: 'variant'    },
+  { key: 'variant',   label: 'Varianter',               status: 'pending_review', method: 'variant,parent_sku' },
   { key: 'confirmed', label: 'Bekræftet gruppering',    status: 'confirmed'      },
   { key: 'rejected',  label: 'Afvist',                  status: 'rejected'       },
 ]
@@ -219,16 +219,19 @@ function GroupCard({
   onUpdate,
 }: {
   group:    MatchGroup
-  onUpdate: (id: string, patch: { suggested_name?: string; status?: string }) => Promise<void>
+  onUpdate: (id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[] }) => Promise<void>
 }) {
-  const [editName,      setEditName]      = useState(group.suggested_name ?? '')
-  const [loading,       setLoading]       = useState(false)
-  const [msg,           setMsg]           = useState<string | null>(null)
-  const [showMembers,   setShowMembers]   = useState(true)
-  const [detailMember,  setDetailMember]  = useState<MatchMember | null>(null)
+  const [editName,        setEditName]        = useState(group.suggested_name ?? '')
+  const [loading,         setLoading]         = useState(false)
+  const [msg,             setMsg]             = useState<string | null>(null)
+  const [showMembers,     setShowMembers]     = useState(true)
+  const [detailMember,    setDetailMember]    = useState<MatchMember | null>(null)
+  const [rejectMode,      setRejectMode]      = useState(false)       // vis EAN-markering inden afvisning
+  const [badEanSuppliers, setBadEanSuppliers] = useState<Set<string>>(new Set())
 
   const conf     = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
   const isSingle = group.match_method === 'single'
+  const isEan    = group.match_method === 'ean'
 
   async function handleConfirm() {
     setLoading(true)
@@ -239,11 +242,23 @@ function GroupCard({
     setLoading(false)
   }
 
-  async function handleReject() {
+  async function handleRejectClick() {
+    // EAN-grupper: vis markerings-UI så admin kan notere fejl-EAN leverandører
+    if (isEan && group.members.length > 1) {
+      setRejectMode(true)
+    } else {
+      await confirmReject([])
+    }
+  }
+
+  async function confirmReject(badSupplierIds: string[]) {
     setLoading(true)
     setMsg(null)
-    await onUpdate(group.id, { status: 'rejected' })
-    setMsg('Afvist')
+    setRejectMode(false)
+    await onUpdate(group.id, { status: 'rejected', bad_ean_supplier_ids: badSupplierIds })
+    setMsg(badSupplierIds.length > 0
+      ? `Afvist — ${badSupplierIds.length} leverandør(er) markeret med fejl-EAN`
+      : 'Afvist')
     setShowMembers(false)
     setLoading(false)
   }
@@ -280,6 +295,16 @@ function GroupCard({
               {isSingle && (
                 <span className="text-xs px-2 py-0.5 rounded-full border bg-gray-100 text-gray-600 border-gray-200">
                   Enkelt leverandør
+                </span>
+              )}
+              {group.match_method === 'parent_sku' && (
+                <span className="text-xs px-2 py-0.5 rounded-full border bg-violet-50 text-violet-700 border-violet-200">
+                  🧩 Variant-familie (lev.)
+                </span>
+              )}
+              {group.match_method === 'variant' && (
+                <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-200">
+                  🔀 Variant (navn)
                 </span>
               )}
               <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
@@ -397,8 +422,67 @@ function GroupCard({
               </div>
             )}
 
+            {/* Afvis EAN-gruppe: marker fejl-EAN leverandører */}
+            {rejectMode && (
+              <div className="mt-3 border border-orange-200 bg-orange-50 rounded-lg px-3 py-3">
+                <p className="text-xs font-medium text-orange-800 mb-2">
+                  ⚠️ Marker hvilke leverandører der har forkert EAN-data for dette produkt
+                </p>
+                <p className="text-xs text-orange-600 mb-3">
+                  Markerede leverandørers EAN <strong>{group.suggested_ean}</strong> udelukkes fra fremtidige auto-grupperinger og imports.
+                </p>
+                <div className="space-y-1.5 mb-3">
+                  {group.members.map(m => {
+                    const sid = (m as { supplier_id?: string }).supplier_id ?? ''
+                    return (
+                      <label key={m.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={badEanSuppliers.has(sid)}
+                          onChange={e => {
+                            setBadEanSuppliers(prev => {
+                              const next = new Set(prev)
+                              e.target.checked ? next.add(sid) : next.delete(sid)
+                              return next
+                            })
+                          }}
+                          className="rounded border-gray-300"
+                        />
+                        <span className="font-medium text-gray-800">{m.suppliers?.name ?? sid}</span>
+                        <span className="text-gray-400 font-mono">{m.normalized_ean}</span>
+                        <span className="text-gray-400">— {m.normalized_name}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => confirmReject([...badEanSuppliers])}
+                    disabled={loading}
+                    className="px-3 py-1 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-40"
+                  >
+                    Bekræft afvisning
+                  </button>
+                  <button
+                    onClick={() => confirmReject([])}
+                    disabled={loading}
+                    className="px-3 py-1 text-xs border border-gray-200 text-gray-600 rounded hover:bg-gray-50 disabled:opacity-40"
+                  >
+                    Afvis uden at markere EAN
+                  </button>
+                  <button
+                    onClick={() => setRejectMode(false)}
+                    disabled={loading}
+                    className="px-3 py-1 text-xs text-gray-400 hover:text-gray-600 disabled:opacity-40"
+                  >
+                    Annuller
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Action buttons */}
-            {!isActioned && (
+            {!isActioned && !rejectMode && (
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button
                   onClick={handleConfirm}
@@ -408,7 +492,7 @@ function GroupCard({
                   Bekræft leverandørgruppering
                 </button>
                 <button
-                  onClick={handleReject}
+                  onClick={handleRejectClick}
                   disabled={loading}
                   className="px-4 py-1.5 text-xs border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
                 >
@@ -624,7 +708,7 @@ export default function MatchingPage() {
 
   useEffect(() => { fetchGroups() }, [fetchGroups])
 
-  async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string }) {
+  async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[] }) {
     await fetch(`/api/matching/${id}`, {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },

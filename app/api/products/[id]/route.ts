@@ -20,10 +20,12 @@ export async function GET(
       product_files  ( id, url, file_name, file_type, language, position, source ),
       product_variants (
         id, internal_variant_sku, attributes, own_stock_quantity,
-        own_stock_reserved, sales_price, sale_price, ean, woo_variation_id, status
+        own_stock_reserved, sales_price, sale_price, ean, woo_variation_id, status,
+        variant_barcodes ( id, ean, is_primary, note, created_at )
       ),
       product_suppliers (
-        id, priority, is_active, variant_id, supplier_sku, supplier_product_name,
+        id, priority, is_active, variant_id, supplier_sku, manufacturer_sku,
+        supplier_product_name,
         purchase_price, recommended_sales_price, delivery_days_min, delivery_days_max,
         moq, supplier_stock_quantity, supplier_stock_reserved, item_status,
         supplier_images, supplier_files, extra_data, updated_at,
@@ -87,7 +89,8 @@ const ALLOWED_FIELDS = [
   'tax_class', 'ean', 'manufacturer_sku', 'brand', 'slug', 'weight',
   'length', 'width', 'height', 'categories', 'tags', 'attributes',
   'specifications', 'video_url', 'meta_title', 'meta_description', 'status',
-  'boat_type',
+  'boat_type', 'hide_when_out_of_stock',
+  'original_number', 'original_number_source',
 ]
 
 export async function PATCH(

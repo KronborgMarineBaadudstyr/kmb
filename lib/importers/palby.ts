@@ -3,6 +3,9 @@ import { XMLParser } from 'fast-xml-parser'
 import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 import * as ftp from 'basic-ftp'
 import { Writable } from 'stream'
+import { syncImagesToProduct } from './image-sync'
+import { enrichMatchedProduct } from './product-enrichment'
+import { batchEanLookup, type EanMatch } from './ean-lookup'
 
 // Palby FTP fil-stier
 const FILES = {
@@ -35,6 +38,11 @@ type PalbyProduct = {
   VariantName:              string
   DropshippingNotPossible:  string
   CatalogNodeIds:           string
+  // Producentens eget varenummer (felt-navn varierer — prøver flere kendte navne)
+  ManufacturerItemId:       string   // f.eks. "29097-1000" for Jabsco
+  ProducerItemId:           string
+  OriginalItemId:           string
+  SupplierItemId:           string
 }
 
 type StockRow = {
@@ -177,6 +185,11 @@ function parsePalbyProductCsv(buf: Buffer): PalbyProduct[] {
       VariantName:             get(row, 'VariantName'),
       DropshippingNotPossible: get(row, 'DropshippingNotPossible'),
       CatalogNodeIds:          get(row, 'CatalogNodeIds'),
+      // Producentens varenummer — prøver alle kendte feltnavne
+      ManufacturerItemId:      get(row, 'ManufacturerItemId'),
+      ProducerItemId:          get(row, 'ProducerItemId'),
+      OriginalItemId:          get(row, 'OriginalItemId'),
+      SupplierItemId:          get(row, 'SupplierItemId'),
     }
 
     if (p.ItemId) products.push(p)
@@ -305,10 +318,7 @@ export async function importPalby(
       const batch = products.slice(i, i + BATCH)
 
       const eans = batch.map(p => p.Barcode).filter(Boolean)
-      const { data: byEan } = eans.length > 0
-        ? await supabase.from('products').select('id, name, ean').in('ean', eans)
-        : { data: [] }
-      const productByEan = Object.fromEntries((byEan ?? []).filter(p => p.ean).map(p => [String(p.ean), p]))
+      const productByEan = await batchEanLookup(supabase, eans, SUPPLIER_ID)
 
       const ops: Promise<void>[] = []
 
@@ -316,6 +326,14 @@ export async function importPalby(
         const ean    = p.Barcode || null
         const images = parseImages(p)
         const skuStr = p.ItemId
+
+        // Producentens eget varenummer — hent det første der er udfyldt
+        const manufacturerSku =
+          p.ManufacturerItemId || p.ProducerItemId || p.OriginalItemId || p.SupplierItemId || null
+
+        // Variant-attributter fra Palby feed
+        const variantAttributes: Array<{ name: string; value: string }> = []
+        if (p.VariantName) variantAttributes.push({ name: 'Variant', value: p.VariantName })
 
         const supplierData = {
           supplier_id:             SUPPLIER_ID,
@@ -328,54 +346,97 @@ export async function importPalby(
           item_status:             'active',
           moq:                     1,
           supplier_images:         images,
+          // Nye dedikerede kolonner
+          manufacturer_sku:        manufacturerSku,
+          supplier_parent_sku:     p.MasterItemId || null,
+          supplier_variant_attributes: variantAttributes.length > 0 ? variantAttributes : null,
           extra_data: {
-            productname:              p.Productname,
-            short_description:        p.ShortDescription || null,
-            description:              p.LongDescription  || null,
+            productname:               p.Productname,
+            short_description:         p.ShortDescription || null,
+            description:               p.LongDescription  || null,
             ean,
-            weight:                   parseNumber(p.GrossWeight),
-            height:                   parseNumber(p.GrossHeight),
-            width:                    parseNumber(p.GrossWidth),
-            depth:                    parseNumber(p.GrossDepth),
-            currency:                 p.Currency         || null,
-            catalog_element_type:     p.CatalogElementType,
-            master_item_id:           p.MasterItemId     || null,
-            variant_name:             p.VariantName      || null,
+            weight:                    parseNumber(p.GrossWeight),
+            height:                    parseNumber(p.GrossHeight),
+            width:                     parseNumber(p.GrossWidth),
+            depth:                     parseNumber(p.GrossDepth),
+            currency:                  p.Currency         || null,
+            catalog_element_type:      p.CatalogElementType,
             dropshipping_not_possible: p.DropshippingNotPossible === 'true',
-            catalog_node_ids:         p.CatalogNodeIds   || null,
+            catalog_node_ids:          p.CatalogNodeIds   || null,
           },
           variant_id: null,
           is_active:  true,
         }
 
-        const matchedProduct = ean ? (productByEan[ean] ?? null) : null
+        const match = ean ? (productByEan[ean] ?? null) : null
         processed++
 
-        if (matchedProduct) {
+        if (match) {
           const existing = existingBySku[skuStr]
+          const enrichData = {
+            dimensions:      { weight: parseNumber(p.GrossWeight), height: parseNumber(p.GrossHeight), width: parseNumber(p.GrossWidth), length: parseNumber(p.GrossDepth) },
+            descriptions:    { description: p.LongDescription || null, short_description: p.ShortDescription || null },
+            manufacturerSku: manufacturerSku,
+            variantAttributes,
+          }
+
           if (existing) {
             updated++
             ops.push(Promise.resolve(
               supabase.from('product_suppliers')
                 .update({ ...supplierData, priority: existing.priority })
                 .eq('id', existing.id)
-            ).then(({ error }) => { if (error) { errors++; updated-- } }))
+            ).then(async ({ error }) => {
+              if (error) { errors++; updated--; return }
+              await Promise.all([
+                images.length > 0 ? syncImagesToProduct(match.productId, images, 'palby', supabase) : Promise.resolve(),
+                enrichMatchedProduct(match.productId, enrichData, supabase),
+              ])
+              const sRow = existingStaging[skuStr]
+              if (sRow && ['pending_review', 'needs_review'].includes(sRow.status)) {
+                await supabase.from('supplier_product_staging')
+                  .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                  .eq('id', sRow.id)
+              }
+            }))
           } else {
             matched++
             ops.push(Promise.resolve(
               supabase.from('product_suppliers')
-                .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-            ).then(({ error }) => { if (error) { errors++; matched-- } }))
+                .insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
+            ).then(async ({ error }) => {
+              if (error) { errors++; matched--; return }
+              await Promise.all([
+                images.length > 0 ? syncImagesToProduct(match.productId, images, 'palby', supabase) : Promise.resolve(),
+                enrichMatchedProduct(match.productId, enrichData, supabase),
+              ])
+              const sRow = existingStaging[skuStr]
+              if (sRow && ['pending_review', 'needs_review'].includes(sRow.status)) {
+                await supabase.from('supplier_product_staging')
+                  .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                  .eq('id', sRow.id)
+              }
+            }))
           }
         } else {
           const stagingRow = existingStaging[skuStr]
           const rawData = {
-            ...supplierData.extra_data,
-            supplier_sku:            skuStr,
-            supplier_product_name:   supplierData.supplier_product_name,
-            purchase_price:          supplierData.purchase_price,
-            recommended_sales_price: supplierData.recommended_sales_price,
-            supplier_images:         images,
+            supplier_sku:              skuStr,
+            supplier_product_name:     supplierData.supplier_product_name,
+            purchase_price:            supplierData.purchase_price,
+            recommended_sales_price:   supplierData.recommended_sales_price,
+            manufacturer_sku:          manufacturerSku,
+            supplier_parent_sku:       p.MasterItemId || null,
+            supplier_variant_attributes: variantAttributes.length > 0 ? variantAttributes : null,
+            supplier_images:           images,
+            short_description:         p.ShortDescription || null,
+            description:               p.LongDescription  || null,
+            weight:                    parseNumber(p.GrossWeight),
+            height:                    parseNumber(p.GrossHeight),
+            width:                     parseNumber(p.GrossWidth),
+            depth:                     parseNumber(p.GrossDepth),
+            catalog_node_ids:          p.CatalogNodeIds   || null,
+            dropshipping_not_possible: p.DropshippingNotPossible === 'true',
           }
 
           if (stagingRow && stagingRow.status !== 'pending_review') {

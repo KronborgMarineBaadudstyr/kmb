@@ -3,6 +3,9 @@ import { XMLParser } from 'fast-xml-parser'
 import * as ftp from 'basic-ftp'
 import { Writable } from 'stream'
 import { flagRecentlyImportedForReview } from '@/lib/review-checker'
+import { syncImagesToProduct } from './image-sync'
+import { enrichMatchedProduct } from './product-enrichment'
+import { batchEanLookup, type EanMatch } from './ean-lookup'
 
 // Columbus Marine bruger to XML-filer:
 //   ColumbusCommonStock.xml — fælles sortiment (alle kunder)
@@ -186,10 +189,7 @@ export async function importColumbus(
       const batch = products.slice(i, i + BATCH)
 
       const eans = batch.map(p => String(p.EAN || '')).filter(e => e && e !== '0')
-      const { data: byEan } = eans.length > 0
-        ? await supabase.from('products').select('id, name, ean').in('ean', eans)
-        : { data: [] }
-      const productByEan = Object.fromEntries((byEan ?? []).filter(p => p.ean).map(p => [String(p.ean), p]))
+      const productByEan = await batchEanLookup(supabase, eans, SUPPLIER_ID)
 
       // Byg alle DB-operationer for batchen parallelt
       const ops: Promise<void>[] = []
@@ -205,6 +205,9 @@ export async function importColumbus(
         if (p.CatParent) categories.push(String(p.CatParent))
         if (p.CatChild && p.CatChild !== p.CatParent) categories.push(String(p.CatChild))
 
+        const columbusInStockExpected =
+          p.InStockExpected && p.InStockExpected !== '1900-01-01' ? p.InStockExpected : null
+
         const supplierData = {
           supplier_id:             SUPPLIER_ID,
           supplier_sku:            skuStr,
@@ -216,26 +219,32 @@ export async function importColumbus(
           item_status:             qty > 0 ? 'active' : 'out_of_stock',
           moq:                     1,
           supplier_images:         [],
+          // Nye dedikerede kolonner
+          in_stock_expected_date:  columbusInStockExpected,
           extra_data: {
-            item_group:       p.ItemGroup  || null,
-            disc_group:       p.DiscGroup  || null,
-            description:      description,
+            item_group:  p.ItemGroup || null,
+            disc_group:  p.DiscGroup || null,
             ean,
-            height:           p.Height     > 0 ? p.Height  : null,
-            length:           p.Length     > 0 ? p.Length  : null,
-            width:            p.Width      > 0 ? p.Width   : null,
-            net_weight:       p.NetWeight  > 0 ? p.NetWeight : null,
-            categories,
-            in_stock_expected: p.InStockExpected !== '1900-01-01' ? p.InStockExpected : null,
           },
           variant_id: null,
           is_active:  true,
         }
 
-        const matchedProduct = ean ? (productByEan[ean] ?? null) : null
+        const match = ean ? (productByEan[ean] ?? null) : null
         processed++
 
-        if (matchedProduct) {
+        if (match) {
+          const enrichData = {
+            dimensions: {
+              weight: p.NetWeight > 0 ? p.NetWeight : null,
+              height: p.Height    > 0 ? p.Height    : null,
+              length: p.Length    > 0 ? p.Length    : null,
+              width:  p.Width     > 0 ? p.Width     : null,
+            },
+            descriptions: { description },
+            categories,
+          }
+
           const existing = existingBySku[skuStr]
           if (existing) {
             updated++
@@ -247,24 +256,53 @@ export async function importColumbus(
                   supplier_stock_updated_at: new Date().toISOString(),
                 })
                 .eq('id', existing.id)
-            ).then(({ error }) => { if (error) { console.error(`[columbus] update product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; updated-- } }))
+            ).then(async ({ error }) => {
+              if (error) { console.error(`[columbus] update product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; updated--; return }
+              await enrichMatchedProduct(match.productId, enrichData, supabase)
+              // Ryd op: marker staging-række som matched hvis den stadig afventer
+              const stagingRow = existingStaging[skuStr]
+              if (stagingRow && ['pending_review', 'needs_review'].includes(stagingRow.status)) {
+                await supabase.from('supplier_product_staging')
+                  .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                  .eq('id', stagingRow.id)
+              }
+            }))
           } else {
             matched++
             ops.push(Promise.resolve(
               supabase.from('product_suppliers')
-                .insert({ ...supplierData, product_id: matchedProduct.id, priority: 1 })
-            ).then(({ error }) => { if (error) { console.error(`[columbus] insert product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; matched-- } }))
+                .insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
+            ).then(async ({ error }) => {
+              if (error) { console.error(`[columbus] insert product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; matched--; return }
+              await enrichMatchedProduct(match.productId, enrichData, supabase)
+              // Ryd op: marker staging-række som matched hvis den stadig afventer
+              const stagingRow = existingStaging[skuStr]
+              if (stagingRow && ['pending_review', 'needs_review'].includes(stagingRow.status)) {
+                await supabase.from('supplier_product_staging')
+                  .update({ status: 'matched', matched_product_id: match.productId, updated_at: new Date().toISOString() })
+                  .eq('id', stagingRow.id)
+              }
+            }))
           }
         } else {
           const stagingRow = existingStaging[skuStr]
 
           const rawData = {
-            ...supplierData.extra_data,
-            supplier_sku:            skuStr,
-            supplier_product_name:   supplierData.supplier_product_name,
-            purchase_price:          supplierData.purchase_price,
-            recommended_sales_price: supplierData.recommended_sales_price,
-            supplier_stock_quantity: qty,
+            supplier_sku:             skuStr,
+            supplier_product_name:    supplierData.supplier_product_name,
+            purchase_price:           supplierData.purchase_price,
+            recommended_sales_price:  supplierData.recommended_sales_price,
+            supplier_stock_quantity:  qty,
+            in_stock_expected_date:   columbusInStockExpected,
+            description,
+            height:  p.Height    > 0 ? p.Height    : null,
+            length:  p.Length    > 0 ? p.Length    : null,
+            width:   p.Width     > 0 ? p.Width     : null,
+            weight:  p.NetWeight > 0 ? p.NetWeight : null,
+            categories,
+            item_group: p.ItemGroup || null,
+            disc_group: p.DiscGroup || null,
+            ean,
           }
 
           if (stagingRow && stagingRow.status !== 'pending_review') {

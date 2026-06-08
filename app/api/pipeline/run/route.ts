@@ -6,38 +6,6 @@ import { normalizeCategory, buildDedupeMap, assignProductCategory } from '@/lib/
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
 
-// ── Word-overlap helpers (mirrors auto-confirm logic) ──────────────
-const STOP_WORDS = new Set([
-  'og', 'med', 'til', 'for', 'fra', 'den', 'det', 'de', 'en', 'et',
-  'the', 'and', 'with', 'from',
-])
-
-function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\b(rød|blå|grøn|sort|hvid|gul|grå|brun|orange|lilla|pink|red|blue|green|black|white|yellow|grey|gray|brown|purple|venstre|højre|left|right|øverste|nederste|top|bottom|lille|stor|mellem|mini|maxi|ekstra|super|ny|new)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function meaningfulWords(name: string): Set<string> {
-  const words = normalizeName(name).split(/\s+/)
-  const result = new Set<string>()
-  for (const w of words) {
-    const clean = w.replace(/[^a-zæøå0-9]/gi, '')
-    if (clean.length >= 3 && !STOP_WORDS.has(clean) && !/^\d+$/.test(clean)) result.add(clean)
-  }
-  return result
-}
-
-function wordOverlap(a: string, b: string): number {
-  const wa = meaningfulWords(a)
-  const wb = meaningfulWords(b)
-  let count = 0
-  for (const w of wa) { if (wb.has(w)) count++ }
-  return count
-}
-
 // GET /api/pipeline/run — SSE stream
 // Stages: categories → matching → auto_confirm → auto_create → done
 export async function GET() {
@@ -104,77 +72,36 @@ export async function GET() {
       // ── STEP 3: Auto-confirm EAN groups ────────────────────────
       send({ stage: 'auto_confirm', status: 'running', message: 'Auto-bekræfter EAN-grupper…' })
 
-      const allGroups: { id: string; members: { normalized_name: string }[] }[] = []
+      // EAN is a definitive identifier — confirm all pending EAN groups without name-overlap checks
+      const eanGroupIds: string[] = []
       const PAGE = 200
       for (let p = 0; ; p++) {
         const { data } = await supabase
           .from('staging_match_groups')
-          .select('id, supplier_product_staging(normalized_name)')
+          .select('id')
           .eq('match_method', 'ean')
           .eq('status', 'pending_review')
           .range(p * PAGE, p * PAGE + PAGE - 1)
 
         if (!data || data.length === 0) break
-        for (const row of data) {
-          allGroups.push({
-            id:      row.id,
-            members: (row.supplier_product_staging as { normalized_name: string }[] ?? []),
-          })
-        }
+        for (const row of data) eanGroupIds.push(row.id)
         if (data.length < PAGE) break
       }
 
-      const toConfirm: string[] = []
-      const reviewReasons = new Map<string, string[]>()
-
-      for (const group of allGroups) {
-        const names = group.members.map(m => m.normalized_name).filter(Boolean)
-        if (names.length < 2) {
-          // Single-member EAN group — confirm anyway (no conflict possible)
-          toConfirm.push(group.id)
-          continue
-        }
-        let allPairsMatch = true
-        let worstOverlap  = Infinity
-        let worstPair: [string, string] = ['', '']
-        outer: for (let i = 0; i < names.length; i++) {
-          for (let j = i + 1; j < names.length; j++) {
-            const ov = wordOverlap(names[i], names[j])
-            if (ov < worstOverlap) { worstOverlap = ov; worstPair = [names[i], names[j]] }
-            if (ov < 2) { allPairsMatch = false; break outer }
-          }
-        }
-        if (allPairsMatch) {
-          toConfirm.push(group.id)
-        } else {
-          const short = (s: string) => s.length > 40 ? s.slice(0, 38) + '…' : s
-          const reason = `Navnene deler kun ${worstOverlap} meningsfuldt ord — "${short(worstPair[0])}" vs "${short(worstPair[1])}"`
-          if (!reviewReasons.has(reason)) reviewReasons.set(reason, [])
-          reviewReasons.get(reason)!.push(group.id)
-        }
-      }
-
-      // Batch confirm
       const BATCH = 200
-      for (let i = 0; i < toConfirm.length; i += BATCH) {
+      for (let i = 0; i < eanGroupIds.length; i += BATCH) {
         await supabase.from('staging_match_groups')
           .update({ status: 'confirmed', notes: null })
-          .in('id', toConfirm.slice(i, i + BATCH))
+          .in('id', eanGroupIds.slice(i, i + BATCH))
       }
-      // Write review reasons
-      for (const [reason, ids] of reviewReasons) {
-        for (let i = 0; i < ids.length; i += BATCH) {
-          await supabase.from('staging_match_groups')
-            .update({ notes: reason })
-            .in('id', ids.slice(i, i + BATCH))
-        }
-      }
+      const toConfirm = eanGroupIds
 
-      // Also auto-confirm all single-supplier and variant groups (no ambiguity)
+      // Also auto-confirm single, variant and parent_sku groups (no ambiguity)
+      // parent_sku = supplier har eksplicit deklareret variant-relation (Palby MasterItemId, Kap-Horn parent SKU)
       const { data: autoGroups } = await supabase
         .from('staging_match_groups')
         .select('id')
-        .in('match_method', ['single', 'variant'])
+        .in('match_method', ['single', 'variant', 'parent_sku'])
         .eq('status', 'pending_review')
 
       const singleAndVariantIds = (autoGroups ?? []).map((g: { id: string }) => g.id)
@@ -188,8 +115,7 @@ export async function GET() {
       send({
         stage: 'auto_confirm', status: 'done',
         confirmed: summary.auto_confirmed,
-        needs_review: reviewReasons.size,
-        message: `${summary.auto_confirmed} grupper bekræftet (${toConfirm.length} EAN, ${singleAndVariantIds.length} enkelt/variant)`,
+        message: `${summary.auto_confirmed} grupper bekræftet (${toConfirm.length} EAN, ${singleAndVariantIds.length} enkelt/variant/parent-SKU)`,
       })
 
       // ── STEP 4: Bulk-create products for confirmed groups (loop until done) ─

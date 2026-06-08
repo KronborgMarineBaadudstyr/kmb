@@ -4,6 +4,8 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { ProductDetail } from './_ProductDetail'
+import { CreateProductPanel } from './_CreateProductPanel'
+import { BulkImportPanel }   from './_BulkImportPanel'
 
 type Product = {
   id: string
@@ -25,6 +27,7 @@ type Product = {
   variant_count: number
   primary_image_url: string | null
   image_count: number
+  hide_when_out_of_stock: boolean
   created_at: string
   updated_at: string
 }
@@ -254,7 +257,7 @@ type ColKey =
   | 'image' | 'name' | 'internal_sku' | 'manufacturer_sku' | 'ean'
   | 'woo_bestillingsnummer' | 'brand' | 'categories' | 'sales_price'
   | 'own_stock_quantity' | 'weight' | 'status' | 'woo_sync_status'
-  | 'image_count' | 'created_at' | 'updated_at'
+  | 'shop_visibility' | 'image_count' | 'created_at' | 'updated_at'
 
 type ColDef = { key: ColKey; label: string; sortable?: string; defaultOn: boolean }
 
@@ -270,6 +273,7 @@ const ALL_COLUMNS: ColDef[] = [
   { key: 'sales_price',         label: 'Pris',             sortable: 'sales_price',        defaultOn: true  },
   { key: 'own_stock_quantity',  label: 'Lager',            sortable: 'own_stock_quantity', defaultOn: true  },
   { key: 'weight',              label: 'Vægt',             defaultOn: false },
+  { key: 'shop_visibility',      label: 'Shop synlighed',   defaultOn: true  },
   { key: 'image_count',         label: 'Billeder',         defaultOn: false },
   { key: 'status',              label: 'Status',           defaultOn: true  },
   { key: 'woo_sync_status',     label: 'Woo sync',         defaultOn: true  },
@@ -306,10 +310,14 @@ export default function ProductsPage() {
   const [visibleCols, setVisibleCols] = useState<Set<ColKey>>(loadVisibleCols)
   const [colMenuOpen, setColMenuOpen] = useState(false)
   const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set())
-  const [familyPanelOpen, setFamilyPanelOpen] = useState(false)
+  const [familyPanelOpen,  setFamilyPanelOpen]  = useState(false)
+  const [createPanelOpen,  setCreatePanelOpen]  = useState(false)
+  const [bulkImportOpen,   setBulkImportOpen]   = useState(false)
   const [deduping,    setDeduping]    = useState(false)
   const [dedupeResult, setDedupeResult] = useState<{ message: string; deleted: number } | null>(null)
   const [selectedId,  setSelectedId]  = useState<string | null>(null)
+  const [visUpdating, setVisUpdating] = useState<Set<string>>(new Set())
+  const [visMsg,      setVisMsg]      = useState<{ text: string; ok: boolean } | null>(null)
   const colMenuRef = useRef<HTMLDivElement>(null)
 
   async function runDeduplicate() {
@@ -322,6 +330,45 @@ export default function ProductsPage() {
       if ((json.deleted ?? 0) > 0) fetchProducts()
     } catch (e) { setDedupeResult({ message: String(e), deleted: 0 }) }
     finally { setDeduping(false) }
+  }
+
+  // Inline toggle for a single product row
+  async function toggleVisibility(p: Product, e: React.MouseEvent) {
+    e.stopPropagation()
+    const next = !p.hide_when_out_of_stock
+    setVisUpdating(s => new Set(s).add(p.id))
+    await fetch(`/api/products/${p.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hide_when_out_of_stock: next }),
+    })
+    setProducts(ps => ps.map(x => x.id === p.id ? { ...x, hide_when_out_of_stock: next } : x))
+    setVisUpdating(s => { const n = new Set(s); n.delete(p.id); return n })
+  }
+
+  // Bulk set for checked products OR whole category
+  async function bulkSetVisibility(hide: boolean, wholeCategory = false) {
+    setVisMsg(null)
+    const body: Record<string, unknown> = { hide_when_out_of_stock: hide }
+    if (wholeCategory && category) {
+      body.category = category
+    } else {
+      if (!checkedIds.size) return
+      body.product_ids = [...checkedIds]
+    }
+    const res  = await fetch('/api/products/visibility', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json()
+    if (json.error) {
+      setVisMsg({ text: json.error, ok: false })
+    } else {
+      setVisMsg({ text: `✓ ${json.updated} produkter opdateret`, ok: true })
+      fetchProducts()
+      setTimeout(() => setVisMsg(null), 3000)
+    }
   }
 
   useEffect(() => {
@@ -469,6 +516,27 @@ export default function ProductsPage() {
             {STATUS_LABELS[p.status]?.label ?? p.status}
           </span>
         )
+      case 'shop_visibility': {
+        const hiding  = p.hide_when_out_of_stock
+        const oos     = p.own_stock_quantity === 0
+        const hidden  = hiding && oos
+        const upd     = visUpdating.has(p.id)
+        return (
+          <button
+            onClick={e => toggleVisibility(p, e)}
+            disabled={upd}
+            title={hiding
+              ? `Skjul ved 0 lager — ${oos ? 'SKJULT nu (lager=0)' : 'Synlig (lager>0)'}`
+              : 'Altid synlig i shop'}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border transition-colors disabled:opacity-40 ${
+              hidden   ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' :
+              hiding   ? 'bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100' :
+                         'bg-green-50 text-green-700 border-green-200 hover:bg-green-100'
+            }`}>
+            {upd ? '…' : hidden ? '🚫 Skjult' : hiding ? '👁 Lager-styret' : '✓ Altid synlig'}
+          </button>
+        )
+      }
       case 'woo_sync_status':
         return p.woo_product_id ? (
           <span className={`text-xs px-2 py-0.5 rounded-full ${
@@ -488,6 +556,22 @@ export default function ProductsPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* Create product panel */}
+      {createPanelOpen && (
+        <CreateProductPanel
+          onClose={() => setCreatePanelOpen(false)}
+          onCreated={(id) => { setCreatePanelOpen(false); fetchProducts(); setSelectedId(id) }}
+        />
+      )}
+
+      {/* Bulk import panel */}
+      {bulkImportOpen && (
+        <BulkImportPanel
+          onClose={() => setBulkImportOpen(false)}
+          onDone={(count) => { if (count > 0) fetchProducts() }}
+        />
+      )}
+
       {/* Bulk variant panel (modal) */}
       {familyPanelOpen && checkedIds.size >= 2 && (
         <ProductVariantFamilyPanel
@@ -568,6 +652,19 @@ export default function ProductsPage() {
               className="flex items-center gap-1 px-2.5 py-1.5 text-sm border border-gray-300 text-gray-600 rounded-md hover:border-orange-400 hover:text-orange-600 hover:bg-orange-50 transition-colors disabled:opacity-40">
               {deduping ? '⏳' : '🧹'}
             </button>
+
+            <div className="w-px h-5 bg-gray-200 shrink-0" />
+
+            <button onClick={() => setBulkImportOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-sm border border-gray-300 text-gray-600 rounded-md hover:border-blue-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"
+              title="Bulk-import fra Excel">
+              📥 Bulk
+            </button>
+
+            <button onClick={() => setCreatePanelOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-gray-900 text-white rounded-md hover:bg-gray-700 transition-colors">
+              + Opret produkt
+            </button>
           </div>
         </div>
 
@@ -644,14 +741,52 @@ export default function ProductsPage() {
         </div>
 
         {/* Multi-select bar */}
-        {checkedIds.size >= 2 && (
-          <div className="border-t border-purple-200 bg-purple-50 px-5 py-2.5 flex items-center gap-3 shrink-0">
-            <span className="text-sm font-medium text-purple-800">{checkedIds.size} valgt</span>
-            <button onClick={() => setFamilyPanelOpen(true)}
-              className="px-3 py-1.5 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium">
-              🔀 Sammenkæd som varianter
-            </button>
-            <button onClick={() => setCheckedIds(new Set())} className="px-2 py-1 text-sm text-purple-500 hover:text-purple-700">
+        {checkedIds.size >= 1 && (
+          <div className="border-t border-purple-200 bg-purple-50 px-5 py-2.5 flex items-center gap-2 shrink-0 flex-wrap">
+            <span className="text-sm font-medium text-purple-800 shrink-0">{checkedIds.size} valgt</span>
+
+            {/* Visibility controls */}
+            <div className="flex items-center gap-1.5 border-r border-purple-200 pr-2.5 mr-0.5">
+              <span className="text-xs text-purple-600 shrink-0">Synlighed:</span>
+              <button
+                onClick={() => bulkSetVisibility(true)}
+                title="Skjul i shop når lokalt lager = 0"
+                className="px-2.5 py-1 text-xs font-medium bg-yellow-100 text-yellow-800 rounded-lg hover:bg-yellow-200 border border-yellow-200 transition-colors">
+                👁 Lager-styret
+              </button>
+              <button
+                onClick={() => bulkSetVisibility(false)}
+                title="Vis altid i shop uanset lager"
+                className="px-2.5 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-lg hover:bg-green-200 border border-green-200 transition-colors">
+                ✓ Altid synlig
+              </button>
+              {category && (
+                <button
+                  onClick={() => {
+                    const hide = confirm(`Sæt ALLE produkter i "${category}" til lager-styret synlighed?`)
+                    if (hide !== null) bulkSetVisibility(true, true)
+                  }}
+                  title={`Sæt hele kategorien "${category}" til lager-styret`}
+                  className="px-2.5 py-1 text-xs font-medium bg-orange-100 text-orange-800 rounded-lg hover:bg-orange-200 border border-orange-200 transition-colors">
+                  Hel kategori: {category}
+                </button>
+              )}
+            </div>
+
+            {checkedIds.size >= 2 && (
+              <button onClick={() => setFamilyPanelOpen(true)}
+                className="px-3 py-1.5 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium shrink-0">
+                🔀 Sammenkæd som varianter
+              </button>
+            )}
+
+            {visMsg && (
+              <span className={`text-xs px-2 py-1 rounded-md font-medium shrink-0 ${visMsg.ok ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                {visMsg.text}
+              </span>
+            )}
+
+            <button onClick={() => setCheckedIds(new Set())} className="ml-auto text-xs text-purple-500 hover:text-purple-700 shrink-0">
               Fravælg alle
             </button>
           </div>
