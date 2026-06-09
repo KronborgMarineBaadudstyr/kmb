@@ -43,18 +43,94 @@ class UnionFind {
   }
 }
 
-// ── Phase 1: EAN grouping — single bulk SQL via RPC ──
+// ── Phase 1: EAN grouping — done in TypeScript to avoid RPC statement timeout ──
 async function runEanPhase(
   supabase: SupabaseClient,
   onProgress: ProgressCallback,
 ): Promise<{ groupsCreated: number; rowsAssigned: number }> {
-  onProgress({ stage: 'ean_phase', message: 'EAN-gruppering kører (SQL)...' })
+  onProgress({ stage: 'ean_phase', message: 'EAN-gruppering kører (henter staging-rækker)...' })
 
-  const { data, error } = await supabase.rpc('create_ean_match_groups', {})
-  if (error) throw new Error(`EAN RPC fejl: ${error.message}`)
+  // Step 1: Load all known EAN exclusions
+  const { data: exclusionRows } = await supabase
+    .from('supplier_ean_exclusions')
+    .select('supplier_id, ean')
+  const exclusionSet = new Set<string>(
+    (exclusionRows ?? []).map((r: { supplier_id: string; ean: string }) => `${r.supplier_id}||${r.ean}`)
+  )
 
-  const result = data as { groups_created: number; rows_assigned: number }
-  return { groupsCreated: result.groups_created, rowsAssigned: result.rows_assigned }
+  // Step 2: Fetch all ungrouped staging rows that have an EAN
+  type Row = { id: string; supplier_id: string; normalized_ean: string; normalized_name: string }
+  const rows: Row[] = []
+  const PAGE = 1000
+  for (let p = 0; ; p++) {
+    const { data, error } = await supabase
+      .from('supplier_product_staging')
+      .select('id, supplier_id, normalized_ean, normalized_name')
+      .not('normalized_ean', 'is', null)
+      .neq('normalized_ean', '')
+      .is('match_group_id', null)
+      .not('status', 'in', '("rejected","matched","new_product")')
+      .range(p * PAGE, p * PAGE + PAGE - 1)
+
+    if (error || !data || data.length === 0) break
+    for (const r of data as Row[]) {
+      // Skip rows whose (supplier_id, ean) is in the exclusions set
+      if (exclusionSet.has(`${r.supplier_id}||${r.normalized_ean}`)) continue
+      rows.push(r)
+    }
+    if (data.length < PAGE) break
+  }
+
+  onProgress({ stage: 'ean_phase', message: `${rows.length.toLocaleString('da-DK')} rækker med EAN fundet — grupperer...` })
+
+  // Step 3: Group by EAN in TypeScript
+  const byEan = new Map<string, Row[]>()
+  for (const row of rows) {
+    if (!byEan.has(row.normalized_ean)) byEan.set(row.normalized_ean, [])
+    byEan.get(row.normalized_ean)!.push(row)
+  }
+
+  let groupsCreated = 0
+  let rowsAssigned  = 0
+
+  // Step 4: Insert groups and assign rows in batches
+  for (const [ean, members] of byEan) {
+    const distinctSuppliers = new Set(members.map(r => r.supplier_id))
+    const method = distinctSuppliers.size >= 2 ? 'ean' : 'single'
+    // Pick longest name as suggested name
+    const bestName = members.reduce((best, r) =>
+      (r.normalized_name ?? '').length > best.length ? (r.normalized_name ?? '') : best, '')
+
+    const { data: group, error: gErr } = await supabase
+      .from('staging_match_groups')
+      .insert({
+        match_confidence: 'high',
+        match_method:     method,
+        supplier_count:   distinctSuppliers.size,
+        suggested_name:   bestName,
+        suggested_ean:    ean,
+        status:           'pending_review',
+      })
+      .select('id')
+      .single()
+
+    if (gErr || !group) {
+      console.error('[matching-engine] EAN group insert error:', gErr?.message)
+      continue
+    }
+
+    groupsCreated++
+
+    const ids = members.map(r => r.id)
+    const { error: uErr } = await supabase
+      .from('supplier_product_staging')
+      .update({ match_group_id: group.id })
+      .in('id', ids)
+
+    if (!uErr) rowsAssigned += ids.length
+  }
+
+  return { groupsCreated, rowsAssigned }
 }
 
 // ── Phase 2: Fuzzy name grouping (cross-supplier only) ──
