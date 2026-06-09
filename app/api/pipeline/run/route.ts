@@ -210,6 +210,57 @@ export async function GET() {
         message: `${remapUpdated} produkter kategoriseret`,
       })
 
+      // ── STEP 6: Auto-populate match_suggestions for pending staging rows ──
+      // Fylder match_suggestions via fuzzy_product_search RPC for alle staging-rækker
+      // der stadig er pending_review og har et tomt forslag-array.
+      // Begrænses til 500 rækker per pipeline-kørsel for at holde sig inden for tidsbudgettet.
+      send({ stage: 'suggestions', status: 'running', message: 'Forbereder match-forslag til staging…' })
+
+      let suggUpdated = 0
+      const SUGG_PAGE = 100
+      const MAX_SUGG  = 500
+      const startSugg = Date.now()
+      const MAX_SUGG_MS = 60_000
+
+      for (let offset = 0; offset < MAX_SUGG && Date.now() - startSugg < MAX_SUGG_MS; offset += SUGG_PAGE) {
+        const { data: stagingBatch } = await supabase
+          .from('supplier_product_staging')
+          .select('id, normalized_name')
+          .in('status', ['pending_review', 'needs_review'])
+          .or('match_suggestions.is.null,match_suggestions.eq.{}')
+          .not('normalized_name', 'is', null)
+          .range(offset, offset + SUGG_PAGE - 1)
+
+        if (!stagingBatch || stagingBatch.length === 0) break
+
+        await Promise.allSettled(
+          (stagingBatch as { id: string; normalized_name: string }[]).map(async row => {
+            const { data: fuzzyMatches } = await supabase
+              .rpc('fuzzy_product_search', { search_query: row.normalized_name, match_limit: 5 })
+
+            const suggestions = (fuzzyMatches ?? []).map((m: { id: string; name: string; similarity: number }) => ({
+              product_id: m.id,
+              name:       m.name,
+              score:      m.similarity,
+            }))
+
+            if (suggestions.length > 0) {
+              await supabase.from('supplier_product_staging')
+                .update({ match_suggestions: suggestions, updated_at: new Date().toISOString() })
+                .eq('id', row.id)
+              suggUpdated++
+            }
+          })
+        )
+      }
+
+      summary.suggestions_populated = suggUpdated
+      send({
+        stage: 'suggestions', status: 'done',
+        populated: suggUpdated,
+        message: `${suggUpdated} staging-rækker fik match-forslag`,
+      })
+
       // ── DONE ────────────────────────────────────────────────────
       send({ stage: 'done', summary })
 

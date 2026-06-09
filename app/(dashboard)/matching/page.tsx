@@ -536,6 +536,7 @@ const PIPELINE_STAGES = [
   { key: 'auto_confirm', label: '3 · Auto-bekræft',       icon: '✅' },
   { key: 'auto_create',  label: '4 · Opret produkter',    icon: '📦' },
   { key: 'remap',        label: '5 · Kategorisér',        icon: '🏷️' },
+  { key: 'suggestions',  label: '6 · Match-forslag',      icon: '💡' },
 ]
 
 // ── Pipeline Panel ──
@@ -581,10 +582,11 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
       setSteps(prev => {
         const status = ev.status as string === 'done' ? 'done' : ev.status as string === 'running' ? 'running' : 'idle'
         let detail: string | undefined
-        if (ev.updated != null)  detail = `${ev.updated} kategorier opdateret`
-        if (ev.confirmed != null) detail = `${ev.confirmed} bekræftet, ${ev.needs_review ?? 0} til manuel`
-        if (ev.created != null)  detail = `${ev.created} produkter oprettet`
+        if (ev.updated != null)       detail = `${ev.updated} kategorier opdateret`
+        if (ev.confirmed != null)     detail = `${ev.confirmed} bekræftet`
+        if (ev.created != null)       detail = `${ev.created} produkter oprettet`
         if (ev.groups_created != null) detail = `${ev.groups_created} grupper oprettet`
+        if (ev.populated != null)     detail = `${ev.populated} forslag tilføjet`
         return { ...prev, [stage]: { stage, status: status as PipelineStep['status'], message: ev.message as string, detail } }
       })
     }
@@ -604,7 +606,7 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
         <div>
           <h3 className="font-semibold text-base mb-0.5">🚀 Onboarding pipeline</h3>
           <p className="text-gray-400 text-sm">
-            Kører automatisk: kategorioprydning → matching → auto-bekræft → produktoprettelse
+            Kører automatisk: kategorioprydning → matching → auto-bekræft → produktoprettelse → kategorisering → match-forslag
           </p>
         </div>
         <button
@@ -619,7 +621,7 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
 
       {/* Step progress */}
       {(running || done || error) && (
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {PIPELINE_STAGES.map(s => {
             const step = steps[s.key]
             const status = step?.status ?? 'idle'
@@ -661,6 +663,9 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
             📦 {summary.products_created ?? 0} produkter oprettet
           </span>
           <span className="bg-white/10 rounded px-3 py-1">🏷️ {summary.products_remapped ?? 0} kategoriseret</span>
+          {(summary.suggestions_populated ?? 0) > 0 && (
+            <span className="bg-white/10 rounded px-3 py-1">💡 {summary.suggestions_populated} match-forslag</span>
+          )}
           {(summary.remaining ?? 0) > 0 && (
             <span className="bg-orange-500/20 border border-orange-400/30 rounded px-3 py-1 text-orange-200">
               ⏳ {summary.remaining} tilbage — kør pipeline igen
