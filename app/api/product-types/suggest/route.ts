@@ -47,9 +47,13 @@ export async function POST() {
   const existingNames  = existingList.map(t => t.name).join(', ') || 'ingen endnu'
   const keywordSets    = existingList.map(t => (t.keywords as string[]) ?? [])
 
-  // Sample up to 500 unique product names from staging that DON'T match any existing type
+  // Sample up to 500 unique product names that DON'T match any existing type.
+  // Kilde 1: staging (pending/needs_review) — mest aktuelt
+  // Kilde 2: products-tabellen — fallback når staging er tom (fx efter pipeline-kørsel)
   const names: string[] = []
   const PAGE = 1000
+
+  // Kilde 1: staging
   for (let p = 0; names.length < 500; p++) {
     const { data, error } = await supabase
       .from('supplier_product_staging')
@@ -64,12 +68,34 @@ export async function POST() {
     for (const row of data) {
       if (!row.normalized_name) continue
       if (names.includes(row.normalized_name)) continue
-      // Skip products that already match an existing product type
       if (keywordSets.length > 0 && matchesAnyType(row.normalized_name, keywordSets)) continue
       names.push(row.normalized_name)
       if (names.length >= 500) break
     }
     if (data.length < PAGE) break
+  }
+
+  // Kilde 2: products — bruges når staging er tom
+  if (names.length < 100) {
+    for (let p = 0; names.length < 500; p++) {
+      const { data, error } = await supabase
+        .from('products')
+        .select('name')
+        .not('name', 'is', null)
+        .range(p * PAGE, p * PAGE + PAGE - 1)
+        .order('id')
+
+      if (error || !data || data.length === 0) break
+
+      for (const row of data as { name: string }[]) {
+        if (!row.name) continue
+        if (names.includes(row.name)) continue
+        if (keywordSets.length > 0 && matchesAnyType(row.name, keywordSets)) continue
+        names.push(row.name)
+        if (names.length >= 500) break
+      }
+      if (data.length < PAGE) break
+    }
   }
 
   if (names.length === 0) {
