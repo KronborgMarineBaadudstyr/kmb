@@ -73,15 +73,15 @@ export async function batchEanLookup(
       .select('id, ean, product_id, products(name)')
       .in('ean', unmatched)
 
-    for (const v of (byVariant ?? []) as {
+    for (const v of (byVariant ?? []) as unknown as {
       id: string; ean: string; product_id: string
-      products: { name: string } | null
+      products: { name: string } | { name: string }[] | null
     }[]) {
       if (v.ean && !result[v.ean]) {
         result[v.ean] = {
           productId:   v.product_id,
           variantId:   v.id,
-          productName: v.products?.name ?? null,
+          productName: (Array.isArray(v.products) ? v.products[0]?.name : v.products?.name) ?? null,
         }
       }
     }

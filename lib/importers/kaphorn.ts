@@ -415,8 +415,8 @@ export async function importKapHorn(
             categories,
             color:                   farve,
             size:                    size,
-            vejl_incl_moms:          toNum(p.VejlInclMoms),
             ...supplierData.extra_data,
+            vejl_incl_moms:          toNum(p.VejlInclMoms),
           }
 
           if (stagingRow && stagingRow.status !== 'pending_review') {

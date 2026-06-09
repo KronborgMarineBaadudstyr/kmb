@@ -178,7 +178,7 @@ export default function BundlesPage() {
     })
     if (r.ok) {
       setShowForm(false)
-      setForm({ name: '', description: '', discount_pct: '', kit_price: '', starts_at: '', ends_at: '', is_active: true })
+      setForm({ name: '', description: '', discount_pct: '', kit_price: '', starts_at: '', ends_at: '', is_active: true, use_dates: false })
       setMsg(`${tab === 'bundle' ? 'Bundle' : 'Kampagne'} oprettet ✓`)
       await load()
     } else {

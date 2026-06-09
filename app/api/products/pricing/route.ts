@@ -31,11 +31,11 @@ export async function GET() {
 
   // Enrich: find best active supplier, derive suggested price
   const enriched = (products ?? []).map(p => {
-    const activeSuppliers = ((p.product_suppliers ?? []) as {
+    const activeSuppliers = ((p.product_suppliers ?? []) as unknown as {
       id: string; priority: number; is_active: boolean
       purchase_price: number | null; recommended_sales_price: number | null
       supplier_sku: string; item_status: string
-      suppliers: { id: string; name: string }
+      suppliers: { id: string; name: string }[] | null
     }[])
       .filter(s => s.is_active)
       .sort((a, b) => a.priority - b.priority)
@@ -59,7 +59,7 @@ export async function GET() {
       primary_image_url: p.primary_image_url,
       sales_price:    p.sales_price,
       primary_supplier: primary ? {
-        name:                    primary.suppliers?.name ?? '—',
+        name:                    (Array.isArray(primary.suppliers) ? (primary.suppliers as { name: string }[])[0]?.name : (primary.suppliers as { name: string } | null)?.name) ?? '—',
         purchase_price:          primary.purchase_price,
         recommended_sales_price: primary.recommended_sales_price,
         supplier_sku:            primary.supplier_sku,

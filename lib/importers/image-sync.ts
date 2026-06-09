@@ -58,7 +58,7 @@ export async function syncImagesToProduct(
       change_type:  'image_sync_error',
       new_value:    JSON.stringify({ source, urls: toInsert.map(i => i.url), error: error.message }),
       changed_at:   new Date().toISOString(),
-    }).catch(() => {/* ignore */})
+    }).then(() => {/* ignore */}, () => {/* ignore */})
 
     return { synced: 0, skipped: images.length, error: error.message }
   }
