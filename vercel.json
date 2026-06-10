@@ -5,7 +5,7 @@
     { "path": "/api/cron/sync-palby-products", "schedule": "30 23 * * *"       },
     { "path": "/api/cron/sync-columbus",       "schedule": "45 23 * * *"       },
     { "path": "/api/cron/sync-kaphorn",        "schedule": "0 0 * * *"         },
-    { "path": "/api/cron/sync-kaphorn-stock",  "schedule": "30 7,12,17,22 * * *" },
-    { "path": "/api/cron/sync-palby-stock",    "schedule": "0 7,12,17,22 * * *"  }
+    { "path": "/api/cron/sync-kaphorn-stock",  "schedule": "30 7 * * *" },
+    { "path": "/api/cron/sync-palby-stock",    "schedule": "0 7 * * *"  }
   ]
 }

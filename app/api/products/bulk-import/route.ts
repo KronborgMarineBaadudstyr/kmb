@@ -6,7 +6,7 @@ import { extractBrand, KnownBrand } from '@/lib/extract-brand'
 export const dynamic = 'force-dynamic'
 
 // Column headers in the Excel template — order matters for readability
-export const TEMPLATE_COLUMNS = [
+const TEMPLATE_COLUMNS = [
   { key: 'name',                    label: 'Produktnavn',             required: true,  example: 'Wirelås rustfri 6mm' },
   { key: 'brand',                   label: 'Brand / Mærke',           required: false, example: 'Plastimo' },
   { key: 'short_description',       label: 'Kort beskrivelse',        required: false, example: 'Kompakt wirelås til sejl' },
