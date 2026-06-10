@@ -93,41 +93,67 @@ async function runEanPhase(
   let groupsCreated = 0
   let rowsAssigned  = 0
 
-  // Step 4: Insert groups and assign rows in batches
-  for (const [ean, members] of byEan) {
-    const distinctSuppliers = new Set(members.map(r => r.supplier_id))
-    const method = distinctSuppliers.size >= 2 ? 'ean' : 'single'
-    // Pick longest name as suggested name
-    const bestName = members.reduce((best, r) =>
-      (r.normalized_name ?? '').length > best.length ? (r.normalized_name ?? '') : best, '')
+  // Step 4: Batch-insert groups (500 at a time), then batch-update staging rows
+  const eanEntries = [...byEan.entries()]
+  const GROUP_BATCH = 500
 
-    const { data: group, error: gErr } = await supabase
-      .from('staging_match_groups')
-      .insert({
+  for (let i = 0; i < eanEntries.length; i += GROUP_BATCH) {
+    const chunk = eanEntries.slice(i, i + GROUP_BATCH)
+
+    const toInsert = chunk.map(([ean, members]) => {
+      const distinctSuppliers = new Set(members.map(r => r.supplier_id))
+      const bestName = members.reduce((best, r) =>
+        (r.normalized_name ?? '').length > best.length ? (r.normalized_name ?? '') : best, '')
+      return {
         match_confidence: 'high',
-        match_method:     method,
+        match_method:     distinctSuppliers.size >= 2 ? 'ean' : 'single',
         supplier_count:   distinctSuppliers.size,
         suggested_name:   bestName,
         suggested_ean:    ean,
         status:           'pending_review',
-      })
-      .select('id')
-      .single()
+      }
+    })
 
-    if (gErr || !group) {
-      console.error('[matching-engine] EAN group insert error:', gErr?.message)
+    const { data: inserted, error: gErr } = await supabase
+      .from('staging_match_groups')
+      .insert(toInsert)
+      .select('id, suggested_ean')
+
+    if (gErr || !inserted) {
+      console.error('[matching-engine] EAN batch insert error:', gErr?.message)
       continue
     }
 
-    groupsCreated++
+    groupsCreated += inserted.length
 
-    const ids = members.map(r => r.id)
-    const { error: uErr } = await supabase
-      .from('supplier_product_staging')
-      .update({ match_group_id: group.id })
-      .in('id', ids)
+    // Map ean → group id, then batch-update staging rows
+    const eanToGroupId = new Map<string, string>(
+      (inserted as { id: string; suggested_ean: string }[]).map(g => [g.suggested_ean, g.id])
+    )
 
-    if (!uErr) rowsAssigned += ids.length
+    // Collect all (groupId, stagingIds) pairs
+    const updates = new Map<string, string[]>()
+    for (const [ean, members] of chunk) {
+      const groupId = eanToGroupId.get(ean)
+      if (!groupId) continue
+      updates.set(groupId, members.map(r => r.id))
+    }
+
+    // Update staging rows in batches of 500 ids
+    for (const [groupId, ids] of updates) {
+      for (let j = 0; j < ids.length; j += 500) {
+        const { error: uErr } = await supabase
+          .from('supplier_product_staging')
+          .update({ match_group_id: groupId })
+          .in('id', ids.slice(j, j + 500))
+        if (!uErr) rowsAssigned += Math.min(500, ids.length - j)
+      }
+    }
+
+    onProgress({
+      stage: 'ean_phase',
+      message: `EAN-gruppering: ${groupsCreated.toLocaleString('da-DK')} / ${eanEntries.length.toLocaleString('da-DK')} grupper oprettet…`,
+    })
   }
 
   return { groupsCreated, rowsAssigned }
