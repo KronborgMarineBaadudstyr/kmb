@@ -126,35 +126,18 @@ async function runEanPhase(
 
     groupsCreated += inserted.length
 
-    // Map ean → group id, then batch-update staging rows
-    const eanToGroupId = new Map<string, string>(
-      (inserted as { id: string; suggested_ean: string }[]).map(g => [g.suggested_ean, g.id])
-    )
-
-    // Collect all (groupId, stagingIds) pairs
-    const updates = new Map<string, string[]>()
-    for (const [ean, members] of chunk) {
-      const groupId = eanToGroupId.get(ean)
-      if (!groupId) continue
-      updates.set(groupId, members.map(r => r.id))
-    }
-
-    // Update staging rows in batches of 500 ids
-    for (const [groupId, ids] of updates) {
-      for (let j = 0; j < ids.length; j += 500) {
-        const { error: uErr } = await supabase
-          .from('supplier_product_staging')
-          .update({ match_group_id: groupId })
-          .in('id', ids.slice(j, j + 500))
-        if (!uErr) rowsAssigned += Math.min(500, ids.length - j)
-      }
-    }
-
     onProgress({
       stage: 'ean_phase',
       message: `EAN-gruppering: ${groupsCreated.toLocaleString('da-DK')} / ${eanEntries.length.toLocaleString('da-DK')} grupper oprettet…`,
     })
   }
+
+  // Single SQL pass to assign all staging rows to their group via normalized_ean join
+  const { data: assignedCount, error: assignErr } = await supabase.rpc('assign_ean_groups')
+  if (assignErr) {
+    console.error('[matching-engine] assign_ean_groups RPC error:', assignErr.message)
+  }
+  rowsAssigned = (assignedCount as number) ?? 0
 
   return { groupsCreated, rowsAssigned }
 }
