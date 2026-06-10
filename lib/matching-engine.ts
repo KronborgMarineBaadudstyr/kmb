@@ -93,8 +93,12 @@ async function runEanPhase(
   let groupsCreated = 0
   let rowsAssigned  = 0
 
-  // Step 4: Batch-insert groups (500 at a time), then batch-update staging rows
-  const eanEntries = [...byEan.entries()]
+  // Step 4: Only create EAN groups for cross-supplier matches (2+ suppliers).
+  // Single-supplier EAN rows are handled by the singles phase — no need to create
+  // 45k single-supplier groups here that would just bloat the pipeline.
+  const eanEntries = [...byEan.entries()].filter(([, members]) =>
+    new Set(members.map(r => r.supplier_id)).size >= 2
+  )
   const GROUP_BATCH = 500
 
   for (let i = 0; i < eanEntries.length; i += GROUP_BATCH) {
