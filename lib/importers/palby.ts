@@ -313,6 +313,7 @@ export async function importPalby(
     const BATCH = 100
     const importStart = new Date()
     let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0
+    const errorLog: string[] = []
 
     for (let i = 0; i < products.length; i += BATCH) {
       const batch = products.slice(i, i + BATCH)
@@ -464,7 +465,7 @@ export async function importPalby(
               stagingRow
                 ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
                 : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-            ).then(({ error }) => { if (error) { console.error(`[palby] staging sku=${skuStr}:`, error.message); errors++; staged-- } }))
+            ).then(({ error }) => { if (error) { const msg = `staging sku=${skuStr}: ${error.message}`; console.error('[palby]', msg); errorLog.push(msg); errors++; staged-- } }))
           }
         }
       }
@@ -480,6 +481,7 @@ export async function importPalby(
     const newSyncState = {
       ...(s.sync_state ?? {}),
       last_full_product_sync: new Date().toISOString(),
+      last_import_errors: errorLog.slice(0, 500),
     }
     await supabase.from('suppliers')
       .update({ last_synced_at: new Date().toISOString(), sync_state: newSyncState })

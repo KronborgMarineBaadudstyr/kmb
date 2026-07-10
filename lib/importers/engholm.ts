@@ -166,6 +166,7 @@ export async function importEngholm(
   const BATCH = 100
   const importStart = new Date()
   let processed = 0, matched = 0, staged = 0, updated = 0, errors = 0
+  const errorLog: string[] = []
 
   for (let i = 0; i < products.length; i += BATCH) {
     const batch = products.slice(i, i + BATCH)
@@ -241,7 +242,7 @@ export async function importEngholm(
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
           ).then(async ({ error }) => {
-            if (error) { console.error(`[engholm] update ps sku=${p.sku}:`, error.message, error.details); errors++; updated--; return }
+            if (error) { const msg = `update ps sku=${p.sku}: ${error.message}`; console.error('[engholm]', msg); errorLog.push(msg); errors++; updated--; return }
             await Promise.all([
               engholmImages.length > 0 ? syncImagesToProduct(match.productId, engholmImages, 'engholm', supabase) : Promise.resolve(),
               enrichMatchedProduct(match.productId, enrichData, supabase),
@@ -260,7 +261,7 @@ export async function importEngholm(
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
           ).then(async ({ error }) => {
-            if (error) { console.error(`[engholm] insert ps sku=${p.sku}:`, error.message, error.details); errors++; matched--; return }
+            if (error) { const msg = `insert ps sku=${p.sku}: ${error.message}`; console.error('[engholm]', msg); errorLog.push(msg); errors++; matched--; return }
             await Promise.all([
               engholmImages.length > 0 ? syncImagesToProduct(match.productId, engholmImages, 'engholm', supabase) : Promise.resolve(),
               enrichMatchedProduct(match.productId, enrichData, supabase),
@@ -302,7 +303,7 @@ export async function importEngholm(
             supabase.from('supplier_product_staging')
               .update({ raw_data: engholmRawData, normalized_unit: unit, normalized_unit_size: unit_size })
               .eq('id', stagingRow.id)
-          ).then(({ error }) => { if (error) { console.error(`[engholm] update staging (skipped) sku=${p.sku}:`, error.message, error.details); errors++ } }))
+          ).then(({ error }) => { if (error) { const msg = `update staging sku=${p.sku}: ${error.message}`; console.error('[engholm]', msg); errorLog.push(msg); errors++ } }))
         } else {
           const stagingUpsertRow = {
             supplier_id:         SUPPLIER_ID,
@@ -322,7 +323,7 @@ export async function importEngholm(
             stagingRow
               ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
               : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-          ).then(({ error }) => { if (error) { console.error(`[engholm] upsert staging sku=${p.sku}:`, error.message, error.details); errors++; staged-- } }))
+          ).then(({ error }) => { if (error) { const msg = `upsert staging sku=${p.sku}: ${error.message}`; console.error('[engholm]', msg); errorLog.push(msg); errors++; staged-- } }))
         }
       }
     }
@@ -335,10 +336,15 @@ export async function importEngholm(
     })
   }
 
-  // Opdater last_synced_at for leverandøren
+  // Opdater last_synced_at + gem fejllog i sync_state
+  const { data: supRow } = await supabase.from('suppliers').select('sync_state').eq('id', SUPPLIER_ID).single()
+  const existingState = (supRow?.sync_state ?? {}) as Record<string, unknown>
   await supabase
     .from('suppliers')
-    .update({ last_synced_at: new Date().toISOString() })
+    .update({
+      last_synced_at: new Date().toISOString(),
+      sync_state: { ...existingState, last_import_errors: errorLog.slice(0, 500) },
+    })
     .eq('id', SUPPLIER_ID)
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)

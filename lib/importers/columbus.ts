@@ -184,6 +184,7 @@ export async function importColumbus(
     const BATCH = 200
     const importStart = new Date()
     let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0
+    const errorLog: string[] = []
 
     for (let i = 0; i < products.length; i += BATCH) {
       const batch = products.slice(i, i + BATCH)
@@ -257,7 +258,7 @@ export async function importColumbus(
                 })
                 .eq('id', existing.id)
             ).then(async ({ error }) => {
-              if (error) { console.error(`[columbus] update product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; updated--; return }
+              if (error) { const msg = `update ps sku=${skuStr}: ${error.message}`; console.error('[columbus]', msg); errorLog.push(msg); errors++; updated--; return }
               await enrichMatchedProduct(match.productId, enrichData, supabase)
               // Ryd op: marker staging-række som matched hvis den stadig afventer
               const stagingRow = existingStaging[skuStr]
@@ -273,7 +274,7 @@ export async function importColumbus(
               supabase.from('product_suppliers')
                 .insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
             ).then(async ({ error }) => {
-              if (error) { console.error(`[columbus] insert product_suppliers sku=${skuStr}:`, error.message, error.details); errors++; matched--; return }
+              if (error) { const msg = `insert ps sku=${skuStr}: ${error.message}`; console.error('[columbus]', msg); errorLog.push(msg); errors++; matched--; return }
               await enrichMatchedProduct(match.productId, enrichData, supabase)
               // Ryd op: marker staging-række som matched hvis den stadig afventer
               const stagingRow = existingStaging[skuStr]
@@ -311,7 +312,7 @@ export async function importColumbus(
               supabase.from('supplier_product_staging')
                 .update({ raw_data: rawData, updated_at: new Date().toISOString() })
                 .eq('id', stagingRow.id)
-            ).then(({ error }) => { if (error) { console.error(`[columbus] update staging sku=${skuStr}:`, error.message, error.details); errors++; skipped-- } }))
+            ).then(({ error }) => { if (error) { const msg = `update staging sku=${skuStr}: ${error.message}`; console.error('[columbus]', msg); errorLog.push(msg); errors++; skipped-- } }))
           } else {
             const stagingUpsertRow = {
               supplier_id:          SUPPLIER_ID,
@@ -330,7 +331,7 @@ export async function importColumbus(
               stagingRow
                 ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
                 : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-            ).then(({ error }) => { if (error) { console.error(`[columbus] upsert staging sku=${skuStr}:`, error.message, error.details); errors++; staged-- } }))
+            ).then(({ error }) => { if (error) { const msg = `upsert staging sku=${skuStr}: ${error.message}`; console.error('[columbus]', msg); errorLog.push(msg); errors++; staged-- } }))
           }
         }
       }
@@ -347,7 +348,7 @@ export async function importColumbus(
     await supabase.from('suppliers')
       .update({
         last_synced_at: new Date().toISOString(),
-        sync_state:     { ...(s.sync_state ?? {}), last_full_sync: new Date().toISOString() },
+        sync_state:     { ...(s.sync_state ?? {}), last_full_sync: new Date().toISOString(), last_import_errors: errorLog.slice(0, 500) },
       })
       .eq('id', SUPPLIER_ID)
 

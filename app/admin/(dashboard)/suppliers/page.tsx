@@ -76,6 +76,24 @@ function saveImportSummary(supplierId: string, data: ImportProgress) {
   })
 }
 
+function ErrorLogPopover({ errors }: { errors: string[] }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative inline-block align-middle ml-1">
+      <button onClick={() => setOpen(v => !v)} className="underline text-red-500 text-xs hover:text-red-700">
+        {open ? 'Skjul' : 'Se fejl'}
+      </button>
+      {open && (
+        <div className="absolute z-50 left-0 top-6 w-[520px] max-h-72 overflow-y-auto bg-white border border-red-200 rounded shadow-lg p-3 text-xs font-mono text-gray-700">
+          {errors.map((e, i) => (
+            <div key={i} className="border-b border-gray-100 py-1 break-words">{i + 1}. {e}</div>
+          ))}
+        </div>
+      )}
+    </span>
+  )
+}
+
 export default function SuppliersPage() {
   const [suppliers,    setSuppliers]    = useState<Supplier[]>([])
   const [loading,      setLoading]      = useState(true)
@@ -479,7 +497,14 @@ s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
                         <span>Opdateret: <strong>{lastSummary.updated}</strong></span>
                         <span>Til gennemgang: <strong>{lastSummary.staged}</strong></span>
                       </>}
-                      {lastSummary.errors > 0 && <span className="text-red-500">Fejl: <strong>{lastSummary.errors}</strong></span>}
+                      {lastSummary.errors > 0 && (
+                        <span className="text-red-500">
+                          Fejl: <strong>{lastSummary.errors}</strong>
+                          {Array.isArray(s.sync_state?.last_import_errors) && (s.sync_state.last_import_errors as string[]).length > 0 && (
+                            <ErrorLogPopover errors={s.sync_state.last_import_errors as string[]} />
+                          )}
+                        </span>
+                      )}
                       {lastSummary.stage === 'error' && <span>{lastSummary.message}</span>}
                     </div>
                   </div>
