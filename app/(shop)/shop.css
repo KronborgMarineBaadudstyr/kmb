@@ -73,6 +73,21 @@
   gap: 16px;
 }
 
+.ls-logo {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  text-decoration: none;
+}
+.ls-logo img {
+  height: 40px;
+  width: auto;
+  display: block;
+}
+@media (max-width: 480px) {
+  .ls-logo img { height: 30px; }
+}
+
 .ls-logo-text {
   font-family: var(--serif);
   font-weight: 600;

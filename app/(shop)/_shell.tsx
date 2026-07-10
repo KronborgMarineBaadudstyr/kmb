@@ -21,8 +21,8 @@ export function ShopHeader() {
   return (
     <header className="ls-header">
       <div className="ls-header-inner">
-        <Link href="/" className="ls-logo-text">
-          LoveSailing<span>.dk</span>
+        <Link href="/" className="ls-logo">
+          <img src="/Logo-horisontal-dark.png" alt="LoveSailing.dk" height={40} />
         </Link>
 
         <form className="ls-search-bar" onSubmit={handleSearch}>
