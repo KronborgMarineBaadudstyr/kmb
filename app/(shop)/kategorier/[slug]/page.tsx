@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { ProductCard } from '../../_product-card'
+import { SortSelect } from './_sort-select'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,20 +89,9 @@ export default async function CategoryPage({
       <div className="ls-listing-header">
         <h1>{matchedCat}</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="ls-listing-count">{total.toLocaleString('da-DK')} varer</span>
-          <form>
-            <input type="hidden" name="page" value="1" />
-            <select name="sort" className="ls-sort-select" defaultValue={sort}
-              onChange={(e) => {
-                // client-side navigation for sort
-              }}>
-              <option value="name_asc">Navn A–Å</option>
-              <option value="name_desc">Navn Å–A</option>
-              <option value="price_asc">Pris lav–høj</option>
-              <option value="price_desc">Pris høj–lav</option>
-            </select>
-          </form>
-        </div>
+            <span className="ls-listing-count">{total.toLocaleString('da-DK')} varer</span>
+            <SortSelect current={sort} slug={slug} />
+          </div>
       </div>
 
       {products && products.length > 0 ? (
