@@ -4,20 +4,20 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 
 const navItems = [
-  { href: '/',              label: 'Dashboard',                    icon: '⊞' },
-  { href: '/suppliers',     label: 'Leverandører',                 icon: '🏭' },
-  { href: '/matching',      label: 'Leverandør-match',             icon: '🔗' },
-  { href: '/staging',       label: 'Til gennemgang',               icon: '🔍' },
-  { href: '/products',      label: 'Produkter',                    icon: '📦' },
-  { href: '/pricing',       label: 'Prissætning',                  icon: '💰' },
-  { href: '/inventory',     label: 'Lagerbeholdning',              icon: '📊' },
-  { href: '/changes',       label: 'Import-ændringer',             icon: '📋' },
-  { href: '/navigation',    label: 'Båd-navigation',               icon: '⚓' },
-  { href: '/bundles',       label: 'Bundler & Kampagner',          icon: '🏷️' },
-  { href: '/brands',            label: 'Brands',                       icon: '🔖' },
-  { href: '/category-filters', label: 'Kategori-søgefiltre',          icon: '🔍' },
-  { href: '/lovesaling',        label: 'Lovesaling — Brand',           icon: '🌊' },
-  { href: '/sync',          label: 'Sync & Logs',                  icon: '🔄' },
+  { href: '/admin',                  label: 'Dashboard',             icon: '⊞' },
+  { href: '/admin/suppliers',        label: 'Leverandører',          icon: '🏭' },
+  { href: '/admin/matching',         label: 'Leverandør-match',      icon: '🔗' },
+  { href: '/admin/staging',          label: 'Til gennemgang',        icon: '🔍' },
+  { href: '/admin/products',         label: 'Produkter',             icon: '📦' },
+  { href: '/admin/pricing',          label: 'Prissætning',           icon: '💰' },
+  { href: '/admin/inventory',        label: 'Lagerbeholdning',       icon: '📊' },
+  { href: '/admin/changes',          label: 'Import-ændringer',      icon: '📋' },
+  { href: '/admin/navigation',       label: 'Båd-navigation',        icon: '⚓' },
+  { href: '/admin/bundles',          label: 'Bundler & Kampagner',   icon: '🏷️' },
+  { href: '/admin/brands',           label: 'Brands',                icon: '🔖' },
+  { href: '/admin/category-filters', label: 'Kategori-søgefiltre',   icon: '🔍' },
+  { href: '/admin/product-types',    label: 'Produkttyper',          icon: '🏷' },
+  { href: '/admin/sync',             label: 'Sync & Logs',           icon: '🔄' },
 ]
 
 export default function SidebarClient() {
@@ -37,7 +37,7 @@ export default function SidebarClient() {
       </div>
       <nav className="flex-1 px-2 py-4 space-y-1">
         {navItems.map(item => {
-          const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href)
+          const active = item.href === '/admin' ? pathname === '/admin' : pathname.startsWith(item.href)
           return (
             <Link
               key={item.href}
@@ -53,7 +53,7 @@ export default function SidebarClient() {
         })}
       </nav>
       <div className="px-4 py-3 border-t border-gray-700 space-y-2">
-        <p className="text-xs text-gray-500">kronborgmarinebaadudstyr.dk</p>
+        <a href="/" className="text-xs text-gray-500 hover:text-gray-300 block">← Se butik</a>
         <button
           onClick={handleLogout}
           className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors rounded-md hover:bg-gray-700"

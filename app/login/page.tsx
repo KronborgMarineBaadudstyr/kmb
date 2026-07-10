@@ -24,7 +24,7 @@ function LoginForm() {
     setLoading(false)
 
     if (res.ok) {
-      const from = searchParams.get('from') || '/'
+      const from = searchParams.get('from') || '/admin'
       router.replace(from)
     } else {
       setError('Forkert adgangskode — prøv igen')

@@ -303,7 +303,7 @@ export default function ChangesPage() {
                           </Link>
                         )}
                         {!row.product_id && row.staging_id && (
-                          <Link href="/staging"
+                          <Link href="/admin/staging"
                             className="text-xs text-gray-400 hover:text-blue-500 hover:underline" title="Se i staging">
                             Staging →
                           </Link>
