@@ -219,6 +219,7 @@ export async function importScanmarine(
   const BATCH = 100
   const importStart = new Date()
   let processed = 0, matched = 0, staged = 0, updated = 0, errors = 0
+  const errorLog: string[] = []
 
   for (let i = 0; i < products.length; i += BATCH) {
     const batch = products.slice(i, i + BATCH)
@@ -277,7 +278,7 @@ export async function importScanmarine(
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').update({ ...supplierData, priority: existing.priority }).eq('id', existing.id)
           ).then(async ({ error }) => {
-            if (error) { errors++; updated--; return }
+            if (error) { const msg = `update ps sku=${p.product_number}: ${error.message}`; console.error('[scanmarine]', msg); errorLog.push(msg); errors++; updated--; return }
             await Promise.all([
               images.length > 0 ? syncImagesToProduct(match.productId, images, 'scanmarine', supabase) : Promise.resolve(),
               enrichMatchedProduct(match.productId, enrichData, supabase),
@@ -295,7 +296,7 @@ export async function importScanmarine(
           ops.push(Promise.resolve(
             supabase.from('product_suppliers').insert({ ...supplierData, product_id: match.productId, variant_id: match.variantId, priority: 1 })
           ).then(async ({ error }) => {
-            if (error) { errors++; matched--; return }
+            if (error) { const msg = `insert ps sku=${p.product_number}: ${error.message}`; console.error('[scanmarine]', msg); errorLog.push(msg); errors++; matched--; return }
             await Promise.all([
               images.length > 0 ? syncImagesToProduct(match.productId, images, 'scanmarine', supabase) : Promise.resolve(),
               enrichMatchedProduct(match.productId, enrichData, supabase),
@@ -333,7 +334,7 @@ export async function importScanmarine(
             supabase.from('supplier_product_staging')
               .update({ raw_data: scanRawData, updated_at: new Date().toISOString() })
               .eq('id', stagingRow.id)
-          ).then(({ error }) => { if (error) errors++ }))
+          ).then(({ error }) => { if (error) { const msg = `update staging sku=${p.product_number}: ${error.message}`; console.error('[scanmarine]', msg); errorLog.push(msg); errors++ } }))
         } else {
           const stagingUpsertRow = {
             supplier_id:          SUPPLIER_ID,
@@ -353,7 +354,7 @@ export async function importScanmarine(
             stagingRow
               ? supabase.from('supplier_product_staging').update(stagingUpsertRow).eq('id', stagingRow.id)
               : supabase.from('supplier_product_staging').insert(stagingUpsertRow)
-          ).then(({ error }) => { if (error) { errors++; staged-- } }))
+          ).then(({ error }) => { if (error) { const msg = `upsert staging sku=${p.product_number}: ${error.message}`; console.error('[scanmarine]', msg); errorLog.push(msg); errors++; staged-- } }))
         }
       }
     }
@@ -366,10 +367,12 @@ export async function importScanmarine(
     })
   }
 
-  // Opdater last_synced_at for leverandøren
+  // Opdater last_synced_at + gem fejllog
+  const { data: supRow } = await supabase.from('suppliers').select('sync_state').eq('id', SUPPLIER_ID).single()
+  const existingState = (supRow?.sync_state ?? {}) as Record<string, unknown>
   await supabase
     .from('suppliers')
-    .update({ last_synced_at: new Date().toISOString() })
+    .update({ last_synced_at: new Date().toISOString(), sync_state: { ...existingState, last_import_errors: errorLog.slice(0, 500) } })
     .eq('id', SUPPLIER_ID)
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
