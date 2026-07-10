@@ -463,13 +463,82 @@ async function runSinglesPhase(
   supabase: SupabaseClient,
   onProgress: ProgressCallback,
 ): Promise<{ groupsCreated: number; rowsAssigned: number }> {
-  onProgress({ stage: 'singles_phase', message: 'Enkelt-leverandør gruppering kører (SQL)...' })
+  onProgress({ stage: 'singles_phase', message: 'Enkelt-leverandør gruppering kører (henter rækker)…' })
 
-  const { data, error } = await supabase.rpc('create_single_supplier_groups', {})
-  if (error) throw new Error(`Singles RPC fejl: ${error.message}`)
+  // Fetch all ungrouped staging rows in pages
+  type Row = { id: string; normalized_name: string | null; normalized_ean: string | null }
+  const rows: Row[] = []
+  const PAGE = 1000
+  for (let p = 0; ; p++) {
+    const { data, error } = await supabase
+      .from('supplier_product_staging')
+      .select('id, normalized_name, normalized_ean')
+      .is('match_group_id', null)
+      .not('status', 'in', '("rejected","matched","new_product")')
+      .range(p * PAGE, p * PAGE + PAGE - 1)
 
-  const result = data as { groups_created: number; rows_assigned: number }
-  return { groupsCreated: result.groups_created, rowsAssigned: result.rows_assigned }
+    if (error || !data || data.length === 0) break
+    rows.push(...(data as Row[]))
+    if (data.length < PAGE) break
+  }
+
+  if (rows.length === 0) {
+    onProgress({ stage: 'singles_phase', message: 'Singles-fase: ingen ungrouped rækker tilbage.' })
+    return { groupsCreated: 0, rowsAssigned: 0 }
+  }
+
+  onProgress({ stage: 'singles_phase', message: `${rows.length.toLocaleString('da-DK')} rækker — opretter single-grupper i batches…` })
+
+  let groupsCreated = 0
+  let rowsAssigned  = 0
+  const BATCH = 500
+
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const chunk = rows.slice(i, i + BATCH)
+
+    // Store staging row id in 'notes' as a temporary correlation key (same pattern as original RPC)
+    const toInsert = chunk.map(r => ({
+      match_confidence: r.normalized_ean ? 'high' : 'low',
+      match_method:     'single' as const,
+      supplier_count:   1,
+      suggested_name:   r.normalized_name,
+      suggested_ean:    r.normalized_ean || null,
+      status:           'pending_review',
+      notes:            r.id, // temporary — cleared below
+    }))
+
+    const { data: inserted, error: gErr } = await supabase
+      .from('staging_match_groups')
+      .insert(toInsert)
+      .select('id, notes')
+
+    if (gErr || !inserted) {
+      console.error('[matching-engine] Singles batch insert error:', gErr?.message)
+      continue
+    }
+
+    groupsCreated += inserted.length
+
+    // Single SQL pass: assign staging rows to groups via the notes correlation key
+    const { data: assigned } = await supabase.rpc('assign_single_groups')
+    rowsAssigned += (assigned as number) ?? 0
+
+    // Clear the temporary correlation key from this batch
+    const groupIds = (inserted as { id: string }[]).map(g => g.id)
+    for (let j = 0; j < groupIds.length; j += 500) {
+      await supabase
+        .from('staging_match_groups')
+        .update({ notes: null })
+        .in('id', groupIds.slice(j, j + 500))
+    }
+
+    onProgress({
+      stage: 'singles_phase',
+      message: `Singles: ${groupsCreated.toLocaleString('da-DK')} / ${rows.length.toLocaleString('da-DK')} grupper oprettet…`,
+    })
+  }
+
+  return { groupsCreated, rowsAssigned }
 }
 
 // ── Main entry point ──
