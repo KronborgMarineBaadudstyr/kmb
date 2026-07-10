@@ -546,7 +546,8 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
   const [done,     setDone]     = useState(false)
   const [summary,  setSummary]  = useState<Record<string, number> | null>(null)
   const [error,    setError]    = useState<string | null>(null)
-  const esRef = useRef<EventSource | null>(null)
+  const esRef    = useRef<EventSource | null>(null)
+  const retryRef = useRef(0)
 
   function startPipeline() {
     if (running) return
@@ -555,6 +556,7 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
     setError(null)
     setSummary(null)
     setSteps({})
+    retryRef.current = 0
 
     const es = new EventSource('/api/pipeline/run')
     esRef.current = es
@@ -592,9 +594,20 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
     }
 
     es.onerror = () => {
-      setError('Forbindelsesfejl — prøv igen')
-      setRunning(false)
       es.close()
+      retryRef.current += 1
+      if (retryRef.current <= 10) {
+        // Pipeline is idempotent — completed steps are skipped on retry
+        setTimeout(() => {
+          const nextEs = new EventSource('/api/pipeline/run')
+          esRef.current = nextEs
+          nextEs.onmessage = es.onmessage
+          nextEs.onerror   = es.onerror
+        }, 2000)
+      } else {
+        setError('Forbindelsesfejl efter 10 forsøg — prøv igen manuelt')
+        setRunning(false)
+      }
     }
   }
 
