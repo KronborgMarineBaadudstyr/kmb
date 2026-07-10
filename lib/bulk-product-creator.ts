@@ -380,7 +380,7 @@ export async function bulkCreateProductsFromGroups(
       }
     }
     for (let i = 0; i < imageInserts.length; i += 500) {
-      await supabase.from('product_images').upsert(imageInserts.slice(i, i + 500), { onConflict: 'product_id,url', ignoreDuplicates: true })
+      await supabase.from('product_images').insert(imageInserts.slice(i, i + 500))
     }
 
     const now = new Date().toISOString()
@@ -534,7 +534,7 @@ export async function bulkCreateProductsFromGroups(
       }
     }
     for (let i = 0; i < variantImageInserts.length; i += 500) {
-      await supabase.from('product_images').upsert(variantImageInserts.slice(i, i + 500), { onConflict: 'product_id,url', ignoreDuplicates: true })
+      await supabase.from('product_images').insert(variantImageInserts.slice(i, i + 500))
     }
 
     // Update groups
