@@ -30,7 +30,17 @@ export async function GET(request: Request) {
   }
 
   if (search) {
-    query = query.ilike('name', `%${search}%`)
+    // Use RPC for full-field search (name, EAN, SKU, brand, supplier_sku)
+    const { data: matchIds } = await supabase
+      .rpc('shop_product_search', { search_term: search })
+      .order('relevance', { ascending: false })
+      .limit(500)
+
+    const ids = ((matchIds ?? []) as { id: string }[]).map(r => r.id)
+    if (ids.length === 0) {
+      return NextResponse.json({ products: [], total: 0, page, limit, pages: 0 })
+    }
+    query = query.in('id', ids)
   }
 
   switch (sort) {

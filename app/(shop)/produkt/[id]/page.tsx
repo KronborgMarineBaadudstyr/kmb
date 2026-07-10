@@ -5,6 +5,18 @@ import { AddToCartBtn } from './_add-to-cart'
 
 export const dynamic = 'force-dynamic'
 
+function formatDescription(text: string): string {
+  return text
+    // literal \n → real newline
+    .replace(/\\n/g, '\n')
+    // **bold** → <strong>
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // · → bullet (already correct, but normalize escaped versions)
+    .replace(/\\·/g, '·')
+    // newline → <br>
+    .replace(/\n/g, '<br>')
+}
+
 function slugify(s: string) {
   return s.toLowerCase()
     .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
@@ -112,7 +124,8 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           )}
 
           {p.short_description && (
-            <div className="ls-pdp-desc">{p.short_description}</div>
+            <div className="ls-pdp-desc"
+              dangerouslySetInnerHTML={{ __html: formatDescription(p.short_description) }} />
           )}
 
           <AddToCartBtn
@@ -121,7 +134,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
           {p.description && (
             <div className="ls-pdp-desc" style={{ marginTop: 8 }}
-              dangerouslySetInnerHTML={{ __html: p.description }} />
+              dangerouslySetInnerHTML={{ __html: formatDescription(p.description) }} />
           )}
 
           {specs.length > 0 && (
