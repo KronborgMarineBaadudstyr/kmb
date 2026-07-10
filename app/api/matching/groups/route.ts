@@ -31,6 +31,9 @@ export async function GET(request: Request) {
     const methods = method.split(',').map(m => m.trim()).filter(Boolean)
     if (methods.length === 1) query = query.eq('match_method', methods[0])
     else                      query = query.in('match_method', methods)
+  } else {
+    // Skjul enkelt-leverandør grupper fra matchning-UI — de kræver ikke manuel gennemgang
+    query = query.gt('supplier_count', 1)
   }
 
   const { data: groups, error: gErr, count } = await query
@@ -71,11 +74,11 @@ export async function GET(request: Request) {
     { count: createdCount },
   ] = await Promise.all([
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'pending_review'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'high').eq('match_method', 'ean').eq('status', 'pending_review'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'medium').eq('status', 'pending_review'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).in('match_method', ['variant', 'parent_sku']).eq('status', 'pending_review'),
-    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'single').eq('status', 'pending_review'),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'pending_review').gt('supplier_count', 1),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'high').eq('match_method', 'ean').eq('status', 'pending_review').gt('supplier_count', 1),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_confidence', 'medium').eq('status', 'pending_review').gt('supplier_count', 1),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).in('match_method', ['variant', 'parent_sku']).eq('status', 'pending_review').gt('supplier_count', 1),
+    supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('match_method', 'single').eq('status', 'pending_review').gt('supplier_count', 1),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'confirmed'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'rejected'),
     supabase.from('staging_match_groups').select('*', { count: 'exact', head: true }).eq('status', 'product_created'),
