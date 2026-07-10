@@ -581,6 +581,7 @@ const PIPELINE_STAGES = [
   { key: 'auto_create',  label: '4 · Opret produkter',    icon: '📦' },
   { key: 'remap',        label: '5 · Kategorisér',        icon: '🏷️' },
   { key: 'suggestions',  label: '6 · Match-forslag',      icon: '💡' },
+  { key: 'auto_stage',   label: '7 · Auto-behandling',    icon: '🤖' },
 ]
 
 // ── Pipeline Panel ──
@@ -633,10 +634,12 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
         let detail: string | undefined
         if (ev.updated != null)        detail = `${ev.updated} kategorier opdateret`
         if (ev.confirmed != null)      detail = `${ev.confirmed} bekræftet`
-        if (ev.created != null)        detail = `${ev.created} produkter oprettet`
+        if (ev.created != null && stage !== 'auto_stage') detail = `${ev.created} produkter oprettet`
         if (ev.groups_created != null) detail = `${ev.groups_created} grupper oprettet`
         if (ev.populated != null)      detail = `${ev.populated} forslag tilføjet`
         if (ev.processed != null)      detail = `${ev.processed} kategoriseret`
+        if (stage === 'auto_stage' && (ev.matched != null || ev.created != null))
+          detail = `${ev.matched ?? 0} matchet · ${ev.created ?? 0} oprettet`
         return { ...prev, [stage]: { stage, status: status as PipelineStep['status'], message: ev.message as string, detail } }
       })
     }
