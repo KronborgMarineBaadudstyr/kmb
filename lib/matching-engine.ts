@@ -143,6 +143,23 @@ async function runEanPhase(
   }
   rowsAssigned = (assignedCount as number) ?? 0
 
+  // Recalculate match_method for all groups:
+  //   single-supplier 'ean' groups → downgrade to 'single'
+  //   multi-supplier  'single' groups → upgrade to 'ean'
+  // This handles both old mis-classified groups and the "second supplier arrives" scenario.
+  const { data: syncResult, error: syncErr } = await supabase.rpc('sync_group_methods')
+  if (syncErr) {
+    console.error('[matching-engine] sync_group_methods RPC error:', syncErr.message)
+  } else if (syncResult) {
+    const { upgraded, downgraded } = syncResult as { upgraded: number; downgraded: number }
+    if (upgraded > 0 || downgraded > 0) {
+      onProgress({
+        stage: 'ean_phase',
+        message: `Gruppe-metoder synkroniseret: ${upgraded} opgraderet til EAN, ${downgraded} nedgraderet til enkelt`,
+      })
+    }
+  }
+
   return { groupsCreated, rowsAssigned }
 }
 
