@@ -1,6 +1,5 @@
-'use client'
+﻿'use client'
 
-import Image from 'next/image'
 import Link from 'next/link'
 import { useCart, fmtPrice } from '../_cart'
 
@@ -37,7 +36,7 @@ export function CartView() {
             <div key={item.id} className="ls-cart-item">
               <div className="ls-cart-item-thumb">
                 {item.image ? (
-                  <Image src={item.image} alt={item.name} width={72} height={72}
+                  <img src={item.image} alt={item.name}
                     style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
                 ) : '⚓'}
               </div>

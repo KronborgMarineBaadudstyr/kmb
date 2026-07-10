@@ -1,7 +1,6 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
 import { useCart, fmtPrice } from './_cart'
 import { useState } from 'react'
 
@@ -38,7 +37,8 @@ export function ProductCard({ product: p }: { product: Product }) {
     <Link href={`/produkt/${p.id}`} className="ls-prodcard">
       <div className="ls-prodcard-thumb">
         {img ? (
-          <Image src={img} alt={p.name} width={200} height={200} style={{ objectFit: 'contain', padding: 12 }} />
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={img} alt={p.name} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 12 }} />
         ) : (
           <span className="placeholder">⚓</span>
         )}

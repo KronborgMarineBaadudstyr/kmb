@@ -1,6 +1,5 @@
-import { createServiceClient } from '@/lib/supabase/server'
+﻿import { createServiceClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import Image from 'next/image'
 import type { Metadata } from 'next'
 import { AddToCartBtn } from './_add-to-cart'
 
@@ -94,7 +93,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         {/* Left: image */}
         <div className="ls-pdp-images">
           {primaryImage ? (
-            <Image src={primaryImage} alt={p.name} width={600} height={600}
+            <img src={primaryImage} alt={p.name}
               style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 24 }} />
           ) : (
             <span className="placeholder">⚓</span>

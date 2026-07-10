@@ -9,21 +9,11 @@ const nextConfig: NextConfig = {
     'xlsx',
   ],
 
-  // Tillad billeder fra WooCommerce og Supabase Storage
+  // Tillad billeder fra alle HTTPS-domæner (leverandør-billeder fra Palby, Columbus, Engholm m.fl.)
   images: {
     remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'kronborgmarinebaadudstyr.dk',
-      },
-      {
-        protocol: 'https',
-        hostname: '*.supabase.co',
-      },
-      {
-        protocol: 'https',
-        hostname: '*.supabase.com',
-      },
+      { protocol: 'https', hostname: '**' },
+      { protocol: 'http',  hostname: '**' },
     ],
   },
 };
