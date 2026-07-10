@@ -25,6 +25,7 @@ type Supplier = {
   active:              boolean
   notes:               string | null
   sync_state:          Record<string, unknown> | null
+  global_priority:     number | null
 }
 
 type ImportProgress = {
@@ -83,7 +84,37 @@ export default function SuppliersPage() {
   const [progress,     setProgress]     = useState<ImportProgress | null>(null)
   const [testMode,     setTestMode]     = useState(false)
   const [selectedFile, setSelectedFile] = useState<Record<string, File>>({})
+  const [savingPrio,   setSavingPrio]   = useState(false)
   const esRef = useRef<EventSource | null>(null)
+
+  async function movePriority(id: string, direction: 'up' | 'down') {
+    const sorted = [...suppliers].sort((a, b) => (a.global_priority ?? 999) - (b.global_priority ?? 999))
+    const idx    = sorted.findIndex(s => s.id === id)
+    if (idx === -1) return
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+    if (swapIdx < 0 || swapIdx >= sorted.length) return
+
+    setSavingPrio(true)
+    const a = sorted[idx]
+    const b = sorted[swapIdx]
+    const pA = a.global_priority ?? idx + 1
+    const pB = b.global_priority ?? swapIdx + 1
+
+    await Promise.all([
+      fetch(`/api/suppliers/${a.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ global_priority: pB }) }),
+      fetch(`/api/suppliers/${b.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ global_priority: pA }) }),
+    ])
+
+    setSuppliers(prev => {
+      const next = [...prev]
+      const iA = next.findIndex(s => s.id === a.id)
+      const iB = next.findIndex(s => s.id === b.id)
+      next[iA] = { ...next[iA], global_priority: pB }
+      next[iB] = { ...next[iB], global_priority: pA }
+      return next.sort((x, y) => (x.global_priority ?? 999) - (y.global_priority ?? 999))
+    })
+    setSavingPrio(false)
+  }
 
   useEffect(() => {
     fetch('/api/suppliers')
@@ -218,14 +249,40 @@ export default function SuppliersPage() {
       {loading ? (
         <div className="text-gray-400">Henter leverandører...</div>
       ) : (
+        {/* Global prioritetsforklaring */}
+        <div className="mb-6 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
+          <p className="font-medium mb-1">Global leverandørprioritet</p>
+          <p className="text-xs text-blue-700">
+            Rækkefølgen herunder afgør hvilken leverandør vi foretrækker når et produkt fås fra flere leverandører.
+            Leverandør #1 vælges som standard — med mindre du sætter en anden prioritet direkte på produktet.
+            Brug pilene til at justere rækkefølgen.
+          </p>
+        </div>
+
         <div className="space-y-4">
-          {suppliers.map(s => {
+          {suppliers.map((s) => {
             const lastSummary = getLastSummary(s)
+            const sortedSuppliers = [...suppliers].sort((a, b) => (a.global_priority ?? 999) - (b.global_priority ?? 999))
+            const posIdx = sortedSuppliers.findIndex(x => x.id === s.id)
+            const isFirst = posIdx === 0
+            const isLast  = posIdx === sortedSuppliers.length - 1
             return (
               <div key={s.id} className="bg-white rounded-lg border border-gray-200 p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-1">
+                      {/* Priority badge + arrows */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs font-bold text-white bg-gray-700 rounded-full w-6 h-6 flex items-center justify-center">
+                          {posIdx + 1}
+                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          <button onClick={() => movePriority(s.id, 'up')} disabled={isFirst || savingPrio}
+                            className="text-gray-300 hover:text-gray-600 disabled:opacity-20 leading-none text-xs">▲</button>
+                          <button onClick={() => movePriority(s.id, 'down')} disabled={isLast || savingPrio}
+                            className="text-gray-300 hover:text-gray-600 disabled:opacity-20 leading-none text-xs">▼</button>
+                        </div>
+                      </div>
                       <h3 className="text-base font-semibold text-gray-900">{s.name}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${s.active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
                         {s.active ? 'Aktiv' : 'Inaktiv'}

@@ -20,9 +20,13 @@ export async function PATCH(
 
   const existing = (supplier?.sync_state ?? {}) as Record<string, unknown>
 
+  const update: Record<string, unknown> = {}
+  if (body.sync_state !== undefined) update.sync_state = { ...existing, ...body.sync_state }
+  if (body.global_priority !== undefined) update.global_priority = body.global_priority
+
   const { error } = await supabase
     .from('suppliers')
-    .update({ sync_state: { ...existing, ...body.sync_state } })
+    .update(update)
     .eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
