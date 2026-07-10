@@ -2,1379 +2,486 @@
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 
-function str(val: unknown, fallback = '—'): string {
-  if (val == null) return fallback
-  return String(val) || fallback
-}
-
-type MatchGroup = {
-  id: string
-  suggested_name: string | null
-  suggested_ean: string | null
-  supplier_count: number
-  match_method: string
-  match_confidence: string
-  status: string
-  product_id: string | null
-  created_at: string
-  members: Array<{
-    id: string
-    supplier_id: string
-    normalized_name: string
-    normalized_sku: string
-    normalized_ean: string | null
-    raw_data: Record<string, unknown>
-    suppliers: { name: string } | null
-  }>
-}
+// ── Types ────────────────────────────────────────────────────────────────────
 
 type StagingRow = {
-  id:                   string
-  supplier_id:          string
-  normalized_name:      string
-  normalized_ean:       string | null
-  normalized_sku:       string
-  normalized_unit:      string | null
-  normalized_unit_size: number | null
-  status:               'pending_review' | 'matched' | 'new_product' | 'rejected' | 'needs_review'
-  matched_product_id:   string | null
-  created_at:           string
-  updated_at:           string
-  suppliers:            { name: string }
-  raw_data:             Record<string, unknown>
+  id:              string
+  supplier_id:     string
+  normalized_name: string
+  normalized_ean:  string | null
+  normalized_sku:  string
+  status:          string
+  created_at:      string
+  suppliers:       { name: string }
+  raw_data:        Record<string, unknown>
 }
 
-const REVIEW_REASON_LABELS: Record<string, string> = {
-  ikke_i_salg:          'Ikke i salg (ingen Woo/POS tilknytning)',
-  mangler_beskrivelse:  'Mangler beskrivelse',
-  mangler_salgspris:    'Mangler salgspris',
-}
-
-type Suggestion = {
+type ProductMatch = {
   id:           string
   name:         string
   internal_sku: string
   score:        number
-  match_field:  'ean' | 'name'
 }
 
-type SuggestionsResult = {
-  suggestions: Suggestion[]
-  ean_match:   boolean
-  rpc_error?:  string
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtPrice(val: unknown) {
+  const n = Number(val)
+  return isNaN(n) || !val ? '—' : `${n.toLocaleString('da-DK', { minimumFractionDigits: 0 })} kr`
 }
 
-type Supplier = { id: string; name: string }
+// ── Variant guide ─────────────────────────────────────────────────────────────
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  pending_review: { label: 'Afventer',      color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  needs_review:   { label: 'Mangler data',  color: 'bg-orange-50 text-orange-700 border-orange-200' },
-  matched:        { label: 'Matchet',       color: 'bg-green-50 text-green-700 border-green-200'    },
-  new_product:    { label: 'Nyt produkt',   color: 'bg-blue-50 text-blue-700 border-blue-200'       },
-  rejected:       { label: 'Afvist',        color: 'bg-gray-100 text-gray-500 border-gray-200'      },
-}
-
-// ── Sammenkæd-panel ───────────────────────────────────────────────────────────
-type LinkVariantsRow = { stagingId: string; name: string; sku: string; attrs: { key: string; val: string }[] }
-
-// Forsøger at udtrække det der adskiller en leverandørproduktnavn fra overprodukt-navn.
-// "Wirelås rustfri Duplex 3 mm 2 stk." → "3 mm"
-// "Ankerkæde 10mm HT" → "10 mm"
-function extractSizeHint(supplierName: string, parentName: string): string {
-  // Fjern fælles præfiks (case-insensitiv)
-  const base = parentName.trim().toLowerCase()
-  const full = supplierName.trim()
-  const lower = full.toLowerCase()
-  const remainder = lower.startsWith(base)
-    ? full.slice(base.length).trim()
-    : full
-
-  // Find mm/cm/m størrelser
-  const mmMatch = remainder.match(/\b(\d+(?:[,\.]\d+)?)\s*(mm|cm|m)\b/i)
-  if (mmMatch) return `${mmMatch[1]} ${mmMatch[2].toLowerCase()}`
-
-  // Find stykantal (2 stk, 3 stk)
-  const stkMatch = remainder.match(/\b(\d+)\s*stk\.?/i)
-  if (stkMatch) return `${stkMatch[1]} stk`
-
-  // Returner resten hvis den er kort nok
-  if (remainder.length > 0 && remainder.length <= 30) return remainder
-
-  return ''
-}
-
-function LinkVariantsPanel({
-  rows,
-  onClose,
-  onDone,
-}: {
-  rows: StagingRow[]
-  onClose: () => void
-  onDone: () => void
-}) {
-  const defaultName = rows[0]?.normalized_name ?? ''
-  const [parentName, setParentName] = useState(defaultName)
-
-  // Initialiser med auto-udtræk fra leverandørens produktnavn
-  const initVariantRows = (pName: string): LinkVariantsRow[] =>
-    rows.map(r => {
-      const supplierName = typeof r.raw_data?.supplier_product_name === 'string'
-        ? r.raw_data.supplier_product_name
-        : r.normalized_name
-      const hint = extractSizeHint(supplierName, pName)
-      return {
-        stagingId: r.id,
-        name: r.normalized_name,
-        sku: r.normalized_sku,
-        attrs: hint ? [{ key: 'størrelse', val: hint }] : [{ key: '', val: '' }],
-      }
-    })
-
-  const [variantRows, setVariantRows] = useState<LinkVariantsRow[]>(() => initVariantRows(defaultName))
-  const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
-
-  // Når overprodukt-navn ændres → opdater kun hint-værdier på rækker der ikke er redigeret endnu
-  function onParentNameChange(val: string) {
-    setParentName(val)
-    setVariantRows(prev => prev.map((vr, idx) => {
-      const r = rows[idx]
-      const supplierName = typeof r?.raw_data?.supplier_product_name === 'string'
-        ? r.raw_data.supplier_product_name : r?.normalized_name ?? ''
-      const hint = extractSizeHint(supplierName, val)
-      // Kun overskriv hvis værdien er tom eller stadig matcher det gamle auto-hint
-      const oldHint = extractSizeHint(supplierName, parentName)
-      const updated = vr.attrs.map(a => {
-        const valIsAutoHint = a.val === oldHint
-        return valIsAutoHint ? { ...a, val: hint } : a
-      })
-      return { ...vr, attrs: updated }
-    }))
-  }
-  const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState<string | null>(null)
-
-  function setAttr(i: number, j: number, field: 'key' | 'val', value: string) {
-    setVariantRows(prev => prev.map((r, ri) => {
-      if (ri === i) {
-        // Denne variant: opdater præcis det felt der er ændret
-        return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, [field]: value }) }
-      }
-      if (field === 'key' && j < r.attrs.length) {
-        // Andre varianter: kun synkroniser nøglenavnet, aldrig værdien
-        return { ...r, attrs: r.attrs.map((a, ai) => ai !== j ? a : { ...a, key: value }) }
-      }
-      return r
-    }))
-  }
-  function addAttr(i: number) {
-    // Tilføj en tom attribut på ALLE varianter så nøglen kan synkroniseres
-    setVariantRows(prev => prev.map(r => ({ ...r, attrs: [...r.attrs, { key: '', val: '' }] })))
-  }
-  function removeAttr(_i: number, j: number) {
-    // Fjern samme attribut-index på alle varianter
-    setVariantRows(prev => prev.map(r => ({ ...r, attrs: r.attrs.filter((_, ai) => ai !== j) })))
-  }
-
-  async function save() {
-    if (!parentName.trim()) { setMsg('Angiv et overprodukt-navn'); return }
-    setSaving(true)
-    setMsg(null)
-    const res = await fetch('/api/staging/link-variants', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parent_name: parentName.trim(),
-        variants: variantRows.map(r => ({
-          staging_id: r.stagingId,
-          variant_attrs: Object.fromEntries(
-            r.attrs.filter(a => a.key.trim()).map(a => [a.key.trim(), a.val.trim()])
-          ),
-        })),
-      }),
-    })
-    const json = await res.json()
-    if (json.error) {
-      setMsg('Fejl: ' + json.error)
-      setSaving(false)
-      return
-    }
-    setMsg(`✓ Oprettet "${json.parent_name}" med ${json.variants_created} varianter`)
-    setTimeout(() => { onDone(); onClose() }, 1200)
-  }
-
+function VariantGuide() {
+  const [open, setOpen] = useState(false)
   return (
-    <>
-      {/* Overlay */}
-      <div className="fixed inset-0 bg-black/30 z-40" onClick={onClose} />
-      {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-[520px] bg-white shadow-xl z-50 flex flex-col">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between shrink-0">
-          <div>
-            <h3 className="font-semibold text-gray-900">Sammenkæd som varianter</h3>
-            <p className="text-xs text-gray-400 mt-0.5">{rows.length} leverandørprodukter → 1 overprodukt + {rows.length} varianter</p>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">×</button>
-        </div>
-
-        <div className="flex-1 overflow-auto px-6 py-5 space-y-6">
-          {/* Overprodukt navn */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Overprodukt-navn</label>
-            <input
-              value={parentName}
-              onChange={e => onParentNameChange(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="F.eks. Wirelås rustfri Duplex"
-            />
-            <p className="text-xs text-gray-400 mt-1">Dette er det fælles overprodukt. Varianterne arver dette navn.</p>
-          </div>
-
-          {/* Per-variant attributter */}
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Hvad adskiller hver variant?</label>
-            <p className="text-xs text-gray-400 mb-3">F.eks. størrelse = 3mm, pakke = 2 stk. Lad felterne stå tomme hvis du ikke ved det endnu.</p>
-            <div className="space-y-3">
-              {variantRows.map((vr, i) => {
-                const row      = rows[i]
-                const rd       = row?.raw_data ?? {}
-                const isOpen   = expandedIdxs.has(i)
-                function autoOpen() { if (!isOpen) setExpandedIdxs(prev => { const n = new Set(prev); n.add(i); return n }) }
-                const supName  = typeof rd.supplier_product_name === 'string' ? rd.supplier_product_name : null
-                const desc     = typeof rd.short_description === 'string' ? rd.short_description
-                               : typeof rd.description      === 'string' ? rd.description : null
-                const price    = typeof rd.purchase_price === 'number' ? rd.purchase_price : null
-                const vejl     = typeof rd.recommended_sales_price === 'number' ? rd.recommended_sales_price : null
-                const qty      = Number(rd.supplier_stock_quantity ?? 0)
-                const images   = Array.isArray(rd.supplier_images) ? rd.supplier_images as Array<{url:string}> : []
-                const imgUrl   = images[0]?.url ?? null
-
-                return (
-                  <div key={vr.stagingId} className="border border-gray-200 rounded-lg overflow-hidden">
-                    {/* Kort-header: altid synlig */}
-                    <div className="flex items-center gap-2 px-3 py-2 bg-gray-50">
-                      {imgUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={imgUrl} alt="" className="w-8 h-8 object-contain rounded border border-gray-200 bg-white shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-600 shrink-0">{vr.sku}</span>
-                          <span className="text-xs text-gray-700 truncate font-medium">{supName ?? vr.name}</span>
-                        </div>
-                        {(price != null || qty > 0) && (
-                          <div className="flex gap-3 mt-0.5 text-xs text-gray-400">
-                            {price != null && <span>Indkøb: <span className="text-gray-600">{price.toLocaleString('da-DK')} kr</span></span>}
-                            {vejl  != null && <span>Vejl: <span className="text-gray-600">{vejl.toLocaleString('da-DK')} kr</span></span>}
-                            {qty > 0 && <span className="text-green-600">Lager: {qty}</span>}
-                          </div>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => setExpandedIdxs(prev => { const n = new Set(prev); isOpen ? n.delete(i) : n.add(i); return n })}
-                        className="text-xs text-gray-400 hover:text-gray-600 shrink-0 px-1"
-                        title={isOpen ? 'Skjul detaljer' : 'Vis detaljer'}
-                      >
-                        {isOpen ? '▲' : '▼'}
-                      </button>
-                    </div>
-
-                    {/* Fold-ud: beskrivelse */}
-                    {isOpen && desc && (
-                      <div className="px-3 py-2 text-xs text-gray-500 border-t border-gray-100 bg-white leading-relaxed line-clamp-4">
-                        {desc}
-                      </div>
-                    )}
-
-                    {/* Attribut-felter */}
-                    <div className="px-3 py-2.5 space-y-1.5 border-t border-gray-100">
-                      {vr.attrs.map((a, j) => (
-                        <div key={j} className="flex gap-1.5 items-center">
-                          <input
-                            placeholder="størrelse"
-                            value={a.key}
-                            onChange={e => setAttr(i, j, 'key', e.target.value)}
-                            onFocus={autoOpen}
-                            className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-                          />
-                          <span className="text-gray-300 text-xs">=</span>
-                          <input
-                            placeholder="3mm"
-                            value={a.val}
-                            onChange={e => setAttr(i, j, 'val', e.target.value)}
-                            onFocus={autoOpen}
-                            className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-                          />
-                          <button onClick={() => removeAttr(i, j)} className="text-gray-300 hover:text-red-400 text-sm">×</button>
-                        </div>
-                      ))}
-                      <button onClick={() => addAttr(i)} className="text-xs text-blue-500 hover:underline">+ Attribut</button>
-                    </div>
-                  </div>
-                )
-              })}
+    <div className="relative inline-block">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+      >
+        <span>ℹ️</span> Hvornår er noget en variant?
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-6 z-40 w-80 bg-white border border-gray-200 rounded-xl shadow-xl p-4 text-sm">
+            <h4 className="font-semibold text-gray-900 mb-2">Hvornår opretter du som variant?</h4>
+            <p className="text-gray-600 mb-3 text-xs leading-relaxed">
+              En variant er det samme produkt i en anden udførelse. Typiske variant-akser:
+            </p>
+            <div className="space-y-1.5 mb-3">
+              {[
+                ['📐 Størrelse / mål', 'Ankerkæde 8mm vs 10mm vs 12mm'],
+                ['🎨 Farve', 'Fender hvid vs sort vs rød'],
+                ['🔩 Materiale', 'Beslag i krom vs messing vs sort'],
+                ['⭕ Diameter / tykkelse', 'Tov 12mm vs 16mm'],
+                ['🏷 Brand + attribut', 'Roca krom vs no-name messing'],
+              ].map(([icon, ex]) => (
+                <div key={icon} className="flex gap-2 text-xs">
+                  <span className="shrink-0 w-36 text-gray-700 font-medium">{icon}</span>
+                  <span className="text-gray-500">{ex}</span>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-gray-100 pt-2 mt-2">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                <strong className="text-gray-700">Brand alene er IKKE en variant.</strong> "Musto redningsvest" og "Helly Hansen redningsvest" er to separate produkter.<br /><br />
+                <strong className="text-gray-700">Tilknyt som ekstra leverandør</strong> når det er præcis samme fysiske produkt — bare indkøbt fra en anden leverandør (typisk samme EAN).
+              </p>
             </div>
           </div>
-
-          {msg && (
-            <div className={`text-sm px-3 py-2 rounded-lg ${msg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-              {msg}
-            </div>
-          )}
-        </div>
-
-        <div className="px-6 py-4 border-t border-gray-200 flex gap-2 shrink-0">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="flex-1 px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
-          >
-            {saving ? 'Opretter...' : `Opret overprodukt + ${rows.length} varianter`}
-          </button>
-          <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50">
-            Annuller
-          </button>
-        </div>
-      </div>
-    </>
+        </>
+      )}
+    </div>
   )
 }
 
-export default function StagingPage() {
-  const [rows,        setRows]        = useState<StagingRow[]>([])
-  const [total,       setTotal]       = useState(0)
-  const [totalPages,  setTotalPages]  = useState(1)
-  const [loading,     setLoading]     = useState(true)
-  const [page,        setPage]        = useState(1)
-  const [statusFilter,setStatusFilter]= useState('pending_review')
-  const [supplierFilter, setSupplierFilter] = useState('')
-  const [search,      setSearch]      = useState('')
-  const [searchInput, setSearchInput] = useState('')
-  const [suppliers,   setSuppliers]   = useState<Supplier[]>([])
-  const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set())
-  const [linkPanel,   setLinkPanel]   = useState(false)
+// ── Product search + action panel ─────────────────────────────────────────────
 
-  // Panel state
-  const [selected,    setSelected]    = useState<StagingRow | null>(null)
-  const [suggestions, setSuggestions] = useState<Suggestion[] | null>(null)
-  const [sugLoading,  setSugLoading]  = useState(false)
-  const [actionLoading, setActionLoading] = useState(false)
-  const [actionMsg,   setActionMsg]   = useState<string | null>(null)
+function ActionPanel({
+  row,
+  onDone,
+}: {
+  row:    StagingRow
+  onDone: () => void
+}) {
+  const [query,       setQuery]       = useState('')
+  const [results,     setResults]     = useState<ProductMatch[]>([])
+  const [searching,   setSearching]   = useState(false)
+  const [selected,    setSelected]    = useState<ProductMatch | null>(null)
+  const [saving,      setSaving]      = useState(false)
+  const [msg,         setMsg]         = useState<{ text: string; ok: boolean } | null>(null)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Variantfamilie: opret overprodukt + eksisterende + staging som varianter
-  const [familyForId,   setFamilyForId]   = useState<string | null>(null) // suggestion product id
-  const [familyName,    setFamilyName]    = useState('')
-  const [familySaving,  setFamilySaving]  = useState(false)
-  const [familyMsg,     setFamilyMsg]     = useState<string | null>(null)
-
-  async function createVariantFamily(existingProductId: string) {
-    if (!familyName.trim()) { setFamilyMsg('Angiv et overprodukt-navn'); return }
-    if (!selected) return
-    setFamilySaving(true)
-    setFamilyMsg(null)
-
-    // 1. Opret nyt overprodukt
-    const createRes = await fetch('/api/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: familyName.trim(), status: 'draft', categories: peekData[existingProductId]?.categories ?? [] }),
-    })
-    const createJson = await createRes.json()
-    const parentId = createJson.data?.id
-    if (!parentId) { setFamilyMsg('Fejl: kunne ikke oprette overprodukt'); setFamilySaving(false); return }
-
-    // 2. Gør det eksisterende produkt til variant
-    await fetch(`/api/products/${parentId}/variants`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ variant_product_id: existingProductId }),
-    })
-
-    // 3. Opret nyt produkt fra staging + gør det til variant
-    const newRes = await fetch(`/api/staging/${selected.id}/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'new_product' }),
-    })
-    const newJson = await newRes.json()
-    if (newJson.ok && newJson.product_id) {
-      await fetch(`/api/products/${parentId}/variants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ variant_product_id: newJson.product_id }),
-      })
-    }
-
-    setFamilyMsg(`✓ Oprettet "${familyName.trim()}" med 2 varianter`)
-    setFamilySaving(false)
-    setTimeout(() => { setFamilyForId(null); setSelected(null); fetchRows() }, 1200)
-  }
-
-  // Peek: expanded product details for match suggestions
-  type ProductPeek = {
-    id: string
-    name: string
-    description: string | null
-    short_description: string | null
-    categories: string[]
-    sales_price: number | null
-    primary_image_url: string | null
-    product_suppliers: Array<{ suppliers: { name: string } | null; supplier_sku: string }>
-    product_images: Array<{ url: string; is_primary: boolean }>
-  }
-  const [peekId,      setPeekId]      = useState<string | null>(null)
-  const [peekData,    setPeekData]    = useState<Record<string, ProductPeek>>({})
-  const [peekLoading, setPeekLoading] = useState<string | null>(null)
-
-  async function togglePeek(id: string) {
-    if (peekId === id) { setPeekId(null); return }
-    setPeekId(id)
-    if (peekData[id]) return // already loaded
-    setPeekLoading(id)
-    const res  = await fetch(`/api/products/${id}`)
-    const json = await res.json()
-    if (json.data) setPeekData(prev => ({ ...prev, [id]: json.data }))
-    setPeekLoading(null)
-  }
-
-  // Bekræftede grupper tab
-  const [groupsTab, setGroupsTab] = useState(false)
-  const [groups, setGroups] = useState<MatchGroup[]>([])
-  const [groupsLoading, setGroupsLoading] = useState(false)
-  const [groupsTotal, setGroupsTotal] = useState(0)
-  const [groupsPage, setGroupsPage] = useState(1)
-  const [groupEditNames, setGroupEditNames] = useState<Record<string, string>>({})
-  const [groupActionMsg, setGroupActionMsg] = useState<Record<string, string>>({})
-
-  // Variant assignment per group
-  const [groupIsVariant,    setGroupIsVariant]    = useState<Record<string, boolean>>({})
-  const [groupVariantSearch,setGroupVariantSearch]= useState<Record<string, string>>({})
-  const [groupVariantResults,setGroupVariantResults] = useState<Record<string, {id:string;name:string;internal_sku:string}[]>>({})
-  const [groupVariantParent,setGroupVariantParent]= useState<Record<string, {id:string;name:string;internal_sku:string} | null>>({})
-  const [groupVariantAttrs, setGroupVariantAttrs] = useState<Record<string, {key:string;val:string}[]>>({})
-  const variantSearchTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-
-  function onVariantSearch(groupId: string, val: string) {
-    setGroupVariantSearch(m => ({ ...m, [groupId]: val }))
-    if (variantSearchTimers.current[groupId]) clearTimeout(variantSearchTimers.current[groupId])
-    if (!val.trim()) { setGroupVariantResults(m => ({ ...m, [groupId]: [] })); return }
-    variantSearchTimers.current[groupId] = setTimeout(async () => {
-      const res  = await fetch(`/api/products?search=${encodeURIComponent(val)}&per_page=6`)
+  function handleQueryChange(q: string) {
+    setQuery(q)
+    setSelected(null)
+    if (!q.trim()) { setResults([]); return }
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(async () => {
+      setSearching(true)
+      const res  = await fetch(`/api/shop/products?search=${encodeURIComponent(q)}&limit=8`)
       const json = await res.json()
-      setGroupVariantResults(m => ({ ...m, [groupId]: json.data ?? [] }))
-    }, 300)
-  }
-
-  // Search input til fuzzy-søgning i match-panel
-  const [matchSearch, setMatchSearch] = useState('')
-  const [matchResults, setMatchResults] = useState<Suggestion[]>([])
-  const [matchSearchLoading, setMatchSearchLoading] = useState(false)
-  const matchSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  // Hent leverandører
-  useEffect(() => {
-    fetch('/api/suppliers')
-      .then(r => r.json())
-      .then(j => setSuppliers(j.data ?? []))
-  }, [])
-
-  const fetchRows = useCallback(async () => {
-    setLoading(true)
-    const params = new URLSearchParams({
-      status:   statusFilter,
-      page:     String(page),
-      per_page: '40',
-    })
-    if (supplierFilter) params.set('supplier_id', supplierFilter)
-    if (search)         params.set('search', search)
-
-    const res  = await fetch(`/api/staging?${params}`)
-    const json = await res.json()
-    setRows(json.data ?? [])
-    setTotal(json.total ?? 0)
-    setTotalPages(json.total_pages ?? 1)
-    setLoading(false)
-    setCheckedIds(new Set()) // nulstil valg ved reload
-  }, [statusFilter, supplierFilter, search, page])
-
-  useEffect(() => { fetchRows() }, [fetchRows])
-
-  const fetchGroups = useCallback(async () => {
-    setGroupsLoading(true)
-    const res = await fetch(`/api/matching/groups?status=confirmed&page=${groupsPage}&per_page=50`)
-    const json = await res.json()
-    setGroups(json.data ?? [])
-    setGroupsTotal(json.total ?? 0)
-    setGroupsLoading(false)
-  }, [groupsPage])
-
-  useEffect(() => { if (groupsTab) fetchGroups() }, [groupsTab, fetchGroups])
-
-  async function createProductFromGroup(groupId: string) {
-    const name = groupEditNames[groupId] ?? groups.find(g => g.id === groupId)?.suggested_name ?? ''
-    if (!name.trim()) { alert('Vælg et produktnavn'); return }
-
-    const isVariant = groupIsVariant[groupId]
-    const parent    = groupVariantParent[groupId]
-    if (isVariant && !parent) { alert('Vælg forælderprodukt for varianten'); return }
-
-    const res = await fetch(`/api/matching/${groupId}/create-product`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chosen_name: name }),
-    })
-    const json = await res.json()
-    if (json.error) {
-      setGroupActionMsg(m => ({ ...m, [groupId]: '✗ Fejl: ' + json.error }))
-      return
-    }
-
-    // Link as variant if requested — create a product_variants row under the parent
-    if (isVariant && parent && json.product_id) {
-      const attrList = (groupVariantAttrs[groupId] ?? [])
-        .filter(a => a.key.trim())
-        .map(a => ({ name: a.key.trim(), value: a.val.trim() }))
-      await fetch(`/api/products/${parent.id}/variants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attributes: attrList }),
-      })
-      setGroupActionMsg(m => ({ ...m, [groupId]: `✓ Produkt oprettet som variant af "${parent.name}"` }))
-    } else {
-      setGroupActionMsg(m => ({ ...m, [groupId]: '✓ Produkt oprettet!' }))
-    }
-    setTimeout(() => fetchGroups(), 1000)
-  }
-
-  async function rejectGroup(groupId: string) {
-    const res = await fetch(`/api/matching/${groupId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'rejected' }),
-    })
-    const json = await res.json()
-    if (json.ok) {
-      setGroupActionMsg(m => ({ ...m, [groupId]: '✓ Afvist' }))
-      setTimeout(() => fetchGroups(), 800)
-    }
-  }
-
-  // Debounce søgning
-  useEffect(() => {
-    const t = setTimeout(() => { setSearch(searchInput); setPage(1) }, 350)
-    return () => clearTimeout(t)
-  }, [searchInput])
-
-  // Hent match-forslag når panel åbnes
-  async function openPanel(row: StagingRow) {
-    setSelected(row)
-    setSuggestions(null)
-    setActionMsg(null)
-    setMatchSearch('')
-    setMatchResults([])
-    setPeekId(null)
-    setFamilyForId(null)
-    setFamilyMsg(null)
-    setSugLoading(true)
-
-    const res  = await fetch(`/api/staging/${row.id}/suggestions`)
-    const json: SuggestionsResult = await res.json()
-    setSuggestions(json.suggestions)
-    setSugLoading(false)
-  }
-
-  // Live match-søgning i panel
-  function onMatchSearchChange(val: string) {
-    setMatchSearch(val)
-    if (matchSearchTimer.current) clearTimeout(matchSearchTimer.current)
-    if (!val.trim()) { setMatchResults([]); return }
-
-    matchSearchTimer.current = setTimeout(async () => {
-      setMatchSearchLoading(true)
-      const res  = await fetch(`/api/products?search=${encodeURIComponent(val)}&per_page=8`)
-      const json = await res.json()
-      setMatchResults((json.data ?? []).map((p: { id: string; name: string; internal_sku: string }) => ({
-        id:           p.id,
-        name:         p.name,
-        internal_sku: p.internal_sku,
-        score:        0,
-        match_field:  'name' as const,
+      setResults((json.products ?? []).map((p: { id: string; name: string; internal_sku: string }) => ({
+        id: p.id, name: p.name, internal_sku: p.internal_sku, score: 1,
       })))
-      setMatchSearchLoading(false)
+      setSearching(false)
     }, 300)
   }
 
-  async function doAction(action: 'match' | 'new_product' | 'reject' | 'reopen', productId?: string) {
-    if (!selected) return
-    setActionLoading(true)
-    setActionMsg(null)
+  async function doAction(actionType: 'match' | 'new_product' | 'variant') {
+    setSaving(true)
+    setMsg(null)
 
-    const res  = await fetch(`/api/staging/${selected.id}/action`, {
+    const body: Record<string, unknown> = { action: actionType }
+    if (actionType === 'match' || actionType === 'variant') {
+      if (!selected) { setMsg({ text: 'Vælg et produkt først', ok: false }); setSaving(false); return }
+      body.product_id   = selected.id
+      body.product_name = selected.name
+      if (actionType === 'variant') body.as_variant = true
+    }
+
+    const res = await fetch(`/api/staging/${row.id}/action`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ action, product_id: productId }),
+      body:    JSON.stringify(body),
     })
-    const json = await res.json()
 
-    if (json.ok) {
-      setActionMsg(
-        action === 'match'       ? '✓ Matchet til produkt' :
-        action === 'new_product' ? '✓ Oprettet som nyt produkt (kladde)' :
-        action === 'reject'      ? '✓ Afvist' : '✓ Genåbnet'
-      )
-      // Opdater rækken lokalt + genindlæs listen
-      setSelected(null)
-      fetchRows()
+    setSaving(false)
+    if (res.ok) {
+      setMsg({ text: actionType === 'new_product' ? 'Oprettet som nyt produkt ✓' : actionType === 'variant' ? 'Tilknyttet som variant ✓' : 'Tilknyttet som leverandør ✓', ok: true })
+      setTimeout(onDone, 800)
     } else {
-      setActionMsg(`Fejl: ${json.error}`)
+      const j = await res.json()
+      setMsg({ text: j.error ?? 'Fejl', ok: false })
     }
-    setActionLoading(false)
-  }
-
-  const displaySuggestions = matchSearch.trim() ? matchResults : (suggestions ?? [])
-
-  const checkedRows = rows.filter(r => checkedIds.has(r.id))
-
-  function toggleCheck(id: string, e: React.MouseEvent) {
-    e.stopPropagation()
-    setCheckedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
-      return next
-    })
-  }
-
-  function toggleAll() {
-    if (checkedIds.size === rows.length) setCheckedIds(new Set())
-    else setCheckedIds(new Set(rows.map(r => r.id)))
   }
 
   return (
-    <div className="flex h-full">
-      {/* Sammenkæd-panel */}
-      {linkPanel && checkedRows.length >= 2 && (
-        <LinkVariantsPanel
-          rows={checkedRows}
-          onClose={() => setLinkPanel(false)}
-          onDone={fetchRows}
+    <div className="mt-3 pt-3 border-t border-gray-100 space-y-3">
+      {/* Search existing */}
+      <div>
+        <label className="text-xs text-gray-400 block mb-1">Søg i eksisterende produkter</label>
+        <input
+          type="search"
+          placeholder="Produktnavn, varenr. eller EAN…"
+          value={query}
+          onChange={e => handleQueryChange(e.target.value)}
+          className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-      )}
-
-      {/* ── Venstre: liste ── */}
-      <div className={`flex flex-col ${selected ? 'w-1/2' : 'w-full'} border-r border-gray-200 transition-all`}>
-
-        {/* Topbar */}
-        <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">Til gennemgang</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
-                Opret produkter fra bekræftede grupper og enkeltprodukter
-              </p>
-            </div>
-            <span className="text-sm text-gray-400">{groupsTab ? groupsTotal.toLocaleString('da-DK') + ' grupper' : total.toLocaleString('da-DK') + ' rækker'}</span>
-          </div>
-
-          {/* Top-level tab switcher */}
-          <div className="flex gap-2 mb-4">
-            <button
-              onClick={() => setGroupsTab(false)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg ${!groupsTab ? 'bg-gray-900 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-            >
-              Leverandørprodukter
-            </button>
-            <button
-              onClick={() => setGroupsTab(true)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg ${groupsTab ? 'bg-blue-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-            >
-              Bekræftede grupper {groupsTotal > 0 && <span className="ml-1.5 text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-full">{groupsTotal}</span>}
-            </button>
-          </div>
-
-          {!groupsTab && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Status filter */}
-            <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
-              {(['pending_review', 'needs_review', 'matched', 'new_product', 'rejected', 'all'] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => { setStatusFilter(s); setPage(1) }}
-                  className={`px-3 py-1.5 transition-colors ${
-                    statusFilter === s
-                      ? 'bg-gray-900 text-white'
-                      : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  {s === 'pending_review' ? 'Afventer'     :
-                   s === 'needs_review'   ? 'Mangler data' :
-                   s === 'matched'        ? 'Matchet'      :
-                   s === 'new_product'    ? 'Nye'          :
-                   s === 'rejected'       ? 'Afvist'       : 'Alle'}
-                </button>
-              ))}
-            </div>
-
-            {/* Leverandør filter */}
-            <select
-              value={supplierFilter}
-              onChange={e => { setSupplierFilter(e.target.value); setPage(1) }}
-              className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Alle leverandører</option>
-              {suppliers.map(s => (
-                <option key={s.id} value={s.id}>{s.name}</option>
-              ))}
-            </select>
-
-            {/* Søg */}
-            <input
-              type="search"
-              placeholder="Søg produktnavn..."
-              value={searchInput}
-              onChange={e => setSearchInput(e.target.value)}
-              className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-52"
-            />
-          </div>
-          )}
-        </div>
-
-        {/* Bekræftede grupper panel */}
-        {groupsTab && (
-          <div className="flex-1 overflow-auto px-6 py-4">
-            {groupsLoading ? (
-              <div className="p-12 text-center text-gray-400">Henter grupper...</div>
-            ) : groups.length === 0 ? (
-              <div className="p-12 text-center text-gray-400">Ingen bekræftede grupper afventer produktoprettelse</div>
-            ) : (
-              <div className="space-y-3 max-w-4xl">
-                {groups.map(g => {
-                  const editName = groupEditNames[g.id] ?? g.suggested_name ?? ''
-                  const actionMsg = groupActionMsg[g.id]
-                  return (
-                    <div key={g.id} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
-                      <div className="px-4 py-3">
-                        <div className="flex items-center gap-2 flex-wrap mb-2">
-                          <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200 font-medium">
-                            Bekræftet
-                          </span>
-                          <span className="text-xs px-2 py-0.5 rounded-full border bg-blue-50 text-blue-700 border-blue-200">
-                            {g.supplier_count} {g.supplier_count === 1 ? 'leverandør' : 'leverandører'}
-                          </span>
-                          {g.suggested_ean && (
-                            <span className="text-xs font-mono text-gray-400">EAN: {g.suggested_ean}</span>
-                          )}
-                        </div>
-                        <div className="mb-3">
-                          <label className="block text-xs text-gray-500 mb-1">Produktnavn</label>
-                          <input
-                            type="text"
-                            value={editName}
-                            onChange={e => setGroupEditNames(m => ({ ...m, [g.id]: e.target.value }))}
-                            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                        </div>
-                        <div className="space-y-2 mb-3">
-                          {g.members.map(m => {
-                            const pp = m.raw_data.purchase_price
-                            const qty = Number(m.raw_data.supplier_stock_quantity ?? 0)
-                            return (
-                              <div key={m.id} className="bg-gray-50 rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-1">
-                                <div>
-                                  <span className="text-gray-400 block">Leverandør</span>
-                                  <span className="font-medium text-gray-800">{m.suppliers?.name ?? '—'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-400 block">SKU</span>
-                                  <span className="font-mono text-gray-700">{m.normalized_sku}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-400 block">Indkøbspris</span>
-                                  <span className="text-gray-700">{pp != null ? `${Number(pp).toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kr` : '—'}</span>
-                                </div>
-                                <div>
-                                  <span className="text-gray-400 block">Lager</span>
-                                  <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>{qty}</span>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                        {/* Variant toggle */}
-                        <div className="mb-3">
-                          <label className="flex items-center gap-2 text-xs text-gray-600 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={groupIsVariant[g.id] ?? false}
-                              onChange={e => setGroupIsVariant(m => ({ ...m, [g.id]: e.target.checked }))}
-                              className="accent-purple-600"
-                            />
-                            Dette produkt er en variant af et eksisterende produkt
-                          </label>
-
-                          {groupIsVariant[g.id] && (
-                            <div className="mt-2 space-y-2 pl-5">
-                              {/* Parent search */}
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">Forælderprodukt</label>
-                                {groupVariantParent[g.id] ? (
-                                  <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1.5 text-xs">
-                                    <span className="font-medium text-purple-800">{groupVariantParent[g.id]!.name}</span>
-                                    <span className="font-mono text-purple-400">{groupVariantParent[g.id]!.internal_sku}</span>
-                                    <button onClick={() => setGroupVariantParent(m => ({ ...m, [g.id]: null }))} className="ml-auto text-purple-400 hover:text-purple-600">×</button>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <input
-                                      type="search"
-                                      placeholder="Søg forælderprodukt..."
-                                      value={groupVariantSearch[g.id] ?? ''}
-                                      onChange={e => onVariantSearch(g.id, e.target.value)}
-                                      className="w-full px-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400"
-                                    />
-                                    {(groupVariantResults[g.id] ?? []).length > 0 && (
-                                      <div className="mt-1 border border-gray-200 rounded-lg overflow-hidden text-xs">
-                                        {(groupVariantResults[g.id] ?? []).map(r => (
-                                          <button
-                                            key={r.id}
-                                            onClick={() => {
-                                              setGroupVariantParent(m => ({ ...m, [g.id]: r }))
-                                              setGroupVariantSearch(m => ({ ...m, [g.id]: '' }))
-                                              setGroupVariantResults(m => ({ ...m, [g.id]: [] }))
-                                            }}
-                                            className="w-full text-left px-3 py-1.5 hover:bg-purple-50 border-b border-gray-100 last:border-0"
-                                          >
-                                            <span className="font-medium text-gray-800">{r.name}</span>
-                                            <span className="font-mono text-gray-400 ml-2">{r.internal_sku}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Variant attributes */}
-                              <div>
-                                <label className="block text-xs text-gray-500 mb-1">Variantattributter (f.eks. farve = rød)</label>
-                                <div className="space-y-1">
-                                  {(groupVariantAttrs[g.id] ?? [{ key: '', val: '' }]).map((a, i) => (
-                                    <div key={i} className="flex gap-1 items-center">
-                                      <input
-                                        placeholder="farve"
-                                        value={a.key}
-                                        onChange={e => setGroupVariantAttrs(m => ({ ...m, [g.id]: (m[g.id] ?? [{ key: '', val: '' }]).map((x, j) => j === i ? { ...x, key: e.target.value } : x) }))}
-                                        className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-300"
-                                      />
-                                      <span className="text-gray-300">=</span>
-                                      <input
-                                        placeholder="rød"
-                                        value={a.val}
-                                        onChange={e => setGroupVariantAttrs(m => ({ ...m, [g.id]: (m[g.id] ?? [{ key: '', val: '' }]).map((x, j) => j === i ? { ...x, val: e.target.value } : x) }))}
-                                        className="flex-1 px-2 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-purple-300"
-                                      />
-                                      <button onClick={() => setGroupVariantAttrs(m => ({ ...m, [g.id]: (m[g.id] ?? []).filter((_, j) => j !== i) }))} className="text-gray-300 hover:text-red-400">×</button>
-                                    </div>
-                                  ))}
-                                  <button
-                                    onClick={() => setGroupVariantAttrs(m => ({ ...m, [g.id]: [...(m[g.id] ?? [{ key: '', val: '' }]), { key: '', val: '' }] }))}
-                                    className="text-xs text-purple-500 hover:underline"
-                                  >+ Tilføj attribut</button>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {actionMsg && (
-                          <div className={`mb-2 text-xs px-2 py-1 rounded ${actionMsg.startsWith('✗') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'}`}>
-                            {actionMsg}
-                          </div>
-                        )}
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => createProductFromGroup(g.id)}
-                            className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                          >
-                            Opret produkt
-                          </button>
-                          <button
-                            onClick={() => rejectGroup(g.id)}
-                            className="px-4 py-1.5 text-xs border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50"
-                          >
-                            Afvis gruppe
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Tabel */}
-        {!groupsTab && <div className="flex-1 overflow-auto">
-          {loading ? (
-            <div className="p-12 text-center text-gray-400">Henter...</div>
-          ) : rows.length === 0 ? (
-            <div className="p-12 text-center text-gray-400">
-              {statusFilter === 'pending_review'
-                ? 'Ingen produkter afventer gennemgang'
-                : 'Ingen rækker'}
-            </div>
-          ) : (
-            <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
-                <tr>
-                  <th className="w-10 px-3 py-3">
-                    <input
-                      type="checkbox"
-                      checked={rows.length > 0 && checkedIds.size === rows.length}
-                      onChange={toggleAll}
-                      className="w-3.5 h-3.5 accent-gray-700 cursor-pointer"
-                    />
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Produktnavn</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Leverandør</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">SKU / EAN</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Lager</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Status</th>
-                  <th className="w-8 px-4 py-3" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {rows.map(row => {
-                  const qty = Number(row.raw_data?.supplier_stock_quantity ?? 0)
-                  const brand = row.raw_data?.brand ? String(row.raw_data.brand) : null
-                  const isSelected = selected?.id === row.id
-
-                  return (
-                    <tr
-                      key={row.id}
-                      onClick={() => openPanel(row)}
-                      className={`cursor-pointer transition-colors ${
-                        checkedIds.has(row.id) ? 'bg-purple-50' : isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
-                      }`}
-                    >
-                      <td className="w-10 px-3 py-3" onClick={e => toggleCheck(row.id, e)}>
-                        <input
-                          type="checkbox"
-                          checked={checkedIds.has(row.id)}
-                          onChange={() => {}}
-                          className="w-3.5 h-3.5 accent-purple-600 cursor-pointer"
-                        />
-                      </td>
-                      <td className="px-4 py-3 max-w-xs">
-                        <div className="font-medium text-gray-900 line-clamp-1">{row.normalized_name}</div>
-                        {brand && (
-                          <div className="text-xs text-gray-400">{brand}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-gray-500">
-                        {row.suppliers?.name ?? '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-mono text-xs text-gray-600">{row.normalized_sku}</div>
-                        {row.normalized_ean && (
-                          <div className="font-mono text-xs text-gray-400">{row.normalized_ean}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-sm font-medium tabular-nums ${
-                          qty > 0 ? 'text-green-700' : 'text-gray-400'
-                        }`}>{qty}</span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_LABELS[row.status]?.color}`}>
-                          {STATUS_LABELS[row.status]?.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-400 text-base">›</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>}
-
-        {/* Flydende multiselect-bar */}
-        {!groupsTab && checkedIds.size >= 2 && (
-          <div className="border-t border-purple-200 bg-purple-50 px-6 py-3 flex items-center gap-3 shrink-0">
-            <span className="text-sm font-medium text-purple-800">{checkedIds.size} valgt</span>
-            <button
-              onClick={() => setLinkPanel(true)}
-              className="px-4 py-1.5 text-sm bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium"
-            >
-              🔀 Sammenkæd som varianter
-            </button>
-            <button
-              onClick={() => setCheckedIds(new Set())}
-              className="px-3 py-1.5 text-sm text-purple-600 hover:text-purple-800"
-            >
-              Fravælg alle
-            </button>
-          </div>
-        )}
-
-        {/* Pagination */}
-        {!groupsTab && totalPages > 1 && (
-          <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-between shrink-0">
-            <p className="text-sm text-gray-500">
-              Side {page} / {totalPages} — {total.toLocaleString('da-DK')} rækker
-            </p>
-            <div className="flex gap-1">
-              <button onClick={() => setPage(p => p - 1)} disabled={page === 1}
-                className="px-3 py-1 text-sm rounded hover:bg-gray-100 disabled:opacity-30">Forrige</button>
-              <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages}
-                className="px-3 py-1 text-sm rounded hover:bg-gray-100 disabled:opacity-30">Næste</button>
-            </div>
+        {searching && <p className="text-xs text-gray-400 mt-1">Søger…</p>}
+        {results.length > 0 && !selected && (
+          <div className="mt-1 border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-48 overflow-y-auto bg-white shadow-sm">
+            {results.map(r => (
+              <button
+                key={r.id}
+                onClick={() => { setSelected(r); setQuery(r.name); setResults([]) }}
+                className="w-full text-left px-3 py-2 hover:bg-blue-50 text-sm"
+              >
+                <span className="font-medium text-gray-800">{r.name}</span>
+                <span className="text-xs text-gray-400 ml-2">{r.internal_sku}</span>
+              </button>
+            ))}
           </div>
         )}
       </div>
 
-      {/* ── Højre: detalje-panel ── */}
-      {selected && (
-        <div className="w-1/2 flex flex-col bg-white overflow-auto">
-          {/* Panel header */}
-          <div className="border-b border-gray-200 px-6 py-4 flex items-start justify-between shrink-0">
-            <div className="flex-1 min-w-0 pr-4">
-              <h3 className="font-semibold text-gray-900 text-base leading-snug">{selected.normalized_name}</h3>
-              <p className="text-xs text-gray-400 mt-0.5">
-                {selected.suppliers?.name} · SKU: {selected.normalized_sku}
-                {selected.normalized_ean && ` · EAN: ${selected.normalized_ean}`}
-              </p>
+      {/* Action buttons */}
+      {msg ? (
+        <div className={`text-xs px-3 py-2 rounded-lg ${msg.ok ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+          {msg.text}
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2 items-center">
+          {selected ? (
+            <>
+              <div className="w-full text-xs bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-blue-800">
+                Valgt: <strong>{selected.name}</strong>
+                <button onClick={() => { setSelected(null); setQuery('') }} className="ml-2 text-blue-400 hover:text-blue-600">× Fjern</button>
+              </div>
+              <button
+                onClick={() => doAction('match')}
+                disabled={saving}
+                className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+              >
+                Tilknyt som ekstra leverandør
+              </button>
+              <button
+                onClick={() => doAction('variant')}
+                disabled={saving}
+                className="px-4 py-1.5 text-xs bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-40"
+              >
+                Tilknyt som variant
+              </button>
+              <VariantGuide />
+            </>
+          ) : (
+            <button
+              onClick={() => doAction('new_product')}
+              disabled={saving}
+              className="px-4 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40"
+            >
+              {saving ? 'Opretter…' : 'Opret som nyt produkt'}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Row card ─────────────────────────────────────────────────────────────────
+
+function StagingCard({
+  row,
+  selected,
+  onSelect,
+  onDone,
+}: {
+  row:      StagingRow
+  selected: boolean
+  onSelect: (id: string, checked: boolean) => void
+  onDone:   () => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const rd  = row.raw_data
+  const qty = Number(rd.supplier_stock_quantity ?? 0)
+
+  return (
+    <div className={`border rounded-xl bg-white transition-colors ${selected ? 'border-blue-300 ring-1 ring-blue-200' : 'border-gray-200'}`}>
+      <div className="px-4 py-3 flex items-start gap-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={e => onSelect(row.id, e.target.checked)}
+          className="mt-1 rounded border-gray-300 cursor-pointer shrink-0"
+        />
+        <div className="flex-1 min-w-0">
+          {/* Name + supplier */}
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <div>
+              <span className="text-xs font-medium text-blue-700 uppercase tracking-wide">{row.suppliers?.name ?? '—'}</span>
+              <h3 className="text-sm font-semibold text-gray-900 leading-snug mt-0.5">{row.normalized_name}</h3>
             </div>
-            <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0">×</button>
+            <button
+              onClick={() => setExpanded(v => !v)}
+              className="text-xs text-gray-400 hover:text-gray-600 shrink-0"
+            >
+              {expanded ? '▲ Mindre' : '▼ Detaljer'}
+            </button>
           </div>
 
-          <div className="flex-1 overflow-auto px-6 py-5 space-y-6">
+          {/* Key facts */}
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+            {row.normalized_ean && <span>EAN: <span className="font-mono text-gray-700">{row.normalized_ean}</span></span>}
+            <span>Varenr: <span className="font-mono text-gray-700">{row.normalized_sku}</span></span>
+            {rd.purchase_price != null && <span>Indkøb: <span className="text-gray-700">{fmtPrice(rd.purchase_price)}</span></span>}
+            {rd.recommended_sales_price != null && <span>Vejl: <span className="text-gray-700">{fmtPrice(rd.recommended_sales_price)}</span></span>}
+            <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>Lager: {qty}</span>
+            {rd.brand && <span>Brand: <span className="text-gray-700">{String(rd.brand)}</span></span>}
+          </div>
 
-            {/* Rådata fra leverandør */}
-            <section>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Leverandørdata</h4>
-              {(() => {
-                const rd = selected.raw_data
-                const purchasePrice = rd?.purchase_price != null
-                  ? `${Number(rd.purchase_price).toLocaleString('da-DK')} kr` : '—'
-                const salesPrice = rd?.recommended_sales_price != null
-                  ? `${Number(rd.recommended_sales_price).toLocaleString('da-DK')} kr` : '—'
-                const fields: [string, string][] = [
-                  ['Produktnavn',     str(rd?.supplier_product_name)],
-                  ['SKU',             selected.normalized_sku],
-                  ['EAN',             selected.normalized_ean ?? '—'],
-                  ['Indkøbspris',     purchasePrice],
-                  ['Vejl. pris',      salesPrice],
-                  ['Lager',           String(Number(rd?.supplier_stock_quantity ?? 0))],
-                  ['Enhed',           selected.normalized_unit ?? '—'],
-                  ['Enhedsstørrelse', selected.normalized_unit_size != null ? String(selected.normalized_unit_size) : '—'],
-                  ['Brand',           str(rd?.brand)],
-                  ['Opdateret',       new Date(selected.updated_at).toLocaleDateString('da-DK')],
-                ]
-                return (
-                  <div className="bg-gray-50 rounded-lg p-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                    {fields.map(([label, value]) => (
-                      <div key={label}>
-                        <span className="text-gray-400 block text-xs">{label}</span>
-                        <span className="text-gray-900 font-medium">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                )
-              })()}
-
-              {/* Beskrivelse */}
-              {(() => {
-                const short = str(selected.raw_data?.short_description, '')
-                const long  = str(selected.raw_data?.description, '')
-                if (!short && !long) return null
-                return (
-                  <div className="mt-3 text-sm text-gray-600 bg-gray-50 rounded-lg p-4 space-y-1">
-                    {short && <p className="font-medium text-gray-700">{short}</p>}
-                    {long  && <p className="text-gray-500 line-clamp-4">{long}</p>}
-                  </div>
-                )
-              })()}
-
-              {/* Billede */}
-              {Array.isArray(selected.raw_data?.supplier_images) && (selected.raw_data.supplier_images as Array<{url:string}>).length > 0 && (
-                <div className="mt-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={(selected.raw_data.supplier_images as Array<{url:string}>)[0].url}
-                    alt={selected.normalized_name}
-                    className="h-32 w-auto object-contain rounded border border-gray-200 bg-gray-50"
-                  />
-                </div>
+          {/* Expanded details */}
+          {expanded && (
+            <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-600 space-y-1">
+              {rd.description && (
+                <p className="text-gray-500 leading-relaxed line-clamp-4">{String(rd.description).replace(/\\n/g, ' ').replace(/\*\*/g, '')}</p>
               )}
-            </section>
-
-            {/* Needs-review sektion — vis årsager og link til produkt */}
-            {selected.status === 'needs_review' && (
-              <section>
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                  Hvorfor skal dette gennemgås?
-                </h4>
-                <div className="space-y-2 mb-4">
-                  {((selected.raw_data?.review_reasons ?? []) as string[]).map(reason => (
-                    <div key={reason} className="flex items-center gap-2 text-sm text-orange-700 bg-orange-50 rounded-lg px-3 py-2">
-                      <span className="text-orange-400">⚠</span>
-                      {REVIEW_REASON_LABELS[reason] ?? reason}
-                    </div>
-                  ))}
-                  {((selected.raw_data?.review_reasons ?? []) as string[]).length === 0 && (
-                    <p className="text-sm text-gray-400">Ingen årsager registreret</p>
-                  )}
-                </div>
-                {selected.matched_product_id && (
-                  <a
-                    href={`/products?id=${selected.matched_product_id}`}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                  >
-                    Åbn produkt →
-                  </a>
-                )}
-              </section>
-            )}
-
-            {/* Match-sektion */}
-            {(selected.status === 'pending_review' || selected.status === 'matched') && (
-              <section>
-                {/* Tydelig label: hvad er vi igang med */}
-                <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-lg px-3 py-2.5 flex items-start gap-2.5">
-                  <span className="text-yellow-500 text-base shrink-0 mt-0.5">↑</span>
-                  <div className="text-xs text-yellow-800">
-                    <span className="font-semibold">Leverandørprodukt der gennemgås:</span>{' '}
-                    <span className="font-mono">{selected.normalized_sku}</span> fra {selected.suppliers?.name} —{' '}
-                    findes dette allerede i vores katalog?
-                  </div>
-                </div>
-
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
-                  Match til eksisterende produkt i kataloget
-                </h4>
-                <div className="mb-3 text-xs text-gray-500 space-y-0.5">
-                  <p><span className="font-medium text-blue-700">Match</span> — brug kun hvis det er <span className="font-medium">præcis samme produkt</span> (samme størrelse, type, model). Leverandørlinket tilføjes til det eksisterende produkt.</p>
-                  <p><span className="font-medium text-purple-700">🔀 Variantfamilie</span> — brug hvis de er varianter af hinanden (f.eks. forskellig størrelse). Opretter et nyt overprodukt og sætter begge som varianter.</p>
-                </div>
-
-                {sugLoading && <div className="text-sm text-gray-400 mb-3">Søger efter match-forslag...</div>}
-
-                {/* Manuel søgning */}
-                <input
-                  type="search"
-                  placeholder="Søg i vores produkter..."
-                  value={matchSearch}
-                  onChange={e => onMatchSearchChange(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {matchSearchLoading && <div className="text-xs text-gray-400 mb-2">Søger...</div>}
-
-                {displaySuggestions.length > 0 ? (
-                  <div className="space-y-2">
-                    {displaySuggestions.map(s => {
-                      const isOpen = peekId === s.id
-                      const peek   = peekData[s.id]
-                      const loading = peekLoading === s.id
-                      const img = peek?.product_images?.find(i => i.is_primary)?.url
-                             ?? peek?.product_images?.[0]?.url
-                             ?? peek?.primary_image_url
-                             ?? null
-                      return (
-                        <div
-                          key={s.id}
-                          className={`border rounded-lg overflow-hidden transition-colors ${isOpen ? 'border-blue-300 bg-blue-50/30' : 'border-gray-200 bg-white hover:border-blue-200'}`}
-                        >
-                          {/* Kort-header */}
-                          <div className="flex items-center gap-3 px-3 py-2.5">
-                            {/* Miniature hvis loaded */}
-                            {img ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={img} alt="" className="w-9 h-9 object-contain rounded border border-gray-200 bg-white shrink-0" />
-                            ) : (
-                              <div className="w-9 h-9 rounded border border-gray-100 bg-gray-50 shrink-0" />
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-gray-900 text-sm leading-tight">{s.name}</div>
-                              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                <span className="font-mono text-xs text-gray-400">{s.internal_sku}</span>
-                                {s.score > 0 && (
-                                  <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                                    s.score >= 0.9 ? 'bg-green-100 text-green-700' :
-                                    s.score >= 0.6 ? 'bg-yellow-100 text-yellow-700' :
-                                                     'bg-gray-100 text-gray-500'
-                                  }`}>
-                                    {s.match_field === 'ean' ? 'EAN match' : `${Math.round(s.score * 100)}% lighed`}
-                                  </span>
-                                )}
-                                {peek?.categories?.[0] && (
-                                  <span className="text-xs text-gray-400">{peek.categories[0]}</span>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={() => togglePeek(s.id)}
-                                className={`px-2 py-1 text-xs rounded border transition-colors ${isOpen ? 'border-blue-300 text-blue-600 bg-blue-50' : 'border-gray-200 text-gray-400 hover:text-gray-600'}`}
-                                title="Vis/skjul produktdetaljer"
-                              >
-                                {loading ? '…' : isOpen ? '▲' : '▼'}
-                              </button>
-                              <button
-                                onClick={() => {
-                                  const sugName = s.name.replace(/\s+\d+\s*(kg|l|ml|mm|cm|m|stk\.?)\s*$/i, '').trim()
-                                  setFamilyForId(familyForId === s.id ? null : s.id)
-                                  setFamilyName(sugName)
-                                  setFamilyMsg(null)
-                                }}
-                                title="Disse er begge varianter — opret nyt overprodukt og sæt dem begge under det"
-                                className={`px-2 py-1.5 text-xs rounded border transition-colors ${familyForId === s.id ? 'border-purple-400 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-400 hover:border-purple-300 hover:text-purple-600'}`}
-                              >
-                                🔀
-                              </button>
-                              <button
-                                onClick={() => doAction('match', s.id)}
-                                disabled={actionLoading}
-                                title="Samme produkt, samme størrelse/type — tilføj dette leverandørlink til det eksisterende produkt"
-                                className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
-                              >
-                                Match
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Fold-ud: produktdetaljer */}
-                          {isOpen && (
-                            <div className="border-t border-blue-100 px-3 py-3 bg-white space-y-2">
-                              {loading && <p className="text-xs text-gray-400">Henter produktdata...</p>}
-                              {peek && (
-                                <>
-                                  {/* Billede + nøgledata side om side */}
-                                  <div className="flex gap-3">
-                                    {img && (
-                                      // eslint-disable-next-line @next/next/no-img-element
-                                      <img src={img} alt="" className="w-20 h-20 object-contain rounded border border-gray-200 bg-gray-50 shrink-0" />
-                                    )}
-                                    <div className="text-xs space-y-1 text-gray-600">
-                                      {peek.sales_price != null && (
-                                        <div><span className="text-gray-400">Salgspris: </span><span className="font-medium">{Number(peek.sales_price).toLocaleString('da-DK')} kr</span></div>
-                                      )}
-                                      {peek.product_suppliers?.length > 0 && (
-                                        <div><span className="text-gray-400">Leverandører: </span>
-                                          {peek.product_suppliers.map(ps => ps.suppliers?.name ?? '—').join(', ')}
-                                        </div>
-                                      )}
-                                      {peek.categories?.length > 0 && (
-                                        <div><span className="text-gray-400">Kategori: </span>{peek.categories.join(' › ')}</div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  {/* Beskrivelse */}
-                                  {(peek.short_description || peek.description) && (
-                                    <p className="text-xs text-gray-500 leading-relaxed line-clamp-3 border-t border-gray-100 pt-2">
-                                      {peek.short_description || peek.description}
-                                    </p>
-                                  )}
-                                </>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Variantfamilie-panel */}
-                          {familyForId === s.id && (
-                            <div className="border-t border-purple-100 px-3 py-3 bg-purple-50 space-y-2">
-                              <p className="text-xs text-purple-700 font-medium">
-                                Opret nyt overprodukt — sæt både <span className="font-semibold">{s.name}</span> og dette leverandørprodukt som varianter under det.
-                              </p>
-                              <input
-                                value={familyName}
-                                onChange={e => setFamilyName(e.target.value)}
-                                placeholder="Overprodukt-navn"
-                                className="w-full px-2 py-1.5 text-xs border border-purple-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-purple-400 bg-white"
-                              />
-                              {familyMsg && (
-                                <p className={`text-xs ${familyMsg.startsWith('Fejl') ? 'text-red-600' : 'text-green-700'}`}>{familyMsg}</p>
-                              )}
-                              <div className="flex gap-2">
-                                <button
-                                  onClick={() => createVariantFamily(s.id)}
-                                  disabled={familySaving || !familyName.trim()}
-                                  className="px-3 py-1.5 text-xs bg-purple-700 text-white rounded-lg hover:bg-purple-800 disabled:opacity-40"
-                                >
-                                  {familySaving ? 'Opretter...' : 'Opret variantfamilie'}
-                                </button>
-                                <button onClick={() => setFamilyForId(null)} className="px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700">
-                                  Annuller
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : !sugLoading && !matchSearchLoading && (
-                  <p className="text-sm text-gray-400">
-                    {matchSearch ? 'Ingen produkter fundet' : 'Ingen automatiske forslag — søg manuelt ovenfor'}
-                  </p>
-                )}
-              </section>
-            )}
-
-            {/* Handlinger */}
-            <section>
-              <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Handling</h4>
-
-              {actionMsg && (
-                <div className={`mb-3 text-sm px-3 py-2 rounded-lg ${
-                  actionMsg.startsWith('Fejl') ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700'
-                }`}>
-                  {actionMsg}
-                </div>
+              {(rd.weight || rd.length || rd.width || rd.height) && (
+                <p>Mål: {[rd.weight && `${rd.weight} kg`, rd.length && `${rd.length}×${rd.width}×${rd.height} cm`].filter(Boolean).join(' · ')}</p>
               )}
+            </div>
+          )}
 
-              <div className="flex flex-wrap gap-2">
-                {selected.status === 'pending_review' && (
-                  <>
-                    <button
-                      onClick={() => doAction('new_product')}
-                      disabled={actionLoading}
-                      className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40"
-                    >
-                      Opret som nyt produkt
-                    </button>
-                    <button
-                      onClick={() => doAction('reject')}
-                      disabled={actionLoading}
-                      title="Afvis dette produkt — duplikat, udgået vare eller ikke relevant. Fjernes fra listen og importeres ikke igen."
-                      className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
-                    >
-                      Afvis
-                    </button>
-                  </>
-                )}
-                {selected.status === 'needs_review' && (
-                  <button
-                    onClick={() => doAction('reject')}
-                    disabled={actionLoading}
-                    title="Markerer at du har set og håndteret dette — produktet fjernes fra 'Mangler data' listen. Næste import vil flage det igen hvis data stadig mangler."
-                    className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
-                  >
-                    Marker som set
-                  </button>
-                )}
-                {(selected.status === 'matched' || selected.status === 'new_product' || selected.status === 'rejected') && (
-                  <button
-                    onClick={() => doAction('reopen')}
-                    disabled={actionLoading}
-                    title="Genåbn til manuel gennemgang — sætter status tilbage til 'Afventer' så produktet kan matches eller behandles på ny."
-                    className="px-4 py-2 text-sm border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 disabled:opacity-40"
-                  >
-                    Genåbn til gennemgang
-                  </button>
-                )}
-              </div>
-            </section>
+          <ActionPanel row={row} onDone={onDone} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+type FilterType = 'all' | 'single' | 'multi'
+
+export default function OpretProdukterPage() {
+  const [rows,        setRows]        = useState<StagingRow[]>([])
+  const [total,       setTotal]       = useState(0)
+  const [totalPages,  setTotalPages]  = useState(1)
+  const [page,        setPage]        = useState(1)
+  const [loading,     setLoading]     = useState(false)
+  const [filter,      setFilter]      = useState<FilterType>('all')
+  const [search,      setSearch]      = useState('')
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkSaving,  setBulkSaving]  = useState(false)
+  const [bulkMsg,     setBulkMsg]     = useState<string | null>(null)
+  const [counts,      setCounts]      = useState({ all: 0, single: 0, multi: 0 })
+
+  const fetchRows = useCallback(async () => {
+    setLoading(true)
+    setSelectedIds(new Set())
+    const params = new URLSearchParams({
+      status:   'pending_review',
+      page:     String(page),
+      per_page: '30',
+      ...(search ? { search } : {}),
+    })
+    const res  = await fetch(`/api/staging?${params}`)
+    const json = await res.json()
+
+    let data: StagingRow[] = json.data ?? []
+
+    // Client-side filter for single/multi (supplier_count not in staging API, use raw heuristic)
+    // Single = only one staging row with this EAN or name in the set — approximate via no match_group
+    // For now, filter is informational: single = no normalized_ean duplicate in this batch
+    if (filter === 'single') {
+      const eanCount = new Map<string, number>()
+      data.forEach(r => { if (r.normalized_ean) eanCount.set(r.normalized_ean, (eanCount.get(r.normalized_ean) ?? 0) + 1) })
+      data = data.filter(r => !r.normalized_ean || (eanCount.get(r.normalized_ean) ?? 1) === 1)
+    }
+
+    setRows(data)
+    setTotal(json.total ?? 0)
+    setTotalPages(json.total_pages ?? 1)
+    setCounts({ all: json.total ?? 0, single: json.single_count ?? 0, multi: json.multi_count ?? 0 })
+    setLoading(false)
+  }, [page, search, filter])
+
+  useEffect(() => { fetchRows() }, [fetchRows])
+
+  async function handleBulkCreate() {
+    const ids = [...selectedIds]
+    if (ids.length === 0) return
+    if (!confirm(`Opret ${ids.length} produkter som nye selvstændige produkter?`)) return
+    setBulkSaving(true)
+    setBulkMsg(null)
+
+    let created = 0
+    for (let i = 0; i < ids.length; i += 20) {
+      const batch = ids.slice(i, i + 20)
+      await Promise.allSettled(batch.map(id =>
+        fetch(`/api/staging/${id}/action`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ action: 'new_product' }),
+        }).then(r => r.ok && created++)
+      ))
+    }
+
+    setBulkMsg(`${created} produkter oprettet`)
+    setBulkSaving(false)
+    fetchRows()
+  }
+
+  const FILTER_TABS: { key: FilterType; label: string }[] = [
+    { key: 'all',    label: `Alle (${total.toLocaleString('da-DK')})` },
+    { key: 'single', label: 'Enkelt-leverandør' },
+    { key: 'multi',  label: 'Flere leverandører' },
+  ]
+
+  return (
+    <div className="flex flex-col h-full">
+
+      {/* Header */}
+      <div className="px-6 pt-6 pb-4 border-b border-gray-200 shrink-0">
+        <h1 className="text-xl font-semibold text-gray-900">Opret produkter</h1>
+        <p className="text-sm text-gray-500 mt-0.5 mb-3">
+          Produkter fra leverandørerne der endnu ikke er oprettet i kataloget
+        </p>
+
+        {/* Workflow explanation */}
+        <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800 leading-relaxed">
+          <p className="font-medium mb-1">Hvad gør du her?</p>
+          <p className="text-blue-700 text-xs">
+            Disse produkter matchede hverken på EAN eller fuzzy navn mod eksisterende produkter. For hvert produkt kan du:
+          </p>
+          <ul className="text-xs text-blue-700 mt-2 space-y-1 list-none">
+            <li>✚ <strong>Opret som nyt produkt</strong> — produktet er unikt og skal have sin egen side i kataloget</li>
+            <li>🔗 <strong>Tilknyt som ekstra leverandør</strong> — præcis samme vare findes allerede, søg og link til det eksisterende produkt</li>
+            <li>🔀 <strong>Tilknyt som variant</strong> — produktet er en variant (anden størrelse, farve eller materiale) af et eksisterende produkt</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* Filters + bulk */}
+      <div className="px-6 py-3 border-b border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3 shrink-0">
+        {/* Filter tabs */}
+        <div className="flex gap-1 bg-white border border-gray-200 rounded-lg p-0.5">
+          {FILTER_TABS.map(t => (
+            <button
+              key={t.key}
+              onClick={() => { setFilter(t.key); setPage(1) }}
+              className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                filter === t.key ? 'bg-gray-900 text-white' : 'text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <input
+          type="search"
+          placeholder="Søg navn, EAN, varenr…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg w-60 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+
+        {/* Bulk */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-2 ml-auto">
+            {bulkMsg ? (
+              <span className="text-xs text-green-600">{bulkMsg}</span>
+            ) : (
+              <>
+                <span className="text-xs text-gray-500">{selectedIds.size} valgt</span>
+                <button
+                  onClick={handleBulkCreate}
+                  disabled={bulkSaving}
+                  className="px-4 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40"
+                >
+                  {bulkSaving ? 'Opretter…' : `Opret ${selectedIds.size} som nye produkter`}
+                </button>
+                <button
+                  onClick={() => setSelectedIds(new Set())}
+                  className="text-xs text-gray-400 hover:text-gray-600"
+                >
+                  Ryd valg
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {selectedIds.size === 0 && rows.length > 0 && (
+          <button
+            onClick={() => setSelectedIds(new Set(rows.map(r => r.id)))}
+            className="ml-auto text-xs text-blue-600 hover:underline"
+          >
+            Vælg alle på siden
+          </button>
+        )}
+      </div>
+
+      {/* List */}
+      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+        {loading ? (
+          <div className="flex items-center justify-center h-40 text-gray-400 text-sm">Indlæser…</div>
+        ) : rows.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-60 gap-3 text-gray-400">
+            <span className="text-5xl">✅</span>
+            <p className="text-base font-medium text-gray-600">Ingen produkter afventer</p>
+            <p className="text-sm">Alle staging-produkter er behandlet</p>
+          </div>
+        ) : (
+          rows.map(row => (
+            <StagingCard
+              key={row.id}
+              row={row}
+              selected={selectedIds.has(row.id)}
+              onSelect={(id, checked) => setSelectedIds(prev => {
+                const next = new Set(prev)
+                checked ? next.add(id) : next.delete(id)
+                return next
+              })}
+              onDone={fetchRows}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="px-6 py-3 border-t border-gray-100 flex items-center justify-between shrink-0 bg-white">
+          <span className="text-xs text-gray-400">Side {page} af {totalPages} — {total.toLocaleString('da-DK')} produkter i alt</span>
+          <div className="flex gap-2">
+            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}
+              className="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40">← Forrige</button>
+            <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}
+              className="px-3 py-1 text-xs border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-40">Næste →</button>
           </div>
         </div>
       )}

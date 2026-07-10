@@ -792,11 +792,11 @@ export default function MatchingPage() {
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
       <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
-        <h2 className="text-xl font-bold text-gray-900 mb-0.5">Leverandør-match</h2>
-        <p className="text-sm text-gray-500 mb-1">Identificér hvilke leverandører der sælger samme produkt — bekræft eller afvis leverandørgrupperinger</p>
+        <h2 className="text-xl font-bold text-gray-900 mb-0.5">Produkt match mellem leverandører</h2>
+        <p className="text-sm text-gray-500 mb-1">Find produkter der sælges af flere leverandører — bekræft at de hører sammen, så de samles under ét produkt i kataloget</p>
         <div className="text-sm text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4 leading-relaxed">
           <span className="font-medium text-blue-800">Hvad gør du her?</span>
-          <span className="text-blue-700"> Her bekræfter du at de viste leverandørprodukter er <em>det samme produkt</em> — eventuelt solgt af flere leverandører. Det kan også være varianter af samme produkt (f.eks. samme fender i forskellig størrelse eller farve fra samme eller flere leverandører). Bekræftede grupperinger går videre til <a href="/admin/staging" className="underline font-medium">Til gennemgang</a>, hvor produktet oprettes i kataloget.</span>
+          <span className="text-blue-700"> Pipelinen har fundet leverandørprodukter der sandsynligvis er <em>det samme produkt</em> solgt af flere leverandører — eller varianter af samme produkt (f.eks. samme fender i forskellig størrelse eller farve). Bekræft grupperne der er korrekte, og afvis dem der ikke hører sammen. Bekræftede grupper oprettes automatisk som produkter. Resten kan oprettes enkeltvis under <a href="/admin/staging" className="underline font-medium">Opret produkter</a>.</span>
         </div>
 
         {/* Pipeline panel */}

@@ -4,8 +4,10 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 type ActionBody = {
-  action:     'match' | 'new_product' | 'reject' | 'reopen'
-  product_id?: string
+  action:       'match' | 'variant' | 'new_product' | 'reject' | 'reopen'
+  product_id?:  string
+  product_name?: string
+  as_variant?:  boolean
 }
 
 // POST /api/staging/[id]/action
@@ -15,7 +17,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const { action, product_id }: ActionBody = await request.json()
+  const { action, product_id, as_variant }: ActionBody = await request.json()
 
   const supabase = createServiceClient()
 
@@ -48,6 +50,57 @@ export async function POST(
       .from('supplier_product_staging')
       .update({ status: 'pending_review', reviewed_at: null, matched_product_id: null })
       .eq('id', id)
+    return NextResponse.json({ ok: true })
+  }
+
+  // ── Tilknyt som variant af eksisterende produkt ──
+  if (action === 'variant') {
+    if (!product_id) return NextResponse.json({ error: 'product_id kræves' }, { status: 400 })
+
+    // Opret product_variant række
+    const variantSku = `${id.slice(0, 8).toUpperCase()}-V`
+    const { data: variant, error: vErr } = await supabase
+      .from('product_variants')
+      .insert({
+        product_id,
+        internal_variant_sku: variantSku,
+        ean:    row.normalized_ean ?? null,
+        status: 'active',
+        attributes: [],
+        own_stock_quantity: 0,
+        own_stock_reserved: 0,
+      })
+      .select('id')
+      .single()
+
+    if (vErr || !variant) return NextResponse.json({ error: vErr?.message ?? 'Variant-oprettelse fejlede' }, { status: 500 })
+
+    // Link leverandør til varianten
+    const { error: spErr } = await supabase
+      .from('product_suppliers')
+      .insert({
+        product_id,
+        variant_id:              variant.id,
+        supplier_id:             supplierId,
+        supplier_sku:            raw.supplier_sku as string ?? row.normalized_sku,
+        supplier_product_name:   (raw.supplier_product_name as string) ?? row.normalized_name,
+        purchase_price:          (raw.purchase_price as number) ?? null,
+        recommended_sales_price: (raw.recommended_sales_price as number) ?? null,
+        supplier_stock_quantity: (raw.supplier_stock_quantity as number) ?? 0,
+        supplier_stock_reserved: 0,
+        supplier_images:         raw.supplier_images ?? [],
+        item_status:             ((raw.supplier_stock_quantity as number) ?? 0) > 0 ? 'active' : 'out_of_stock',
+        priority:   1,
+        is_active:  true,
+      })
+
+    if (spErr) return NextResponse.json({ error: spErr.message }, { status: 500 })
+
+    await supabase
+      .from('supplier_product_staging')
+      .update({ status: 'matched', matched_product_id: product_id, reviewed_at: now })
+      .eq('id', id)
+
     return NextResponse.json({ ok: true })
   }
 
