@@ -1,7 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { assignProductCategory } from '@/lib/standard-categories'
-import { enrichMatchedProduct } from '@/lib/importers/product-enrichment'
-import { syncImagesToProduct, type SupplierImage } from '@/lib/importers/image-sync'
 
 type RawData = Record<string, unknown>
 
@@ -86,61 +84,6 @@ function completenessScore(raw: RawData): number {
     else if (v && typeof v === 'object') score++
   }
   return score
-}
-
-// ── Post-creation enrichment ─────────────────────────────────────────────────
-// Kør billede-sync + product-enrichment på et nyoprettet produkt.
-// Bruger den member med højest completeness-score som primær datakilde,
-// men samler billeder fra ALLE members.
-// Fejl logges, kastes ikke — enrichment er best-effort.
-async function enrichNewProduct(
-  productId: string,
-  members:   StagingRow[],
-  supabase:  SupabaseClient,
-): Promise<void> {
-  try {
-    // Find best member (højest completeness) som primær datakilde
-    const best = members.reduce((a, b) =>
-      completenessScore(b.raw_data) > completenessScore(a.raw_data) ? b : a
-    )
-    const raw = best.raw_data
-
-    // Kør enrichment fra bedste member
-    await enrichMatchedProduct(productId, {
-      dimensions: {
-        weight: typeof raw.weight === 'number' ? raw.weight : null,
-        length: typeof raw.length === 'number' ? raw.length : null,
-        width:  typeof raw.width  === 'number' ? raw.width  : null,
-        height: typeof raw.height === 'number' ? raw.height : null,
-      },
-      descriptions: {
-        description:       typeof raw.description       === 'string' ? raw.description       : null,
-        short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
-      },
-      specifications:  (raw.supplier_specifications && typeof raw.supplier_specifications === 'object' && !Array.isArray(raw.supplier_specifications))
-        ? raw.supplier_specifications as Record<string, string>
-        : {},
-      manufacturerSku: typeof raw.manufacturer_sku === 'string' ? raw.manufacturer_sku : null,
-    }, supabase)
-
-    // Saml billeder fra ALLE members (bedste kilde til primærbillede, resten efterfølgende)
-    const allImages: SupplierImage[] = []
-    for (const m of members) {
-      const imgs = m.raw_data.supplier_images
-      if (Array.isArray(imgs)) {
-        for (const img of imgs as SupplierImage[]) {
-          if (img?.url && !allImages.some(i => i.url === img.url)) {
-            allImages.push(img)
-          }
-        }
-      }
-    }
-    if (allImages.length > 0) {
-      await syncImagesToProduct(productId, allImages, 'pipeline', supabase)
-    }
-  } catch (err) {
-    console.error(`[bulk-creator] enrichment fejl for produkt ${productId}:`, err)
-  }
 }
 
 // ── Extract variant attributes from raw_data ────────────────────────────────
@@ -340,9 +283,6 @@ export async function bulkCreateProductsFromGroups(
       )
     }
 
-    // Enrichment: udfyld tomme felter på eksisterende produkt med data fra nye members
-    await enrichNewProduct(productId, p.members, supabase)
-
     const stagingIds = p.members.map(m => m.id)
     for (let i = 0; i < stagingIds.length; i += 500) {
       await supabase.from('supplier_product_staging')
@@ -415,15 +355,32 @@ export async function bulkCreateProductsFromGroups(
       if (error) console.error('[bulk-creator] product_suppliers error:', error.message)
     }
 
-    // Enrichment: billeder + specs + beskrivelse for hvert nyt simpelt produkt
-    const enrichOps: Promise<void>[] = []
+    // Bulk image sync: collect all images and insert in one batch
+    const imageInserts: Record<string, unknown>[] = []
     for (const p of toInsertSimple) {
       const productId = groupIdToProductId.get(p.groupId)
-      if (productId) enrichOps.push(enrichNewProduct(productId, p.members, supabase))
+      if (!productId) continue
+      const seen = new Set<string>()
+      let position = 0
+      for (const m of p.members) {
+        const imgs = m.raw_data.supplier_images
+        if (!Array.isArray(imgs)) continue
+        for (const img of imgs as { url?: string; alt_text?: string }[]) {
+          if (!img?.url || seen.has(img.url)) continue
+          seen.add(img.url)
+          imageInserts.push({
+            product_id:  productId,
+            url:         img.url,
+            alt_text:    img.alt_text ?? null,
+            is_primary:  position === 0,
+            position:    position++,
+            source:      'pipeline',
+          })
+        }
+      }
     }
-    // Kør i batches af 20 for ikke at overbelaste DB
-    for (let i = 0; i < enrichOps.length; i += 20) {
-      await Promise.allSettled(enrichOps.slice(i, i + 20))
+    for (let i = 0; i < imageInserts.length; i += 500) {
+      await supabase.from('product_images').upsert(imageInserts.slice(i, i + 500), { onConflict: 'product_id,url', ignoreDuplicates: true })
     }
 
     const now = new Date().toISOString()
@@ -538,8 +495,7 @@ export async function bulkCreateProductsFromGroups(
       const { error: sErr } = await supabase.from('product_suppliers').insert(supplierRows)
       if (sErr) console.error(`[bulk-creator] variant product_suppliers error:`, sErr.message)
 
-      // Enrichment: billeder + specs for varianten
-      await enrichNewProduct(productId, p.members, supabase)
+      // Billeder samles til bulk insert nedenfor
 
       // Mark staging rows matched
       const stagingIds = p.members.map(m => m.id)
@@ -551,6 +507,34 @@ export async function bulkCreateProductsFromGroups(
       await supabase.from('supplier_product_staging')
         .update({ status: 'matched', updated_at: now })
         .in('id', allVariantStagingIds.slice(i, i + 500))
+    }
+
+    // Bulk image sync for variants
+    const variantImageInserts: Record<string, unknown>[] = []
+    for (const p of toInsertVariant) {
+      const productId = variantGroupToProductId.get(p.groupId)
+      if (!productId) continue
+      const seen = new Set<string>()
+      let position = 0
+      for (const m of p.members) {
+        const imgs = m.raw_data.supplier_images
+        if (!Array.isArray(imgs)) continue
+        for (const img of imgs as { url?: string; alt_text?: string }[]) {
+          if (!img?.url || seen.has(img.url)) continue
+          seen.add(img.url)
+          variantImageInserts.push({
+            product_id:  productId,
+            url:         img.url,
+            alt_text:    img.alt_text ?? null,
+            is_primary:  position === 0,
+            position:    position++,
+            source:      'pipeline',
+          })
+        }
+      }
+    }
+    for (let i = 0; i < variantImageInserts.length; i += 500) {
+      await supabase.from('product_images').upsert(variantImageInserts.slice(i, i + 500), { onConflict: 'product_id,url', ignoreDuplicates: true })
     }
 
     // Update groups
