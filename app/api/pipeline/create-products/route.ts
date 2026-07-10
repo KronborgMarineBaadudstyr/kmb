@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { bulkCreateProductsFromGroups } from '@/lib/bulk-product-creator'
 import { assignProductCategory } from '@/lib/standard-categories'
+import { processAutoStage } from '@/lib/auto-stage-processor'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -160,6 +161,39 @@ export async function GET() {
         stage: 'suggestions', status: 'done',
         populated: suggUpdated,
         message: `${suggUpdated} staging-rækker fik match-forslag`,
+      })
+
+      // ── STEP 7: Auto-match + auto-create fra pending staging ──────
+      send({ stage: 'auto_stage', status: 'running', message: 'Auto-matcher staging mod eksisterende produkter (≥ 0.85)…' })
+
+      const runId = new Date().toISOString()
+      const startAutoStage = Date.now()
+      let autoMatched = 0
+      let autoCreated = 0
+
+      try {
+        const result = await processAutoStage(supabase, runId, (m, c) => {
+          autoMatched = m; autoCreated = c
+          if (Date.now() - startAutoStage < 230_000) {
+            send({
+              stage: 'auto_stage', status: 'running',
+              matched: m, created: c,
+              message: `${m} matchet til eksisterende · ${c} nye oprettet…`,
+            })
+          }
+        })
+        autoMatched = result.matched
+        autoCreated = result.created
+        summary.auto_matched = autoMatched
+        summary.auto_created = autoCreated
+      } catch (e) {
+        send({ stage: 'auto_stage', status: 'error', message: String(e) })
+      }
+
+      send({
+        stage: 'auto_stage', status: 'done',
+        matched: autoMatched, created: autoCreated,
+        message: `${autoMatched} matchet til eksisterende produkter · ${autoCreated} nye produkter oprettet`,
       })
 
       // ── DONE ──────────────────────────────────────────────────────
