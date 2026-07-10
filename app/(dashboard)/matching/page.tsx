@@ -549,16 +549,8 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
   const esRef    = useRef<EventSource | null>(null)
   const retryRef = useRef(0)
 
-  function startPipeline() {
-    if (running) return
-    setRunning(true)
-    setDone(false)
-    setError(null)
-    setSummary(null)
-    setSteps({})
-    retryRef.current = 0
-
-    const es = new EventSource('/api/pipeline/run')
+  function connectToEndpoint(url: string, summaryRef: Record<string, number>) {
+    const es = new EventSource(url)
     esRef.current = es
 
     es.onmessage = (e: MessageEvent<string>) => {
@@ -566,11 +558,22 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
       const stage = ev.stage as string
 
       if (stage === 'done') {
-        setSummary(ev.summary as Record<string, number>)
-        setDone(true)
-        setRunning(false)
         es.close()
-        onDone()
+        // Merge partial summary
+        const partial = ev.summary as Record<string, number> | undefined
+        if (partial) Object.assign(summaryRef, partial)
+
+        if (url.includes('create-products')) {
+          // Fully done
+          setSummary({ ...summaryRef })
+          setDone(true)
+          setRunning(false)
+          onDone()
+        } else {
+          // /run finished — start /create-products with fresh retry counter
+          retryRef.current = 0
+          connectToEndpoint('/api/pipeline/create-products', summaryRef)
+        }
         return
       }
 
@@ -584,11 +587,12 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
       setSteps(prev => {
         const status = ev.status as string === 'done' ? 'done' : ev.status as string === 'running' ? 'running' : 'idle'
         let detail: string | undefined
-        if (ev.updated != null)       detail = `${ev.updated} kategorier opdateret`
-        if (ev.confirmed != null)     detail = `${ev.confirmed} bekræftet`
-        if (ev.created != null)       detail = `${ev.created} produkter oprettet`
+        if (ev.updated != null)        detail = `${ev.updated} kategorier opdateret`
+        if (ev.confirmed != null)      detail = `${ev.confirmed} bekræftet`
+        if (ev.created != null)        detail = `${ev.created} produkter oprettet`
         if (ev.groups_created != null) detail = `${ev.groups_created} grupper oprettet`
-        if (ev.populated != null)     detail = `${ev.populated} forslag tilføjet`
+        if (ev.populated != null)      detail = `${ev.populated} forslag tilføjet`
+        if (ev.processed != null)      detail = `${ev.processed} kategoriseret`
         return { ...prev, [stage]: { stage, status: status as PipelineStep['status'], message: ev.message as string, detail } }
       })
     }
@@ -597,18 +601,23 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
       es.close()
       retryRef.current += 1
       if (retryRef.current <= 10) {
-        // Pipeline is idempotent — completed steps are skipped on retry
-        setTimeout(() => {
-          const nextEs = new EventSource('/api/pipeline/run')
-          esRef.current = nextEs
-          nextEs.onmessage = es.onmessage
-          nextEs.onerror   = es.onerror
-        }, 2000)
+        setTimeout(() => connectToEndpoint(url, summaryRef), 2000)
       } else {
         setError('Forbindelsesfejl efter 10 forsøg — prøv igen manuelt')
         setRunning(false)
       }
     }
+  }
+
+  function startPipeline() {
+    if (running) return
+    setRunning(true)
+    setDone(false)
+    setError(null)
+    setSummary(null)
+    setSteps({})
+    retryRef.current = 0
+    connectToEndpoint('/api/pipeline/run', {})
   }
 
   useEffect(() => () => { esRef.current?.close() }, [])
