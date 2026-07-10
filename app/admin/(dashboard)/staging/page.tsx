@@ -259,7 +259,7 @@ function StagingCard({
             {rd.purchase_price != null && <span>Indkøb: <span className="text-gray-700">{fmtPrice(rd.purchase_price)}</span></span>}
             {rd.recommended_sales_price != null && <span>Vejl: <span className="text-gray-700">{fmtPrice(rd.recommended_sales_price)}</span></span>}
             <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>Lager: {qty}</span>
-            {rd.brand && <span>Brand: <span className="text-gray-700">{String(rd.brand)}</span></span>}
+            {rd.brand != null && <span>Brand: <span className="text-gray-700">{String(rd.brand as string)}</span></span>}
           </div>
 
           {/* Expanded details */}
