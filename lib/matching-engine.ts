@@ -315,36 +315,42 @@ async function runParentSkuPhase(
   let groupsCreated = 0
   let rowsAssigned  = 0
 
-  for (const [, members] of buckets) {
-    if (members.length < 2) continue  // loner variant — handled in singles phase
+  const eligible = [...buckets.entries()].filter(([, members]) => members.length >= 2)
+  const BATCH = 500
 
-    // Shortest name is most likely the base product name
-    const suggestedName = members
-      .map(id => nameMap.get(id) ?? '')
-      .reduce((best, n) => (n.length > 0 && n.length < best.length) ? n : best)
+  for (let i = 0; i < eligible.length; i += BATCH) {
+    const chunk = eligible.slice(i, i + BATCH)
 
-    const { data: group, error: gErr } = await supabase
+    const toInsert = chunk.map(([, members]) => ({
+      match_confidence: 'high',
+      match_method:     'parent_sku',
+      supplier_count:   1,
+      suggested_name:   members.map(id => nameMap.get(id) ?? '').reduce((best, n) => (n.length > 0 && n.length < best.length) ? n : best),
+      suggested_ean:    null,
+      status:           'pending_review',
+    }))
+
+    const { data: inserted, error: gErr } = await supabase
       .from('staging_match_groups')
-      .insert({
-        match_confidence: 'high',
-        match_method:     'parent_sku',
-        supplier_count:   1,
-        suggested_name:   suggestedName,
-        suggested_ean:    null,
-        status:           'pending_review',
-      })
+      .insert(toInsert)
       .select('id')
-      .single()
 
-    if (gErr || !group) { console.error('[matching-engine] parent_sku group insert:', gErr?.message); continue }
-    groupsCreated++
+    if (gErr || !inserted) { console.error('[matching-engine] parent_sku batch insert:', gErr?.message); continue }
+    groupsCreated += inserted.length
 
-    const { error: uErr } = await supabase
-      .from('supplier_product_staging')
-      .update({ match_group_id: group.id })
-      .in('id', members)
-
-    if (!uErr) rowsAssigned += members.length
+    const groupIds = (inserted as { id: string }[]).map(g => g.id)
+    for (let j = 0; j < chunk.length; j++) {
+      const groupId = groupIds[j]
+      const members = chunk[j][1]
+      if (!groupId) continue
+      for (let k = 0; k < members.length; k += 500) {
+        const { error: uErr } = await supabase
+          .from('supplier_product_staging')
+          .update({ match_group_id: groupId })
+          .in('id', members.slice(k, k + 500))
+        if (!uErr) rowsAssigned += Math.min(500, members.length - k)
+      }
+    }
   }
 
   return { groupsCreated, rowsAssigned }
@@ -393,40 +399,43 @@ async function runVariantPhase(
   let groupsCreated = 0
   let rowsAssigned  = 0
 
-  for (const [, members] of buckets) {
-    if (members.length < 2) continue // singles handled later
+  const nameMap = new Map(rows.map(r => [r.id, r.normalized_name ?? '']))
+  const eligible = [...buckets.entries()].filter(([, members]) => members.length >= 2)
+  const BATCH = 500
 
-    // Find suggested name from first member
-    const firstRow = rows.find(r => r.id === members[0])
-    const suggestedName = rows.find(r => members.includes(r.id))?.normalized_name ?? ''
+  for (let i = 0; i < eligible.length; i += BATCH) {
+    const chunk = eligible.slice(i, i + BATCH)
 
-    const { data: group, error: gErr } = await supabase
+    const toInsert = chunk.map(([, members]) => ({
+      match_confidence: 'high',
+      match_method:     'variant',
+      supplier_count:   1,
+      suggested_name:   nameMap.get(members[0]) ?? '',
+      suggested_ean:    null,
+      status:           'pending_review',
+    }))
+
+    const { data: inserted, error: gErr } = await supabase
       .from('staging_match_groups')
-      .insert({
-        match_confidence: 'high',
-        match_method:     'variant',
-        supplier_count:   1,
-        suggested_name:   suggestedName,
-        suggested_ean:    null,
-        status:           'pending_review',
-      })
+      .insert(toInsert)
       .select('id')
-      .single()
 
-    if (gErr || !group) {
-      console.error('[matching-engine] variant group insert error:', gErr?.message)
-      continue
+    if (gErr || !inserted) { console.error('[matching-engine] variant batch insert:', gErr?.message); continue }
+    groupsCreated += inserted.length
+
+    const groupIds = (inserted as { id: string }[]).map(g => g.id)
+    for (let j = 0; j < chunk.length; j++) {
+      const groupId = groupIds[j]
+      const members = chunk[j][1]
+      if (!groupId) continue
+      for (let k = 0; k < members.length; k += 500) {
+        const { error: uErr } = await supabase
+          .from('supplier_product_staging')
+          .update({ match_group_id: groupId })
+          .in('id', members.slice(k, k + 500))
+        if (!uErr) rowsAssigned += Math.min(500, members.length - k)
+      }
     }
-
-    groupsCreated++
-
-    const { error: uErr } = await supabase
-      .from('supplier_product_staging')
-      .update({ match_group_id: group.id })
-      .in('id', members)
-
-    if (!uErr) rowsAssigned += members.length
-    void firstRow // suppress unused warning
   }
 
   return { groupsCreated, rowsAssigned }
