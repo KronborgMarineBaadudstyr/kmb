@@ -219,24 +219,32 @@ function GroupCard({
   onUpdate,
 }: {
   group:    MatchGroup
-  onUpdate: (id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[] }) => Promise<void>
+  onUpdate: (id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[]; member_ids?: string[] }) => Promise<void>
 }) {
   const [editName,        setEditName]        = useState(group.suggested_name ?? '')
   const [loading,         setLoading]         = useState(false)
   const [msg,             setMsg]             = useState<string | null>(null)
   const [showMembers,     setShowMembers]     = useState(true)
   const [detailMember,    setDetailMember]    = useState<MatchMember | null>(null)
-  const [rejectMode,      setRejectMode]      = useState(false)       // vis EAN-markering inden afvisning
+  const [rejectMode,      setRejectMode]      = useState(false)
   const [badEanSuppliers, setBadEanSuppliers] = useState<Set<string>>(new Set())
+  const [selectedIds,     setSelectedIds]     = useState<Set<string>>(
+    () => new Set(group.members.map(m => m.id))
+  )
 
   const conf     = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
   const isSingle = group.match_method === 'single'
   const isEan    = group.match_method === 'ean'
 
   async function handleConfirm() {
+    if (selectedIds.size === 0) { setMsg('Vælg mindst ét produkt'); return }
     setLoading(true)
     setMsg(null)
-    await onUpdate(group.id, { status: 'confirmed', suggested_name: editName })
+    await onUpdate(group.id, {
+      status:        'confirmed',
+      suggested_name: editName,
+      member_ids:    [...selectedIds],
+    })
     setMsg('Bekræftet')
     setShowMembers(false)
     setLoading(false)
@@ -364,52 +372,88 @@ function GroupCard({
 
             {showMembers && (
               <div className="mt-2 space-y-2">
-                {group.members.map(m => {
-                  const pp  = m.raw_data.purchase_price
-                  const qty = Number(m.raw_data.supplier_stock_quantity ?? 0)
-                  const hasImages = ((m.raw_data.supplier_images as SupplierImage[] | undefined) ?? []).length > 0
-                  return (
+                {!isActioned && group.members.length > 1 && (
+                  <div className="flex items-center gap-2 text-xs text-gray-400 pb-1 border-b border-gray-100">
+                    <span>Afkryds produkter der skal samles i denne gruppe</span>
                     <button
-                      key={m.id}
-                      onClick={() => setDetailMember(m)}
-                      className="w-full text-left bg-gray-50 hover:bg-blue-50 hover:border-blue-200 border border-transparent rounded-lg px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-1 transition-colors group cursor-pointer"
-                      title="Klik for at se produktdetaljer"
-                    >
-                      <div>
-                        <span className="text-gray-400 block">Leverandør</span>
-                        <span className="font-medium text-gray-800 group-hover:text-blue-700">{m.suppliers?.name ?? '—'}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 block">SKU</span>
-                        <span className="font-mono text-gray-700">{m.normalized_sku}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 block">Navn</span>
-                        <span className="text-gray-700">{m.normalized_name}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 block">Indkøbspris</span>
-                        <span className="text-gray-700">{fmtPrice(pp)}</span>
-                      </div>
-                      <div>
-                        <span className="text-gray-400 block">Lager</span>
-                        <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>{qty}</span>
-                      </div>
-                      <div className="flex items-end justify-between col-span-1">
-                        {m.normalized_ean ? (
-                          <div>
-                            <span className="text-gray-400 block">EAN</span>
-                            <span className="font-mono text-gray-600">{m.normalized_ean}</span>
-                          </div>
-                        ) : <div />}
-                        <div className="flex items-center gap-1 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs">
-                          {hasImages && <span>🖼</span>}
-                          <span>Detaljer →</span>
+                      className="ml-auto text-blue-500 hover:underline"
+                      onClick={() => setSelectedIds(new Set(group.members.map(m => m.id)))}
+                    >Vælg alle</button>
+                  </div>
+                )}
+                {group.members.map(m => {
+                  const pp       = m.raw_data.purchase_price
+                  const qty      = Number(m.raw_data.supplier_stock_quantity ?? 0)
+                  const hasImages = ((m.raw_data.supplier_images as SupplierImage[] | undefined) ?? []).length > 0
+                  const checked  = selectedIds.has(m.id)
+                  return (
+                    <div key={m.id} className={`flex gap-2 items-start rounded-lg border transition-colors ${
+                      !isActioned
+                        ? checked
+                          ? 'bg-gray-50 border-gray-200'
+                          : 'bg-gray-50/40 border-dashed border-gray-200 opacity-50'
+                        : 'bg-gray-50 border-transparent'
+                    }`}>
+                      {!isActioned && group.members.length > 1 && (
+                        <div className="pt-3 pl-3 shrink-0">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e => setSelectedIds(prev => {
+                              const next = new Set(prev)
+                              e.target.checked ? next.add(m.id) : next.delete(m.id)
+                              return next
+                            })}
+                            className="rounded border-gray-300 cursor-pointer"
+                          />
                         </div>
-                      </div>
-                    </button>
+                      )}
+                      <button
+                        onClick={() => setDetailMember(m)}
+                        className="flex-1 text-left px-3 py-2 text-xs grid grid-cols-2 gap-x-4 gap-y-1 group cursor-pointer"
+                        title="Klik for at se produktdetaljer"
+                      >
+                        <div>
+                          <span className="text-gray-400 block">Leverandør</span>
+                          <span className="font-medium text-gray-800 group-hover:text-blue-700">{m.suppliers?.name ?? '—'}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block">SKU</span>
+                          <span className="font-mono text-gray-700">{m.normalized_sku}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block">Navn</span>
+                          <span className="text-gray-700">{m.normalized_name}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block">Indkøbspris</span>
+                          <span className="text-gray-700">{fmtPrice(pp)}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400 block">Lager</span>
+                          <span className={qty > 0 ? 'text-green-700 font-medium' : 'text-gray-400'}>{qty}</span>
+                        </div>
+                        <div className="flex items-end justify-between col-span-1">
+                          {m.normalized_ean ? (
+                            <div>
+                              <span className="text-gray-400 block">EAN</span>
+                              <span className="font-mono text-gray-600">{m.normalized_ean}</span>
+                            </div>
+                          ) : <div />}
+                          <div className="flex items-center gap-1 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity text-xs">
+                            {hasImages && <span>🖼</span>}
+                            <span>Detaljer →</span>
+                          </div>
+                        </div>
+                      </button>
+                    </div>
                   )
                 })}
+                {!isActioned && selectedIds.size < group.members.length && (
+                  <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+                    {group.members.length - selectedIds.size} produkt(er) frigøres til staging ved bekræftelse
+                  </p>
+                )}
               </div>
             )}
 
@@ -735,7 +779,7 @@ export default function MatchingPage() {
 
   useEffect(() => { fetchGroups() }, [fetchGroups])
 
-  async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[] }) {
+  async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[]; member_ids?: string[] }) {
     await fetch(`/api/matching/${id}`, {
       method:  'PATCH',
       headers: { 'Content-Type': 'application/json' },

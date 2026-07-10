@@ -17,6 +17,7 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     status?:                string
     notes?:                 string
     bad_ean_supplier_ids?:  string[]  // leverandør-IDs med dokumenteret forkert EAN
+    member_ids?:            string[]  // kun disse staging-rækker forbliver i gruppen; resten frigøres
   }
 
   const allowed = ['pending_review', 'confirmed', 'rejected', 'product_created']
@@ -38,6 +39,27 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Frigør members der ikke er valgt — sæt match_group_id = null og status = 'pending_review'
+  if (body.member_ids) {
+    // Find alle nuværende members i gruppen
+    const { data: allMembers } = await supabase
+      .from('supplier_product_staging')
+      .select('id')
+      .eq('match_group_id', id)
+
+    const kept    = new Set(body.member_ids)
+    const release = (allMembers ?? [])
+      .map(m => (m as { id: string }).id)
+      .filter(mid => !kept.has(mid))
+
+    if (release.length > 0) {
+      await supabase
+        .from('supplier_product_staging')
+        .update({ match_group_id: null, status: 'pending_review' })
+        .in('id', release)
+    }
+  }
 
   // Skriv fejl-EAN ekskluderinger hvis angivet (typisk ved afvisning)
   if (
