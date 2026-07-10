@@ -305,7 +305,7 @@ s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
                       <div>
                         <span className="text-gray-400 w-28 inline-block">Sidst synkret</span>
                         {s.last_synced_at
-                          ? new Date(s.last_synced_at).toLocaleString('da-DK')
+                          ? new Date(s.last_synced_at).toLocaleString('da-DK', { hour12: false })
                           : <span className="text-orange-500">Aldrig</span>}
                       </div>
                       {s.notes && (
@@ -470,7 +470,7 @@ s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
                         {lastSummary.stage === 'error' ? '✗ Seneste import fejlede' : '✓ Seneste import'}
                       </span>
                       <span className="text-gray-400">
-                        {new Date(lastSummary.timestamp).toLocaleString('da-DK')}
+                        {new Date(lastSummary.timestamp).toLocaleString('da-DK', { hour12: false })}
                       </span>
                     </div>
                     <div className="flex gap-4 flex-wrap">
