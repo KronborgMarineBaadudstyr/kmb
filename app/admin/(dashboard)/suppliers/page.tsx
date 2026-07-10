@@ -249,7 +249,7 @@ export default function SuppliersPage() {
       {loading ? (
         <div className="text-gray-400">Henter leverandører...</div>
       ) : (
-        {/* Global prioritetsforklaring */}
+        <>
         <div className="mb-6 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800">
           <p className="font-medium mb-1">Global leverandørprioritet</p>
           <p className="text-xs text-blue-700">
@@ -494,6 +494,7 @@ s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
             </div>
           )}
         </div>
+        </>
       )}
     </div>
   )
