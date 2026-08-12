@@ -91,6 +91,7 @@ const ALLOWED_FIELDS = [
   'specifications', 'video_url', 'meta_title', 'meta_description', 'status',
   'boat_type', 'hide_when_out_of_stock',
   'original_number', 'original_number_source',
+  'own_stock_quantity', 'own_stock_reserved',
 ]
 
 export async function PATCH(

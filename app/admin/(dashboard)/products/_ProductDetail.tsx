@@ -881,6 +881,8 @@ export function ProductDetail({
   const [statusSaving, setStatusSaving] = useState(false)
   const [variants,  setVariants] = useState<Variant[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
+  const [suppliersState, setSuppliersState] = useState<ProductSupplier[]>([])
+  const [prioSaving, setPrioSaving] = useState(false)
 
   useEffect(() => {
     setLoading(true)
@@ -893,7 +895,11 @@ export function ProductDetail({
       .then(r => r.json())
       .then(j => {
         if (j.error) setError(j.error)
-        else { setProduct(j.data); setVariants(j.data?.product_variants ?? []) }
+        else {
+          setProduct(j.data)
+          setVariants(j.data?.product_variants ?? [])
+          setSuppliersState([...(j.data?.product_suppliers ?? [])].sort((a: ProductSupplier, b: ProductSupplier) => a.priority - b.priority))
+        }
       })
       .finally(() => setLoading(false))
 
@@ -919,6 +925,27 @@ export function ProductDetail({
     setStatusSaving(true)
     await patchField({ status })
     setStatusSaving(false)
+  }
+
+  async function moveSupplierPriority(idx: number, dir: -1 | 1) {
+    const swapIdx = idx + dir
+    if (swapIdx < 0 || swapIdx >= suppliersState.length) return
+    setPrioSaving(true)
+    const a = suppliersState[idx]
+    const b = suppliersState[swapIdx]
+    const pA = a.priority
+    const pB = b.priority
+    await Promise.all([
+      fetch(`/api/products/${productId}/suppliers/${a.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ priority: pB }) }),
+      fetch(`/api/products/${productId}/suppliers/${b.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ priority: pA }) }),
+    ])
+    setSuppliersState(prev => {
+      const next = [...prev]
+      next[idx]     = { ...a, priority: pB }
+      next[swapIdx] = { ...b, priority: pA }
+      return next.sort((x, y) => x.priority - y.priority)
+    })
+    setPrioSaving(false)
   }
 
   if (loading) return (
@@ -1018,13 +1045,19 @@ export function ProductDetail({
   )
 
   const suppliersSection = (
-    <Section title={`Leverandører (${suppls.length})`}>
-      {suppls.length > 0 ? (
+    <Section title={`Leverandører (${suppliersState.length})`}>
+      {suppliersState.length > 0 ? (
         <div className="space-y-3">
-          {suppls.map(s => (
+          {suppliersState.map((s, idx) => (
             <div key={s.id} className={`rounded-lg border p-4 ${s.is_active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50 opacity-60'}`}>
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-0.5">
+                    <button onClick={() => moveSupplierPriority(idx, -1)} disabled={prioSaving || idx === 0}
+                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 leading-none text-xs px-0.5">▲</button>
+                    <button onClick={() => moveSupplierPriority(idx, 1)} disabled={prioSaving || idx === suppliersState.length - 1}
+                      className="text-gray-300 hover:text-gray-600 disabled:opacity-20 leading-none text-xs px-0.5">▼</button>
+                  </div>
                   <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full font-mono">#{s.priority}</span>
                   <span className="text-sm font-semibold text-gray-900">{s.suppliers.name}</span>
                   {!s.is_active && <span className="text-xs text-gray-400">(inaktiv)</span>}
@@ -1069,6 +1102,7 @@ export function ProductDetail({
       ) : (
         <p className="text-sm text-gray-300">Ingen leverandører tilknyttet</p>
       )}
+      {prioSaving && <p className="text-xs text-blue-400 mt-2">Gemmer prioritet…</p>}
     </Section>
   )
 
@@ -1110,11 +1144,37 @@ export function ProductDetail({
   const stockSection = (
     <Section title="Lagerbeholdning">
       <div className="flex justify-between items-center pb-3 mb-2 border-b border-gray-100">
-        <span className="text-sm text-gray-600">Eget lager</span>
-        <span className={`text-xl font-bold tabular-nums ${product.own_stock_quantity > 0 ? 'text-green-700' : 'text-gray-400'}`}>
-          {product.own_stock_quantity}
-          {product.own_stock_reserved > 0 && <span className="text-sm text-orange-400 ml-1 font-normal">-{product.own_stock_reserved}</span>}
-        </span>
+        <div>
+          <span className="text-sm text-gray-600">Eget lager</span>
+          <p className="text-xs text-gray-400 mt-0.5">Klik antal for at justere</p>
+        </div>
+        <div className="text-right">
+          <div className="flex items-center gap-2 justify-end">
+            <span className="text-xs text-gray-400">Beholdning</span>
+            <div className="w-20">
+              <NumericInput
+                value={product.own_stock_quantity}
+                onSave={v => patchField({ own_stock_quantity: v ?? 0 }, 'own_stock_quantity')}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-2 justify-end mt-1">
+            <span className="text-xs text-gray-400">Reserveret</span>
+            <div className="w-20">
+              <NumericInput
+                value={product.own_stock_reserved}
+                onSave={v => patchField({ own_stock_reserved: v ?? 0 }, 'own_stock_reserved')}
+                placeholder="0"
+              />
+            </div>
+          </div>
+          {product.own_stock_reserved > 0 && (
+            <p className="text-xs text-orange-500 mt-0.5">
+              Tilgængeligt: {product.own_stock_quantity - product.own_stock_reserved}
+            </p>
+          )}
+        </div>
       </div>
       {suppls.filter(s => s.is_active).map(s => (
         <div key={s.id} className="flex justify-between items-center py-1 text-xs">
