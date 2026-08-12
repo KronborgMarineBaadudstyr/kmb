@@ -649,9 +649,14 @@ export default function PricingPage() {
           </button>
         )}
         {tab === 'needs_manual' && pricingData && (
-          <button onClick={async () => { for (const p of pricingData.needs_manual) { const s = suggestPrice(p.purchase_price, markup); if (s) await saveSalesPrice(p.id, s) } }}
+          <button onClick={async () => {
+            const targets = checkedIds.size > 0
+              ? (pricingData.needs_manual as PricingProduct[]).filter(p => checkedIds.has(p.id))
+              : pricingData.needs_manual
+            for (const p of targets) { const s = suggestPrice(p.purchase_price, markup); if (s) await saveSalesPrice(p.id, s) }
+          }}
             className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
-            Beregn alle med {markup}% avance
+            {checkedIds.size > 0 ? `Beregn ${checkedIds.size} valgte med ${markup}%` : `Beregn alle med ${markup}% avance`}
           </button>
         )}
       </div>
