@@ -204,6 +204,7 @@ export async function bulkCreateProductsFromGroups(
         description:       typeof raw.description       === 'string' ? raw.description       : null,
         short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
         brand:             typeof raw.brand             === 'string' ? raw.brand             : null,
+        sales_price:       typeof raw.recommended_sales_price === 'number' && isFinite(raw.recommended_sales_price) ? raw.recommended_sales_price : null,
         weight:            typeof raw.weight === 'number' && isFinite(raw.weight) ? raw.weight : null,
         length:            typeof raw.length === 'number' && isFinite(raw.length) ? raw.length : null,
         width:             typeof raw.width  === 'number' && isFinite(raw.width)  ? raw.width  : null,
