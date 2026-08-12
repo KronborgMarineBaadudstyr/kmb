@@ -13,7 +13,7 @@ export async function GET() {
     .from('products')
     .select(`
       id, name, internal_sku, status, sales_price,
-      primary_image_url,
+      product_images ( url, is_primary, position ),
       product_suppliers (
         id, priority, is_active,
         purchase_price, recommended_sales_price,
@@ -31,6 +31,8 @@ export async function GET() {
 
   // Enrich: find best active supplier, derive suggested price
   const enriched = (products ?? []).map(p => {
+    const imgs = (p.product_images ?? []) as { url: string; is_primary: boolean; position: number }[]
+    const primaryImg = imgs.find(i => i.is_primary) ?? imgs.sort((a, b) => a.position - b.position)[0]
     const activeSuppliers = ((p.product_suppliers ?? []) as unknown as {
       id: string; priority: number; is_active: boolean
       purchase_price: number | null; recommended_sales_price: number | null
@@ -56,7 +58,7 @@ export async function GET() {
       name:           p.name,
       internal_sku:   p.internal_sku,
       status:         p.status,
-      primary_image_url: p.primary_image_url,
+      primary_image_url: primaryImg?.url ?? null,
       sales_price:    p.sales_price,
       primary_supplier: primary ? {
         name:                    (Array.isArray(primary.suppliers) ? (primary.suppliers as { name: string }[])[0]?.name : (primary.suppliers as { name: string } | null)?.name) ?? '—',
