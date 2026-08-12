@@ -2,8 +2,8 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { assignProductCategory } from '@/lib/standard-categories'
 
 const MATCH_THRESHOLD = 0.85
-const BATCH_SIZE      = 300  // rows per RPC call — keep under statement timeout
-const MAX_BATCHES     = 50   // safety ceiling per pipeline run
+const BATCH_SIZE      = 500  // rows per RPC call — keep under statement timeout
+const MAX_BATCHES     = 200  // safety ceiling per pipeline run (~100.000 rows max)
 
 type StagingRow = {
   id:              string
@@ -77,21 +77,27 @@ export async function processAutoStage(
       .from('supplier_product_staging')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending_review')
-      .is('match_group_id', null)
+      .not('id', 'is', null)
 
     if (!count || count === 0) break
 
-    // 2. Run fuzzy match RPC for this batch
-    const { data: matches, error: rpcErr } = await supabase
-      .rpc('auto_match_staging_to_products', {
-        threshold:    MATCH_THRESHOLD,
-        batch_limit:  BATCH_SIZE,
-        batch_offset: 0,  // always offset 0 — matched rows change status so they drop out
-      })
+    // 2. Run fuzzy match RPC for this batch (only if products exist to match against)
+    const { count: productCount } = await supabase
+      .from('products')
+      .select('*', { count: 'exact', head: true })
+      .neq('status', 'draft')
 
-    if (rpcErr) throw new Error(`auto_match RPC fejl: ${rpcErr.message}`)
-
-    const matchRows = (matches ?? []) as MatchResult[]
+    let matchRows: MatchResult[] = []
+    if ((productCount ?? 0) > 0) {
+      const { data: matches, error: rpcErr } = await supabase
+        .rpc('auto_match_staging_to_products', {
+          threshold:    MATCH_THRESHOLD,
+          batch_limit:  BATCH_SIZE,
+          batch_offset: 0,
+        })
+      if (rpcErr) throw new Error(`auto_match RPC fejl: ${rpcErr.message}`)
+      matchRows = (matches ?? []) as MatchResult[]
+    }
     const matchedStagingIds = new Set(matchRows.map(m => m.staging_id))
 
     // 3. Fetch all staging rows in this logical batch to find unmatched ones
@@ -99,7 +105,7 @@ export async function processAutoStage(
       .from('supplier_product_staging')
       .select('id, supplier_id, normalized_name, normalized_ean, normalized_sku, raw_data')
       .eq('status', 'pending_review')
-      .is('match_group_id', null)
+      .not('id', 'is', null)
       .order('id')
       .limit(BATCH_SIZE)
 
