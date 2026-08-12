@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react'
 import Image from 'next/image'
+import { ProductDetail } from '../products/_ProductDetail'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type PricingProduct = {
@@ -475,6 +476,7 @@ export default function PricingPage() {
   const [categories,  setCategories]  = useState<string[]>([])
   const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set())
   const [panel,       setPanel]       = useState<'adjust' | 'campaign' | null>(null)
+  const [detailId,    setDetailId]    = useState<string | null>(null)
 
   // Load pricing data (missing prices)
   async function loadPricing() {
@@ -560,6 +562,16 @@ export default function PricingPage() {
 
   return (
     <div className="flex flex-col h-full bg-gray-50">
+      {/* Produkt-detalje panel */}
+      {detailId && (
+        <>
+          <div className="fixed inset-0 bg-black/30 z-40" onClick={() => setDetailId(null)} />
+          <div className="fixed right-0 top-0 h-full w-[680px] bg-white shadow-xl z-50 flex flex-col">
+            <ProductDetail productId={detailId} mode="panel" onClose={() => setDetailId(null)} />
+          </div>
+        </>
+      )}
+
       {/* Panels */}
       {panel === 'adjust' && (
         <AdjustPricesPanel
@@ -695,7 +707,9 @@ export default function PricingPage() {
                       ) : <div className="w-10 h-10 rounded border border-gray-100 bg-gray-100" />}
                     </td>
                     <td className="px-4 py-2 max-w-xs" onClick={e => e.stopPropagation()}>
-                      <div className="font-medium text-gray-900 line-clamp-2 leading-tight text-sm">{p.name}</div>
+                      <button className="text-left hover:text-blue-600 transition-colors group" onClick={() => setDetailId(p.id)}>
+                        <div className="font-medium text-gray-900 group-hover:text-blue-700 line-clamp-2 leading-tight text-sm">{p.name}</div>
+                      </button>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="font-mono text-xs text-gray-400">{p.internal_sku}</span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full ${STATUS[p.status] ?? 'bg-gray-100 text-gray-500'}`}>{p.status}</span>
