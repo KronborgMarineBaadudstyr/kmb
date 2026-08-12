@@ -52,6 +52,7 @@ type PreparedProduct = {
     description:       string | null
     short_description: string | null
     brand:             string | null
+    sales_price:       number | null
     weight:            number | null
     length:            number | null
     width:             number | null
