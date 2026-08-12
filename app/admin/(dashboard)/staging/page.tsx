@@ -225,7 +225,7 @@ function StagingCard({
   onDone:   () => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const rd  = row.raw_data
+  const rd  = row.raw_data as Record<string, string | number | null | undefined>
   const qty = Number(rd.supplier_stock_quantity ?? 0)
 
   return (
