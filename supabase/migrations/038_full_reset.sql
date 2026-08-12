@@ -12,8 +12,8 @@ SET match_group_id = NULL,
     status         = 'pending_review',
     updated_at     = now();
 
--- 3. Slet alle match-grupper
-TRUNCATE staging_match_groups;
+-- 3. Slet alle match-grupper (ingen FK-konflikt da staging er frigjort ovenfor)
+DELETE FROM staging_match_groups;
 
 -- 4. Slet pipeline-oprettede draft-produkter og alt tilknyttet
 DELETE FROM product_images
