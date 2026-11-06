@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 
-type Subcategory = { name: string; keywords: string[] }
+type Subcategory = { name: string; keywords: string[]; boat_types?: string[] }
 
 type CategoryRow = {
   id: string
@@ -12,6 +12,8 @@ type CategoryRow = {
   boat_types: string[]
   sort_order: number
   active: boolean
+  image_url?: string | null
+  description?: string | null
   product_type_count?: number
 }
 
@@ -52,6 +54,49 @@ function InlineText({
       title="Klik for at redigere"
     >
       {value || <span className="text-gray-300">{placeholder}</span>}
+    </button>
+  )
+}
+
+// ── Inline textarea editor ────────────────────────────────────────────────────
+function InlineTextarea({
+  value, onSave, placeholder, className = '',
+}: {
+  value: string | null | undefined; onSave: (v: string | null) => void; placeholder?: string; className?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value ?? '')
+
+  function commit() {
+    setEditing(false)
+    const v = draft.trim() || null
+    if (v !== (value ?? null)) onSave(v)
+  }
+
+  if (editing) {
+    return (
+      <textarea
+        autoFocus
+        rows={3}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Escape') { setEditing(false); setDraft(value ?? '') } }}
+        placeholder={placeholder}
+        className={`border border-blue-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white w-full resize-none ${className}`}
+      />
+    )
+  }
+  return (
+    <button
+      onClick={() => { setDraft(value ?? ''); setEditing(true) }}
+      className={`text-left rounded px-1 -mx-1 hover:bg-blue-50 transition-colors w-full ${className}`}
+      title="Klik for at redigere"
+    >
+      {value
+        ? <span className="text-gray-700 text-sm whitespace-pre-wrap">{value}</span>
+        : <span className="text-gray-300 text-sm italic">{placeholder ?? '—'}</span>
+      }
     </button>
   )
 }
@@ -103,47 +148,66 @@ function SubcatEditor({
 }: {
   subcategories: Subcategory[]; onChange: (s: Subcategory[]) => void
 }) {
-  function updateName(i: number, name: string) {
+  function update(i: number, patch: Partial<Subcategory>) {
     const next = [...subcategories]
-    next[i] = { ...next[i], name }
+    next[i] = { ...next[i], ...patch }
     onChange(next)
   }
-  function updateKeywords(i: number, keywords: string[]) {
-    const next = [...subcategories]
-    next[i] = { ...next[i], keywords }
-    onChange(next)
+  function toggleBoatType(i: number, bt: string) {
+    const current = subcategories[i].boat_types ?? []
+    const next = current.includes(bt) ? current.filter(t => t !== bt) : [...current, bt]
+    update(i, { boat_types: next })
   }
   function remove(i: number) {
     onChange(subcategories.filter((_, j) => j !== i))
   }
   function add() {
-    onChange([...subcategories, { name: 'Ny underkategori', keywords: [] }])
+    onChange([...subcategories, { name: 'Ny underkategori', keywords: [], boat_types: ['sejlbåd', 'motorbåd'] }])
   }
 
   return (
     <div className="space-y-2">
-      {subcategories.map((sub, i) => (
-        <div key={i} className="flex items-start gap-3 bg-gray-50 rounded-lg px-3 py-2">
-          <div className="w-5 text-xs text-gray-400 pt-1 shrink-0">{i + 1}</div>
-          <div className="flex-1 min-w-0 space-y-1">
-            <InlineText
-              value={sub.name}
-              onSave={name => updateName(i, name)}
-              placeholder="Navn på underkategori"
-              className="font-medium text-sm text-gray-800 w-full"
-            />
-            <KeywordTags
-              keywords={sub.keywords}
-              onChange={kw => updateKeywords(i, kw)}
-            />
+      {subcategories.map((sub, i) => {
+        const boatTypes = sub.boat_types ?? ['sejlbåd', 'motorbåd']
+        return (
+          <div key={i} className="flex items-start gap-3 bg-gray-50 rounded-lg px-3 py-2">
+            <div className="w-5 text-xs text-gray-400 pt-1 shrink-0">{i + 1}</div>
+            <div className="flex-1 min-w-0 space-y-1.5">
+              <InlineText
+                value={sub.name}
+                onSave={name => update(i, { name })}
+                placeholder="Navn på underkategori"
+                className="font-medium text-sm text-gray-800 w-full"
+              />
+              {/* Boat types per subcategory */}
+              <div className="flex gap-1.5 flex-wrap">
+                {BOAT_TYPE_OPTIONS.map(bt => (
+                  <button
+                    key={bt}
+                    onClick={() => toggleBoatType(i, bt)}
+                    className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                      boatTypes.includes(bt)
+                        ? 'bg-blue-500 text-white border-blue-500'
+                        : 'bg-white text-gray-400 border-gray-200 hover:border-blue-300'
+                    }`}
+                  >
+                    {bt}
+                  </button>
+                ))}
+              </div>
+              <KeywordTags
+                keywords={sub.keywords}
+                onChange={kw => update(i, { keywords: kw })}
+              />
+            </div>
+            <button
+              onClick={() => remove(i)}
+              className="text-gray-300 hover:text-red-500 text-sm shrink-0 mt-0.5"
+              title="Slet underkategori"
+            >✕</button>
           </div>
-          <button
-            onClick={() => remove(i)}
-            className="text-gray-300 hover:text-red-500 text-sm shrink-0 mt-0.5"
-            title="Slet underkategori"
-          >✕</button>
-        </div>
-      ))}
+        )
+      })}
       <button
         onClick={add}
         className="text-sm text-blue-600 hover:text-blue-800 px-3 py-1.5 border border-dashed border-blue-200 rounded-lg w-full hover:bg-blue-50 transition-colors"
@@ -207,6 +271,11 @@ function CategoryCard({
           onClick={() => setExpanded(e => !e)}
           className="flex-1 flex items-center gap-3 text-left min-w-0"
         >
+          {/* Category image thumbnail */}
+          {cat.image_url
+            ? <img src={cat.image_url} alt={cat.name} className="w-8 h-8 rounded-md object-cover shrink-0 border border-gray-100" />
+            : <div className="w-8 h-8 rounded-md bg-gray-100 flex items-center justify-center shrink-0 text-gray-300 text-xs">📂</div>
+          }
           <InlineText
             value={cat.name}
             onSave={name => patch({ name })}
@@ -248,9 +317,39 @@ function CategoryCard({
       {/* Expanded detail */}
       {expanded && (
         <div className="border-t bg-gray-50 px-4 py-4 space-y-5">
+
+          {/* Image + Description row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Kategori-billede (URL)</div>
+              <input
+                type="url"
+                defaultValue={cat.image_url ?? ''}
+                placeholder="https://…"
+                onBlur={e => {
+                  const v = e.target.value.trim() || null
+                  if (v !== (cat.image_url ?? null)) patch({ image_url: v })
+                }}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
+              />
+              {cat.image_url && (
+                <img src={cat.image_url} alt={cat.name} className="mt-2 w-full max-h-32 object-cover rounded-lg border border-gray-100" />
+              )}
+            </div>
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Beskrivelse</div>
+              <InlineTextarea
+                value={cat.description}
+                onSave={v => patch({ description: v })}
+                placeholder="Klik for at tilføje beskrivelse…"
+                className="min-h-[80px]"
+              />
+            </div>
+          </div>
+
           {/* Boat types */}
           <div>
-            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Båttype</div>
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Båttype (kategori-niveau)</div>
             <div className="flex gap-2">
               {BOAT_TYPE_OPTIONS.map(bt => (
                 <button
@@ -443,17 +542,17 @@ export default function CategoriesPage() {
         </div>
         <div className="bg-white border rounded-xl p-4">
           <div className="text-2xl font-bold text-gray-900">
-            {categories.reduce((n, c) => n + c.keywords.length, 0)}
+            {categories.filter(c => c.description).length}
           </div>
-          <div className="text-xs text-gray-500 mt-0.5">Nøgleord i alt</div>
+          <div className="text-xs text-gray-500 mt-0.5">Med beskrivelse</div>
         </div>
       </div>
 
       {/* List */}
       {loading ? (
-        <div className="text-center py-12 text-gray-400 text-sm">Indlæser kategorier…</div>
+        <div className="text-center py-16 text-gray-400 text-sm">Henter kategorier…</div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {filtered.map(cat => (
             <CategoryCard
               key={cat.id}
@@ -462,9 +561,6 @@ export default function CategoriesPage() {
               onDelete={handleDelete}
             />
           ))}
-          {filtered.length === 0 && search && (
-            <div className="text-center py-8 text-gray-400 text-sm">Ingen kategorier matcher "{search}"</div>
-          )}
           <AddCategoryForm onAdded={cat => setCategories(prev => [...prev, cat])} />
         </div>
       )}
