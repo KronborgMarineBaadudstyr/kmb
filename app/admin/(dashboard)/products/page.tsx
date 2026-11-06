@@ -727,7 +727,7 @@ export default function ProductsPage() {
                       </td>
                     ))}
                     <td className="px-3 py-2">
-                      <Link href={`/products/${p.id}`} onClick={e => e.stopPropagation()}
+                      <Link href={`/admin/products/${p.id}`} onClick={e => e.stopPropagation()}
                         title="Åbn på egen side"
                         className="text-gray-300 hover:text-blue-500 text-base transition-colors">
                         ↗
