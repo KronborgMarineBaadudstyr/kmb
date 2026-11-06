@@ -394,6 +394,12 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.ls-prodcard-meta {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
 .ls-prodcard-brand {
   font-size: 10px;
   font-weight: 800;
@@ -401,11 +407,45 @@
   text-transform: uppercase;
   color: var(--ink-3);
 }
-.ls-prodcard-price {
-  font-size: 15px;
+.ls-prodcard-cat {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--navy-700);
+  background: var(--line-2);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+/* Pris */
+.ls-prodcard-price { margin-top: auto; }
+.ls-prodcard-price-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.ls-prodcard-price-kr {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-3);
+  letter-spacing: .02em;
+}
+.ls-prodcard-price-whole {
+  font-size: 17px;
   font-weight: 800;
   color: var(--navy);
-  margin-top: auto;
+  letter-spacing: -.01em;
+}
+.ls-prodcard-price-cents {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.ls-prodcard-price-unknown {
+  font-size: 12px;
+  color: var(--ink-3);
 }
 .ls-prodcard-price .old {
   font-size: 12px;
@@ -414,6 +454,23 @@
   text-decoration: line-through;
   margin-left: 5px;
 }
+/* Knap */
+.ls-prodcard-btn {
+  margin-top: 8px;
+  padding: 7px 12px;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--sans);
+  transition: background .2s;
+  width: 100%;
+}
+.ls-prodcard-btn:hover { background: var(--red-deep); }
+.ls-prodcard-btn.toasted { background: var(--stock); }
 
 /* ── HORIZONTAL SCROLL RAIL ──────────────────────────────────── */
 .ls-rail {
@@ -424,7 +481,7 @@
   scrollbar-width: none;
 }
 .ls-rail::-webkit-scrollbar { display: none; }
-.ls-rail .ls-prodcard { flex: 0 0 168px; }
+.ls-rail .ls-prodcard { flex: 0 0 210px; }
 
 /* ── PRODUCT DETAIL ──────────────────────────────────────────── */
 .ls-pdp {
