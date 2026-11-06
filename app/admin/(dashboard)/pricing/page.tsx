@@ -307,13 +307,15 @@ function CampaignPanel({
         <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
           {/* Navn */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Kampagnenavn</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Kampagnenavn</label>
+            <p className="text-xs text-amber-600 mb-1.5">⚠ Kan være synligt for kunden som forklaring på prisen</p>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="F.eks. Sommersalg 2026"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Beskrivelse (valgfri)</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Intern note om kampagnen…"
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Beskrivelse (valgfri)</label>
+            <p className="text-xs text-amber-600 mb-1.5">⚠ Kan være synligt for kunden — beskriv tilbuddet som om kunden læser det</p>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="F.eks. &quot;Spar 20% på alt tilbehør i juli måned. Rabatten trækkes automatisk i kurven.&quot;"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
 
