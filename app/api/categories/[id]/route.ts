@@ -5,15 +5,16 @@ export const dynamic = 'force-dynamic'
 
 export async function PATCH(
   request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   const body = await request.json() as Record<string, unknown>
   const supabase = createServiceClient()
 
   const { data, error } = await supabase
     .from('categories')
     .update({ ...body, updated_at: new Date().toISOString() })
-    .eq('id', params.id)
+    .eq('id', id)
     .select()
     .single()
 
@@ -23,13 +24,14 @@ export async function PATCH(
 
 export async function DELETE(
   _request: Request,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   const supabase = createServiceClient()
   const { error } = await supabase
     .from('categories')
     .delete()
-    .eq('id', params.id)
+    .eq('id', id)
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return new NextResponse(null, { status: 204 })
