@@ -35,10 +35,10 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: true  },
 
   // ── Leverandører ──
-  { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: false },
-  { label: 'FTP/XML/Excel import fra leverandør',                                         done: false },
-  { label: 'Sammenlign import med eksisterende Supabase data (hvad er ændret?)',          done: false },
-  { label: 'Manuel godkendelsesproces for ændringer (nyt produkt / prisændring / udgået)', done: false },
+  { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: true  },
+  { label: 'FTP/XML/CSV/XML import fra leverandør (6 leverandører implementeret)',        done: true  },
+  { label: 'Sammenlign import med eksisterende Supabase data (staging + needs_review)',   done: true  },
+  { label: 'Manuel godkendelsesproces for ændringer (staging review + matching pipeline)', done: true  },
   { label: 'Opdater/upsert godkendte ændringer til Woo (og senere POS mv.)',              done: false },
 
   // ── Ordre & Forsendelse ──
