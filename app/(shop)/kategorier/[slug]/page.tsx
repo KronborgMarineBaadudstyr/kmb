@@ -1,4 +1,5 @@
 import { createServiceClient } from '@/lib/supabase/server'
+import { headers } from 'next/headers'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { ProductCard } from '../../_product-card'
@@ -25,6 +26,58 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
 const PAGE_SIZE = 24
 
+type ApiProduct = {
+  id: string
+  name: string
+  brand?: string | null
+  sales_price?: number | null
+  categories?: string[]
+  primary_image_url?: string | null
+}
+
+async function fetchProducts(opts: {
+  category:  string
+  sort:      string
+  page:      number
+  brand?:    string
+  inStock?:  boolean
+  minPrice?: string
+  maxPrice?: string
+}) {
+  // Build URL for internal API call
+  const hdrs = await headers()
+  const host  = hdrs.get('host') ?? 'localhost:3000'
+  const proto = host.startsWith('localhost') ? 'http' : 'https'
+
+  const [sortCol, sortDir] = opts.sort === 'price_asc'  ? ['sales_price', 'asc']  :
+                             opts.sort === 'price_desc' ? ['sales_price', 'desc'] :
+                             opts.sort === 'name_desc'  ? ['name',        'desc'] :
+                                                          ['name',        'asc']
+
+  const params = new URLSearchParams({
+    category: opts.category,
+    sort:     sortCol,
+    order:    sortDir,
+    page:     String(opts.page),
+    per_page: String(PAGE_SIZE),
+    shop:     '1',
+  })
+  if (opts.brand)    params.set('brand', opts.brand)
+  if (opts.inStock)  params.set('in_stock', '1')
+  if (opts.minPrice) params.set('min_price', opts.minPrice)
+  if (opts.maxPrice) params.set('max_price', opts.maxPrice)
+
+  const res = await fetch(`${proto}://${host}/api/products?${params.toString()}`, {
+    cache: 'no-store',
+  })
+  if (!res.ok) return { products: [], total: 0 }
+  const json = await res.json()
+  return {
+    products: (json.data ?? []) as ApiProduct[],
+    total:    (json.total ?? 0) as number,
+  }
+}
+
 export default async function CategoryPage({
   params,
   searchParams,
@@ -47,7 +100,6 @@ export default async function CategoryPage({
   const inStock  = sp.in_stock  === '1'
   const minPrice = sp.min_price ?? ''
   const maxPrice = sp.max_price ?? ''
-  const offset   = (page - 1) * PAGE_SIZE
 
   const supabase = createServiceClient()
 
@@ -71,35 +123,18 @@ export default async function CategoryPage({
     )
   }
 
-  // Fetch category description
-  const { data: catInfo } = await supabase
-    .from('categories')
-    .select('description')
-    .eq('name', matchedCat)
-    .maybeSingle()
+  // Fetch category description + products via the shared backend engine
+  const [catInfo, { products, total }] = await Promise.all([
+    supabase
+      .from('categories')
+      .select('description')
+      .eq('name', matchedCat)
+      .maybeSingle()
+      .then(r => r.data),
 
-  // Build filtered product query
-  let query = supabase
-    .from('products')
-    .select('id, name, categories, sales_price, brand, product_images(url, is_primary)', { count: 'exact' })
-    .not('status', 'eq', 'archived')
-    .not('status', 'eq', 'rejected')
-    .contains('categories', [matchedCat])
+    fetchProducts({ category: matchedCat, sort, page, brand: brand || undefined, inStock, minPrice: minPrice || undefined, maxPrice: maxPrice || undefined }),
+  ])
 
-  if (brand)    query = query.eq('brand', brand)
-  if (inStock)  query = query.gt('own_stock_quantity', 0)
-  if (minPrice) query = query.gte('sales_price', parseFloat(minPrice))
-  if (maxPrice) query = query.lte('sales_price', parseFloat(maxPrice))
-
-  switch (sort) {
-    case 'price_asc':  query = query.order('sales_price', { ascending: true,  nullsFirst: false }); break
-    case 'price_desc': query = query.order('sales_price', { ascending: false, nullsFirst: false }); break
-    case 'name_desc':  query = query.order('name',        { ascending: false }); break
-    default:           query = query.order('name',        { ascending: true  }); break
-  }
-
-  const { data: products, count } = await query.range(offset, offset + PAGE_SIZE - 1)
-  const total = count ?? 0
   const pages = Math.ceil(total / PAGE_SIZE)
 
   // Fetch available brands for filter chips (unfiltered — always show all brands in category)
@@ -115,7 +150,7 @@ export default async function CategoryPage({
     .filter(Boolean)
     .sort()
 
-  // Price range for hints
+  // Price range hints (unfiltered)
   const { data: priceRange } = await supabase
     .from('products')
     .select('sales_price')
@@ -124,11 +159,11 @@ export default async function CategoryPage({
     .contains('categories', [matchedCat])
     .not('sales_price', 'is', null)
 
-  const prices     = (priceRange ?? []).map(r => r.sales_price as number).filter(Boolean)
-  const globalMin  = prices.length ? Math.min(...prices) : 0
-  const globalMax  = prices.length ? Math.max(...prices) : 0
+  const prices    = (priceRange ?? []).map(r => r.sales_price as number).filter(Boolean)
+  const globalMin = prices.length ? Math.min(...prices) : 0
+  const globalMax = prices.length ? Math.max(...prices) : 0
 
-  // Build base URL for pagination (preserves all filters)
+  // Build URL for pagination (preserves all filters)
   function pageUrl(p: number) {
     const params = new URLSearchParams({ sort, page: String(p) })
     if (brand)    params.set('brand', brand)
@@ -137,6 +172,14 @@ export default async function CategoryPage({
     if (maxPrice) params.set('max_price', maxPrice)
     return `/kategorier/${slug}?${params.toString()}`
   }
+
+  // Map API response to ProductCard shape (API returns primary_image_url, card expects product_images)
+  const mappedProducts = products.map(p => ({
+    ...p,
+    product_images: p.primary_image_url
+      ? [{ url: p.primary_image_url, is_primary: true }]
+      : [],
+  }))
 
   return (
     <>
@@ -149,7 +192,7 @@ export default async function CategoryPage({
         <span style={{ color: 'var(--ink)' }}>{matchedCat}</span>
       </nav>
 
-      {/* Navy kategori-header (improvement 4) */}
+      {/* Navy kategori-header */}
       <div className="ls-cat-listing-hero">
         <div className="ls-cat-listing-hero-content">
           <div className="ls-hero-kicker">
@@ -164,7 +207,7 @@ export default async function CategoryPage({
         </div>
       </div>
 
-      {/* Filter-panel (improvement 5) */}
+      {/* Filter-panel */}
       <Suspense fallback={null}>
         <CategoryFilters
           brands={brands}
@@ -175,12 +218,11 @@ export default async function CategoryPage({
       </Suspense>
 
       {/* Produktgrid */}
-      {products && products.length > 0 ? (
+      {mappedProducts.length > 0 ? (
         <div className="ls-prodgrid">
-          {products.map(p => <ProductCard key={p.id} product={p as any} />)}
+          {mappedProducts.map(p => <ProductCard key={p.id} product={p as any} />)}
         </div>
       ) : (
-        /* Tom state med CTA (improvement 7) */
         <div className="ls-empty">
           <div className="ls-empty-icon">📦</div>
           <h3>Ingen produkter fundet</h3>
@@ -198,7 +240,7 @@ export default async function CategoryPage({
         </div>
       )}
 
-      {/* Pagination med className på Link (improvement 6) */}
+      {/* Pagination */}
       {pages > 1 && (
         <div className="ls-pagination">
           {page > 1 && (
