@@ -22,10 +22,10 @@ const navEntries: NavEntry[] = [
     { href: '/admin/auto-log',       label: 'Auto-handling log',   icon: '🤖' },
   ]},
 
+  { href: '/admin/changes',          label: 'Import-ændringer',    icon: '📋' },
   { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
   { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
   { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },
-  { href: '/admin/changes',          label: 'Import-ændringer',    icon: '📋' },
   { href: '/admin/navigation',       label: 'Båd-navigation',      icon: '⚓' },
   { href: '/admin/bundles',          label: 'Bundler & Kampagner', icon: '🏷️' },
   { href: '/admin/brands',           label: 'Brands',              icon: '🔖' },
