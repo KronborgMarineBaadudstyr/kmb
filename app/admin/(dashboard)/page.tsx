@@ -16,7 +16,7 @@ async function getStats() {
   }
 }
 
-const STEPS: { label: string; done: boolean; group?: string }[] = [
+const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }[] = [
   // ── Fundament ──
   { group: 'Fundament',        label: 'Next.js projekt oprettet og konfigureret',         done: true  },
   { label: 'Supabase projekt oprettet og forbundet',                                       done: true  },
@@ -30,8 +30,8 @@ const STEPS: { label: string; done: boolean; group?: string }[] = [
   { label: 'WooCommerce → Supabase initial import kørt (idempotent upsert)',              done: true  },
   { label: 'Produktliste med kolonne-vælger, filtrering og sortering',                    done: true  },
   { label: 'Produkt detaljevisning med alle felter inkl. tomme',                          done: true  },
-  { label: 'Supabase → WooCommerce sync (publicér/opdatér produkter)',                    done: false },
-  { label: 'Løbende lagersync Woo → Supabase (ca. hvert 15 min, konfigurerbart)',         done: false },
+  { label: 'Supabase → WooCommerce sync (publicér/opdatér produkter)',                    done: false, skipped: true },
+  { label: 'Løbende lagersync Woo → Supabase (ca. hvert 15 min, konfigurerbart)',         done: false, skipped: true },
   { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: true  },
 
   // ── Leverandører ──
@@ -129,12 +129,16 @@ export default async function DashboardPage() {
               )}
               <div className="flex items-start gap-3 py-1">
                 <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 ${
-                  step.done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
+                  step.done    ? 'bg-green-100 text-green-700' :
+                  step.skipped ? 'bg-gray-50 text-gray-300' :
+                                 'bg-gray-100 text-gray-400'
                 }`}>
-                  {step.done ? '✓' : ''}
+                  {step.done ? '✓' : step.skipped ? '–' : ''}
                 </div>
                 <span className={`text-sm leading-relaxed ${
-                  step.done ? 'text-gray-400 line-through' : 'text-gray-700'
+                  step.done    ? 'text-gray-400 line-through' :
+                  step.skipped ? 'text-gray-300 line-through' :
+                                 'text-gray-700'
                 }`}>
                   {step.label}
                 </span>
