@@ -152,10 +152,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
           {suppliers.length > 0 && (
             <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              Leverandør: {suppliers.map(s => {
+              Leverandør: {[...new Set(suppliers.map(s => {
                 const sup = Array.isArray(s.suppliers) ? s.suppliers[0] : s.suppliers
                 return sup?.name
-              }).filter(Boolean).join(', ')}
+              }).filter(Boolean))].join(', ')}
             </div>
           )}
         </div>
