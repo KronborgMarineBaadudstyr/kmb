@@ -92,6 +92,7 @@ const ALLOWED_FIELDS = [
   'boat_type', 'hide_when_out_of_stock',
   'original_number', 'original_number_source',
   'own_stock_quantity', 'own_stock_reserved',
+  'variant_of_product_id',
 ]
 
 export async function PATCH(
@@ -106,6 +107,45 @@ export async function PATCH(
     body = await request.json()
   } catch {
     return NextResponse.json({ error: 'Ugyldig JSON' }, { status: 400 })
+  }
+
+  // Valider variant_of_product_id:
+  // 1. Produktet må ikke pege på sig selv
+  // 2. Et produkt der HAR children (andre peger på det) kan ikke selv blive variant
+  // 3. Et produkt kan kun have ét parent (overskriver evt. eksisterende)
+  if (Object.prototype.hasOwnProperty.call(body, 'variant_of_product_id') && body.variant_of_product_id) {
+    const parentId = body.variant_of_product_id as string
+
+    if (parentId === id) {
+      return NextResponse.json({ error: 'Et produkt kan ikke være variant af sig selv' }, { status: 400 })
+    }
+
+    // Tjek at dette produkt ikke selv er parent for andre
+    const { count: childCount } = await supabase
+      .from('products')
+      .select('id', { count: 'exact', head: true })
+      .eq('variant_of_product_id', id)
+
+    if ((childCount ?? 0) > 0) {
+      return NextResponse.json(
+        { error: 'Dette produkt er overprodukt for andre varianter og kan ikke selv blive en variant' },
+        { status: 400 }
+      )
+    }
+
+    // Tjek at parent ikke selv er variant af noget andet (ingen dybe kæder)
+    const { data: parentRow } = await supabase
+      .from('products')
+      .select('variant_of_product_id')
+      .eq('id', parentId)
+      .single()
+
+    if (parentRow?.variant_of_product_id) {
+      return NextResponse.json(
+        { error: 'Overprodukt er selv en variant — dybe kæder er ikke tilladt' },
+        { status: 400 }
+      )
+    }
   }
 
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }

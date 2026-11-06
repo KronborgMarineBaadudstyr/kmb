@@ -28,6 +28,7 @@ type Product = {
   primary_image_url: string | null
   image_count: number
   hide_when_out_of_stock: boolean
+  variant_of_product_id: string | null
   created_at: string
   updated_at: string
 }
@@ -127,22 +128,32 @@ function ProductVariantFamilyPanel({
     const parentId   = createJson.data?.id
     if (!parentId) { setMsg('Fejl: ' + (createJson.error ?? 'Kunne ikke oprette overprodukt')); setSaving(false); return }
 
-    // 2. Opret product_variants rækker
+    // 2. Opret product_variants rækker + marker originalprodukter som "variant af" parent
     let errors = 0
     for (let i = 0; i < products.length; i++) {
-      const p    = products[i]
-      const vr   = variantRows[i]
+      const p     = products[i]
+      const vr    = variantRows[i]
       const attrs = vr.attrs.filter(a => a.key.trim()).map(a => ({ name: a.key.trim(), value: a.val.trim() }))
-      const res  = await fetch(`/api/products/${parentId}/variants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ attributes: attrs, ean: p.ean, sales_price: p.sales_price }),
-      })
-      const json = await res.json()
-      if (json.error) errors++
+
+      const [varRes, linkRes] = await Promise.all([
+        fetch(`/api/products/${parentId}/variants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ attributes: attrs, ean: p.ean, sales_price: p.sales_price }),
+        }),
+        // Sæt variant_of_product_id på originalprodukt → skjules fra grids
+        fetch(`/api/products/${p.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ variant_of_product_id: parentId }),
+        }),
+      ])
+      const varJson  = await varRes.json()
+      const linkJson = await linkRes.json()
+      if (varJson.error || linkJson.error) errors++
     }
 
-    if (errors > 0) { setMsg(`Oprettet overprodukt, men ${errors} varianter fejlede`); setSaving(false) }
+    if (errors > 0) { setMsg(`Oprettet overprodukt, men ${errors} handlinger fejlede`); setSaving(false) }
     else { setMsg(`✓ Oprettet "${parentName.trim()}" med ${products.length} varianter`); setTimeout(() => { onDone(); onClose() }, 1200) }
   }
 
@@ -706,24 +717,34 @@ export default function ProductsPage() {
                 <tr><td colSpan={colCount} className="px-4 py-12 text-center text-gray-400">Ingen produkter fundet</td></tr>
               )}
               {!loading && products.map(p => {
-                const isSelected = selectedId === p.id
-                const isChecked  = checkedIds.has(p.id)
+                const isSelected  = selectedId === p.id
+                const isChecked   = checkedIds.has(p.id)
+                const isVariantOf = !!p.variant_of_product_id
                 return (
                   <tr key={p.id}
                     onClick={() => setSelectedId(prev => prev === p.id ? null : p.id)}
                     className={`cursor-pointer transition-colors ${
-                      isSelected ? 'bg-blue-50 border-l-2 border-l-blue-500' :
-                      isChecked  ? 'bg-purple-50' : 'hover:bg-gray-50'
+                      isSelected  ? 'bg-blue-50 border-l-2 border-l-blue-500' :
+                      isChecked   ? 'bg-purple-50' :
+                      isVariantOf ? 'bg-amber-50/60 hover:bg-amber-50' :
+                                    'hover:bg-gray-50'
                     }`}>
                     <td className="w-10 px-3 py-2" onClick={e => toggleCheck(p.id, e)}>
                       <input type="checkbox" checked={isChecked} onChange={() => {}}
                         className="w-3.5 h-3.5 accent-purple-600 cursor-pointer" />
                     </td>
                     {cols.map(col => (
-                      <td key={col.key} className={`px-4 py-2 ${col.key === 'name' ? 'max-w-[200px]' : ''} ${
+                      <td key={col.key} className={`px-4 py-2 ${col.key === 'name' ? 'max-w-[220px]' : ''} ${
                         col.key === 'sales_price' || col.key === 'own_stock_quantity' ? 'text-right' : ''
-                      }`}>
-                        {renderCell(col, p)}
+                      } ${isVariantOf ? 'opacity-60' : ''}`}>
+                        {col.key === 'name' && isVariantOf
+                          ? <div>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded mb-0.5 leading-none">
+                                ↳ variant af parent
+                              </span>
+                              <div className="font-medium text-gray-900 line-clamp-2 leading-tight text-sm pl-3">{p.name}</div>
+                            </div>
+                          : renderCell(col, p)}
                       </td>
                     ))}
                     <td className="px-3 py-2">

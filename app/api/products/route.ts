@@ -3,13 +3,19 @@ import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-// GET /api/products?search=&status=&category=&supplier_id=&page=1&per_page=50&sort=name&order=asc
+// GET /api/products?search=&status=&category=&supplier_id=&brand=&in_stock=1&min_price=&max_price=&page=1&per_page=50&sort=name&order=asc
 export async function GET(request: Request) {
   const url        = new URL(request.url)
   const search     = url.searchParams.get('search')      || ''
   const status     = url.searchParams.get('status')      || ''
   const category   = url.searchParams.get('category')    || ''
   const supplierId = url.searchParams.get('supplier_id') || ''
+  const brand      = url.searchParams.get('brand')       || ''
+  const inStock    = url.searchParams.get('in_stock')    === '1'
+  const minPrice   = url.searchParams.get('min_price')   || ''
+  const maxPrice   = url.searchParams.get('max_price')   || ''
+  // shop=1 → exclude archived + rejected + variant_of products automatically
+  const shopMode = url.searchParams.get('shop') === '1'
   const page       = Math.max(1, parseInt(url.searchParams.get('page')     || '1',  10))
   const perPage    = Math.min(100, parseInt(url.searchParams.get('per_page') || '50', 10))
   const sort       = url.searchParams.get('sort')  || 'name'
@@ -100,7 +106,6 @@ export async function GET(request: Request) {
       categories,
       brand,
       status,
-      woo_sync_status,
       woo_product_id,
       woo_bestillingsnummer,
       ean,
@@ -110,6 +115,7 @@ export async function GET(request: Request) {
       unit_size,
       boat_type,
       hide_when_out_of_stock,
+      variant_of_product_id,
       created_at,
       updated_at,
       product_images ( url, alt_text, is_primary, position )
@@ -129,7 +135,18 @@ export async function GET(request: Request) {
     }
   }
   if (status)             query = query.eq('status', status)
+  if (shopMode) {
+    // Shop: skip archived/rejected AND products that are sub-variants of a parent
+    query = query
+      .not('status', 'eq', 'archived')
+      .not('status', 'eq', 'rejected')
+      .is('variant_of_product_id', null)
+  }
   if (category)           query = query.contains('categories', [category])
+  if (brand)              query = query.eq('brand', brand)
+  if (inStock)            query = query.gt('own_stock_quantity', 0)
+  if (minPrice)           query = query.gte('sales_price', parseFloat(minPrice))
+  if (maxPrice)           query = query.lte('sales_price', parseFloat(maxPrice))
   if (supplierProductIds) query = query.in('id', supplierProductIds)
 
   const { data, error, count } = await query
