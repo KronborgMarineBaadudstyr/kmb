@@ -228,7 +228,7 @@ export async function processAutoStage(
           name:              name || `Produkt ${idx + 1}`,
           ean:               r.normalized_ean ?? null,
           manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
-          status:            'draft' as const,
+          status:            'published' as const,
           description:       typeof raw.description === 'string' ? raw.description : null,
           short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
           brand:             typeof raw.brand === 'string' ? raw.brand : null,

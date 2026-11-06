@@ -205,7 +205,7 @@ export async function bulkCreateProductsFromGroups(
         name,
         ean:               isVariant ? null : (group.suggested_ean ?? primary.normalized_ean ?? null),
         manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
-        status:            'draft',
+        status:            'published',
         description:       typeof raw.description       === 'string' ? raw.description       : null,
         short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
         brand:             typeof raw.brand             === 'string' ? raw.brand             : null,
