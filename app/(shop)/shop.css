@@ -1223,24 +1223,21 @@
 .ls-wishlist-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  height: 38px;
-  padding: 0 16px;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
   border-radius: var(--r-md);
-  border: 1.5px solid var(--line);
-  background: var(--card);
+  border: none;
+  background: none;
   font-family: var(--sans);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink-3);
   cursor: pointer;
   text-decoration: none;
-  transition: border-color .15s, color .15s, background .15s;
-  margin-top: 8px;
+  transition: color .15s;
+  margin-top: 4px;
 }
-.ls-wishlist-btn svg { flex-shrink: 0; color: #e55; }
-.ls-wishlist-btn:hover {
-  border-color: #e55;
-  color: #c0392b;
-  background: #fef8f8;
-}
+.ls-wishlist-btn svg { flex-shrink: 0; opacity: .6; }
+.ls-wishlist-btn:hover { color: #c0392b; }
+.ls-wishlist-btn:hover svg { opacity: 1; }
