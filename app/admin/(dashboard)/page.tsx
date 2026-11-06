@@ -2,17 +2,15 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, published, suppliers, orders] = await Promise.all([
+  const [products, published, suppliers] = await Promise.all([
     supabase.from('products').select('*', { count: 'exact', head: true }),
     supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'published'),
     supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('active', true),
-    supabase.from('orders').select('*', { count: 'exact', head: true }),
   ])
   return {
     productCount:   products.count  ?? 0,
     publishedCount: published.count ?? 0,
     supplierCount:  suppliers.count ?? 0,
-    orderCount:     orders.count    ?? 0,
   }
 }
 
@@ -28,8 +26,6 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   // ── Produkter ──
   { group: 'Produkter',        label: 'Produktliste med kolonne-vælger, filtrering og sortering', done: true  },
   { label: 'Produkt detaljevisning og redigering med alle felter',                        done: true  },
-  { label: 'Webhook: ordre modtaget → lagerreservation i Supabase (realtid)',             done: true  },
-
   // ── Leverandører ──
   { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: true  },
   { label: 'FTP/XML/CSV/XML import fra leverandør (6 leverandører implementeret)',        done: true  },
@@ -50,7 +46,7 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
 ]
 
 export default async function DashboardPage() {
-  const { productCount, publishedCount, supplierCount, orderCount } = await getStats()
+  const { productCount, publishedCount, supplierCount } = await getStats()
 
   const doneCount = STEPS.filter(s => s.done).length
 
@@ -66,12 +62,6 @@ export default async function DashboardPage() {
       value: supplierCount > 0 ? supplierCount.toLocaleString('da-DK') : '—',
       sub:   supplierCount > 0 ? 'leverandører konfigureret' : 'Ingen leverandører oprettet endnu',
       color: supplierCount > 0 ? 'text-gray-900' : 'text-gray-400',
-    },
-    {
-      label: 'Ordre i systemet',
-      value: orderCount > 0 ? orderCount.toLocaleString('da-DK') : '—',
-      sub:   orderCount > 0 ? 'ordre modtaget via webhook' : 'Afventer webhook opsætning',
-      color: orderCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
   ]
 
