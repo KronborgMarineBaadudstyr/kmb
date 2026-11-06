@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { assignProductCategory } from '@/lib/standard-categories'
 import { type DBCategory, assignFromDB } from '@/lib/db-categories'
+import { shouldAutoPublish } from '@/lib/bulk-product-creator'
 
 const MATCH_THRESHOLD = 0.85
 const BATCH_SIZE      = 500  // rows per RPC call — keep under statement timeout
@@ -228,7 +229,7 @@ export async function processAutoStage(
           name:              name || `Produkt ${idx + 1}`,
           ean:               r.normalized_ean ?? null,
           manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
-          status:            'published' as const,
+          status:            shouldAutoPublish(raw, 'single') ? 'published' : 'draft',
           description:       typeof raw.description === 'string' ? raw.description : null,
           short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
           brand:             typeof raw.brand === 'string' ? raw.brand : null,

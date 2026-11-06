@@ -4,6 +4,18 @@ import { type DBCategory, assignFromDB } from '@/lib/db-categories'
 
 type RawData = Record<string, unknown>
 
+// Publiceringsregler: produkt publiceres automatisk hvis det har pris, billede,
+// beskrivelse OG kom fra en entydig match (single/ean/variant/parent_sku — ikke fuzzy).
+const AUTO_PUBLISH_METHODS = new Set(['single', 'ean', 'variant', 'parent_sku'])
+
+export function shouldAutoPublish(raw: RawData, matchMethod?: string | null): boolean {
+  const hasPrice       = typeof raw.recommended_sales_price === 'number' && (raw.recommended_sales_price as number) > 0
+  const hasImage       = Array.isArray(raw.supplier_images) && (raw.supplier_images as unknown[]).length > 0
+  const hasDescription = typeof raw.description === 'string' && (raw.description as string).trim().length > 10
+  const goodMatch      = !matchMethod || AUTO_PUBLISH_METHODS.has(matchMethod)
+  return hasPrice && hasImage && hasDescription && goodMatch
+}
+
 type ProductType = {
   id:              string
   keywords:        string[] | null
@@ -205,7 +217,7 @@ export async function bulkCreateProductsFromGroups(
         name,
         ean:               isVariant ? null : (group.suggested_ean ?? primary.normalized_ean ?? null),
         manufacturer_sku:  typeof raw.manufacturer_sku === 'string' && raw.manufacturer_sku ? raw.manufacturer_sku : null,
-        status:            'published',
+        status:            shouldAutoPublish(raw, group.match_method) ? 'published' : 'draft',
         description:       typeof raw.description       === 'string' ? raw.description       : null,
         short_description: typeof raw.short_description === 'string' ? raw.short_description : null,
         brand:             typeof raw.brand             === 'string' ? raw.brand             : null,
