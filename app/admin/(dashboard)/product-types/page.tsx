@@ -5,6 +5,8 @@ import type { AiSuggestion } from '@/app/api/product-types/suggest/route'
 
 type VariantAttribute = { name: string; unit: string }
 
+type CategoryOption = { id: string; name: string; subcategories: { name: string }[] }
+
 type ProductTypeRow = {
   id: string
   name: string
@@ -12,6 +14,7 @@ type ProductTypeRow = {
   variant_attributes: VariantAttribute[]
   our_category: string | null
   our_subcategory: string | null
+  category_id: string | null
   notes: string | null
   active: boolean
 }
@@ -21,12 +24,13 @@ type FormState = {
   keywords: string
   our_category: string
   our_subcategory: string
+  category_id: string
   notes: string
   variant_attributes: VariantAttribute[]
 }
 
 const emptyForm = (): FormState => ({
-  name: '', keywords: '', our_category: '', our_subcategory: '', notes: '',
+  name: '', keywords: '', our_category: '', our_subcategory: '', category_id: '', notes: '',
   variant_attributes: [],
 })
 
@@ -36,6 +40,7 @@ function formFromRow(row: ProductTypeRow): FormState {
     keywords:           row.keywords.join(', '),
     our_category:       row.our_category ?? '',
     our_subcategory:    row.our_subcategory ?? '',
+    category_id:        row.category_id ?? '',
     notes:              row.notes ?? '',
     variant_attributes: row.variant_attributes.map(a => ({ ...a })),
   }
@@ -48,14 +53,21 @@ function FieldHelp({ children }: { children: React.ReactNode }) {
 
 // ─── Form ─────────────────────────────────────────────────────
 function ProductTypeForm({
-  initial, onSave, onCancel, saving,
+  initial, onSave, onCancel, saving, categories,
 }: {
   initial: FormState
   onSave: (f: FormState) => void
   onCancel: () => void
   saving: boolean
+  categories: CategoryOption[]
 }) {
   const [form, setForm] = useState<FormState>(initial)
+
+  // When category_id changes, sync our_category name and reset subcategory
+  function selectCategory(id: string) {
+    const cat = categories.find(c => c.id === id)
+    setForm(f => ({ ...f, category_id: id, our_category: cat?.name ?? '', our_subcategory: '' }))
+  }
 
   function setField<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm(f => ({ ...f, [key]: value }))
@@ -110,15 +122,33 @@ function ProductTypeForm({
       {/* Kategorier */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-semibold text-gray-700 mb-1">Vores kategori</label>
-          <input type="text" value={form.our_category} onChange={e => setField('our_category', e.target.value)}
-            placeholder="Ankre & fortøjning" className={inputCls} />
-          <FieldHelp>Overordnet kategori i webshop — vises for kunden. Bruges på tværs af alle leverandørers produkter af denne type.</FieldHelp>
+          <label className="block text-xs font-semibold text-gray-700 mb-1">Kategori</label>
+          {categories.length > 0 ? (
+            <select value={form.category_id} onChange={e => selectCategory(e.target.value)} className={inputCls}>
+              <option value="">— Vælg kategori —</option>
+              {categories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input type="text" value={form.our_category} onChange={e => setField('our_category', e.target.value)}
+              placeholder="Ankre & fortøjning" className={inputCls} />
+          )}
+          <FieldHelp>Overordnet kategori — bruges til klassificering i webshop og pipeline.</FieldHelp>
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-700 mb-1">Underkategori</label>
-          <input type="text" value={form.our_subcategory} onChange={e => setField('our_subcategory', e.target.value)}
-            placeholder="Ankerkæder" className={inputCls} />
+          {form.category_id && categories.find(c => c.id === form.category_id)?.subcategories.length ? (
+            <select value={form.our_subcategory} onChange={e => setField('our_subcategory', e.target.value)} className={inputCls}>
+              <option value="">— Valgfri underkategori —</option>
+              {(categories.find(c => c.id === form.category_id)?.subcategories ?? []).map(s => (
+                <option key={s.name} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+          ) : (
+            <input type="text" value={form.our_subcategory} onChange={e => setField('our_subcategory', e.target.value)}
+              placeholder="Ankerkæder" className={inputCls} />
+          )}
           <FieldHelp>Mere specifik underkategori (valgfri). Eksempel: Ankre & fortøjning › <span className="font-mono">Ankerkæder</span></FieldHelp>
         </div>
       </div>
@@ -607,6 +637,7 @@ function CategoryManagerModal({
 // ─── Main page ─────────────────────────────────────────────────
 export default function ProductTypesPage() {
   const [rows,        setRows]        = useState<ProductTypeRow[]>([])
+  const [dbCategoryOptions, setDbCategoryOptions] = useState<CategoryOption[]>([])
   const [loading,     setLoading]     = useState(true)
   const [error,       setError]       = useState<string | null>(null)
   const [showNew,     setShowNew]     = useState(false)
@@ -630,9 +661,13 @@ export default function ProductTypesPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null)
     try {
-      const res = await fetch('/api/product-types')
-      if (!res.ok) throw new Error(await res.text())
-      setRows(await res.json())
+      const [ptRes, catRes] = await Promise.all([
+        fetch('/api/product-types'),
+        fetch('/api/categories'),
+      ])
+      if (!ptRes.ok) throw new Error(await ptRes.text())
+      setRows(await ptRes.json())
+      if (catRes.ok) setDbCategoryOptions(await catRes.json() as CategoryOption[])
     } catch (e) { setError(String(e)) }
     finally { setLoading(false) }
   }, [])
@@ -650,6 +685,7 @@ export default function ProductTypesPage() {
           variant_attributes: form.variant_attributes.filter(a => a.name.trim() && a.unit.trim()),
           our_category:       form.our_category.trim() || null,
           our_subcategory:    form.our_subcategory.trim() || null,
+          category_id:        form.category_id || null,
           notes:              form.notes.trim() || null,
         }),
       })
@@ -670,6 +706,7 @@ export default function ProductTypesPage() {
           variant_attributes: form.variant_attributes.filter(a => a.name.trim() && a.unit.trim()),
           our_category:       form.our_category.trim() || null,
           our_subcategory:    form.our_subcategory.trim() || null,
+          category_id:        form.category_id || null,
           notes:              form.notes.trim() || null,
         }),
       })
@@ -982,7 +1019,7 @@ export default function ProductTypesPage() {
         <div className="bg-white border border-blue-200 rounded-lg p-5 shadow-sm">
           <h2 className="text-sm font-semibold text-gray-800 mb-4">Ny produkttype</h2>
           <ProductTypeForm initial={emptyForm()} onSave={handleCreate}
-            onCancel={() => setShowNew(false)} saving={saving} />
+            onCancel={() => setShowNew(false)} saving={saving} categories={dbCategoryOptions} />
         </div>
       )}
 
@@ -1092,7 +1129,7 @@ export default function ProductTypesPage() {
                       <>
                         <h3 className="text-sm font-semibold text-gray-800 mb-4">Rediger: {row.name}</h3>
                         <ProductTypeForm initial={formFromRow(row)} onSave={f => handleUpdate(row.id, f)}
-                          onCancel={() => setEditId(null)} saving={saving} />
+                          onCancel={() => setEditId(null)} saving={saving} categories={dbCategoryOptions} />
                       </>
                     ) : (
                       <div className="flex items-start justify-between gap-4">

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { assignProductCategory } from '@/lib/standard-categories'
+import { type DBCategory, assignFromDB } from '@/lib/db-categories'
 
 const MATCH_THRESHOLD = 0.85
 const BATCH_SIZE      = 500  // rows per RPC call — keep under statement timeout
@@ -64,6 +65,7 @@ export async function processAutoStage(
   supabase:       SupabaseClient,
   runId:          string,
   onProgress:     (matched: number, created: number) => void,
+  dbCategories?:  DBCategory[],
 ): Promise<AutoStageResult> {
   let totalMatched = 0
   let totalCreated = 0
@@ -218,7 +220,7 @@ export async function processAutoStage(
       const productRows = unmatchedRows.map((r, idx) => {
         const raw      = r.raw_data
         const name     = r.normalized_name?.trim() || ''
-        const assigned = assignProductCategory(name)
+        const assigned = dbCategories ? assignFromDB(name, dbCategories) : assignProductCategory(name)
         const cats     = [assigned.category, assigned.subcategory].filter((c): c is string => !!c)
 
         return {

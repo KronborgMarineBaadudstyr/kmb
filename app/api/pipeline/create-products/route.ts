@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { bulkCreateProductsFromGroups } from '@/lib/bulk-product-creator'
 import { assignProductCategory } from '@/lib/standard-categories'
+import { loadCategories, assignFromDB } from '@/lib/db-categories'
 import { processAutoStage } from '@/lib/auto-stage-processor'
 import { PipelineRun } from '@/lib/pipeline-run'
 
@@ -53,6 +54,9 @@ export async function GET(request: Request) {
       }
     }
 
+    // Load DB categories once for all steps in this route
+    const dbCategories = await loadCategories(supabase)
+
     try {
       // ── STEP 4: Bulk-create products for confirmed groups ────────
       send({ stage: 'auto_create', status: 'running', message: 'Opretter produkter i bulk…' })
@@ -65,7 +69,7 @@ export async function GET(request: Request) {
       let remaining    = 0
 
       do {
-        const result = await bulkCreateProductsFromGroups(supabase, 2000)
+        const result = await bulkCreateProductsFromGroups(supabase, 2000, dbCategories)
         totalCreated += result.created
         totalSkipped += result.skipped
         remaining     = result.remaining
@@ -115,7 +119,9 @@ export async function GET(request: Request) {
 
         const groups = new Map<string, string[]>()
         for (const p of batch as { id: string; name: string }[]) {
-          const { category, subcategory, boatType } = assignProductCategory(p.name)
+          const { category, subcategory, boatType } = dbCategories.length > 0
+            ? assignFromDB(p.name, dbCategories)
+            : assignProductCategory(p.name)
           const cats = [category, subcategory].filter(Boolean) as string[]
           const key  = JSON.stringify({ cats, boatType })
           if (!groups.has(key)) groups.set(key, [])
@@ -218,7 +224,7 @@ export async function GET(request: Request) {
               message: `${m} matchet til eksisterende · ${c} nye oprettet…`,
             })
           }
-        })
+        }, dbCategories.length > 0 ? dbCategories : undefined)
         autoMatched = result.matched
         autoCreated = result.created
         summary.auto_matched = autoMatched

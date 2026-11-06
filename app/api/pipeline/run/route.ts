@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { runMatchingEngine } from '@/lib/matching-engine'
 import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
+import { loadCategories, normalizeCategoryFromDB, buildDedupMapFromDB } from '@/lib/db-categories'
 import { PipelineRun } from '@/lib/pipeline-run'
 
 export const dynamic    = 'force-dynamic'
@@ -24,10 +25,13 @@ export async function GET() {
     // Send run id so create-products can attach to same run
     send({ stage: 'run_id', run_id: run.id })
 
+    // Load DB categories once — used in steps 1 and passed via run_id to create-products
+    const dbCategories = await loadCategories(supabase)
+
     try {
-      // ── STEP 1: Apply standard categories + strip prefixes ──────
-      send({ stage: 'categories', status: 'running', message: 'Anvender standardstruktur på kategorier…' })
-      await run.updateStep('categories', { status: 'running', message: 'Anvender standardstruktur på kategorier…' })
+      // ── STEP 1: Normalize product_types.our_category to DB category names ──
+      send({ stage: 'categories', status: 'running', message: 'Normaliserer kategorier mod DB…' })
+      await run.updateStep('categories', { status: 'running', message: 'Normaliserer kategorier mod DB…' })
 
       const { data: catRows } = await supabase
         .from('product_types')
@@ -36,16 +40,20 @@ export async function GET() {
 
       const allCats = [...new Set((catRows ?? []).map(r => r.our_category as string))]
 
-      // Phase 1: normalize to standard
+      // Phase 1: normalize against DB categories (fallback to hardcoded)
       const phase1 = new Map<string, string>()
       for (const cat of allCats) {
-        const final = normalizeCategory(cat)
+        const final = dbCategories.length > 0
+          ? normalizeCategoryFromDB(cat, dbCategories)
+          : normalizeCategory(cat)
         if (final !== cat) phase1.set(cat, final)
       }
 
       // Phase 2: fuzzy dedup on post-phase1 names
       const afterPhase1 = allCats.map(c => phase1.get(c) ?? c)
-      const phase2 = buildDedupeMap([...new Set(afterPhase1)])
+      const phase2 = dbCategories.length > 0
+        ? buildDedupMapFromDB([...new Set(afterPhase1)], dbCategories)
+        : buildDedupeMap([...new Set(afterPhase1)])
 
       for (const cat of allCats) {
         const afterP1 = phase1.get(cat) ?? cat

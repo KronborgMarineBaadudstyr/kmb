@@ -12,7 +12,7 @@ type CategoryRow = {
   boat_types: string[]
   sort_order: number
   active: boolean
-  product_count?: number
+  product_type_count?: number
 }
 
 const BOAT_TYPE_OPTIONS = ['sejlbåd', 'motorbåd']
@@ -214,7 +214,7 @@ function CategoryCard({
           />
           <span className="text-xs text-gray-400 shrink-0">
             {cat.subcategories.length} underkategorier
-            {cat.product_count != null && ` · ${cat.product_count} produkter`}
+            {(cat.product_type_count ?? 0) > 0 && ` · ${cat.product_type_count} produkttyper`}
           </span>
         </button>
 

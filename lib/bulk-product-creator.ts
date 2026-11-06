@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { assignProductCategory } from '@/lib/standard-categories'
+import { type DBCategory, assignFromDB } from '@/lib/db-categories'
 
 type RawData = Record<string, unknown>
 
@@ -122,6 +123,7 @@ function inferBaseName(members: StagingRow[], suggestedName: string | null): str
 export async function bulkCreateProductsFromGroups(
   supabase: SupabaseClient,
   limit = 2000,
+  dbCategories?: DBCategory[],
 ): Promise<{ created: number; skipped: number; remaining: number }> {
 
   // 0. Load product types for category matching
@@ -183,7 +185,9 @@ export async function bulkCreateProductsFromGroups(
     const primary = [...members].sort((a, b) => completenessScore(b.raw_data) - completenessScore(a.raw_data))[0]
     const raw     = primary.raw_data
 
-    const assigned    = assignProductCategory(name)
+    const assigned = dbCategories
+      ? assignFromDB(name, dbCategories)
+      : assignProductCategory(name)
     const matchedType = assigned.category ? null : findProductType(name, productTypes)
     const categories: string[] = assigned.category
       ? [assigned.category, assigned.subcategory].filter((c): c is string => !!c)

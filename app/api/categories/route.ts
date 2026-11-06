@@ -5,13 +5,21 @@ export const dynamic = 'force-dynamic'
 
 export async function GET() {
   const supabase = createServiceClient()
-  const { data, error } = await supabase
-    .from('categories')
-    .select('*')
-    .order('sort_order')
+  const [{ data, error }, { data: ptCounts }] = await Promise.all([
+    supabase.from('categories').select('*').order('sort_order'),
+    supabase.from('product_types').select('category_id').not('category_id', 'is', null),
+  ])
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+
+  // Count product types per category
+  const countMap: Record<string, number> = {}
+  for (const pt of ptCounts ?? []) {
+    if (pt.category_id) countMap[pt.category_id] = (countMap[pt.category_id] ?? 0) + 1
+  }
+
+  const result = (data ?? []).map(cat => ({ ...cat, product_type_count: countMap[cat.id] ?? 0 }))
+  return NextResponse.json(result)
 }
 
 export async function POST(request: Request) {
