@@ -87,6 +87,16 @@ export default function InventoryPage() {
   const [order,       setOrder]       = useState<'asc' | 'desc'>('asc')
   const [detailId,    setDetailId]    = useState<string | null>(null)
   const [expanded,    setExpanded]    = useState<Set<string>>(new Set())
+  const [lastSynced,  setLastSynced]  = useState<string | null>(null)
+
+  useEffect(() => {
+    fetch('/api/suppliers')
+      .then(r => r.json())
+      .then((suppliers: { last_synced_at: string | null }[]) => {
+        const dates = suppliers.map(s => s.last_synced_at).filter(Boolean) as string[]
+        if (dates.length > 0) setLastSynced(dates.sort().at(-1)!)
+      })
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -215,9 +225,19 @@ export default function InventoryPage() {
             ))}
           </div>
 
-          <button onClick={load} className="ml-auto px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
-            ↻ Opdater
-          </button>
+          <div className="ml-auto flex flex-col items-end gap-0.5">
+            <button onClick={load} className="px-3 py-1.5 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-gray-50">
+              ↻ Opdater
+            </button>
+            {lastSynced && (
+              <span
+                className="text-xs text-gray-400 cursor-default"
+                title={`Senest importeret: ${new Date(lastSynced).toLocaleString('da-DK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}\n\nLageropgørelserne opdateres automatisk fra leverandørernes systemer via de planlagte cron-jobs.`}
+              >
+                Senest importeret {new Date(lastSynced).toLocaleString('da-DK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 

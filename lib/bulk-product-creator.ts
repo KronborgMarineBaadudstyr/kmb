@@ -232,7 +232,24 @@ export async function bulkCreateProductsFromGroups(
     })
   }
 
-  if (prepared.length === 0) return { created: 0, skipped: skipped.length, remaining: 0 }
+  // Mark truly unprocessable groups as 'skipped' so they don't loop forever in remaining count
+  if (skipped.length > 0) {
+    const now = new Date().toISOString()
+    for (let i = 0; i < skipped.length; i += 100) {
+      await supabase.from('staging_match_groups')
+        .update({ status: 'skipped', updated_at: now })
+        .in('id', skipped.slice(i, i + 100))
+    }
+  }
+
+  if (prepared.length === 0) {
+    const { count: rem } = await supabase
+      .from('staging_match_groups')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'confirmed')
+      .is('product_id', null)
+    return { created: 0, skipped: skipped.length, remaining: rem ?? 0 }
+  }
 
   // 4a. Check for existing products with the same name → link instead of re-creating
   const { data: existingByName } = await supabase

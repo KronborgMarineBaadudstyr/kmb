@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const supabase = createServiceClient()
 
-  const [{ data: filters }, { data: cats }] = await Promise.all([
+  const [{ data: filters }, { data: cats }, { data: variants }] = await Promise.all([
     supabase
       .from('category_attribute_filters')
       .select('*')
@@ -15,14 +15,14 @@ export async function GET() {
       .order('position')
       .order('attribute_name'),
     supabase.rpc('get_all_categories'),
+    supabase.from('product_variants').select('attributes').limit(5000),
   ])
 
-  // Fallback: hent kategorier manuelt hvis RPC ikke findes
+  // Kendte kategorier
   let categories: string[] = []
   if (cats) {
     categories = (cats as { category: string }[]).map(r => r.category)
   } else {
-    // Hent direkte fra products (langsom fallback)
     const { data: prods } = await supabase.from('products').select('categories')
     if (prods) {
       const set = new Set<string>()
@@ -33,7 +33,16 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ data: filters ?? [], categories })
+  // Kendte attributnavne fra product_variants.attributes
+  const attrSet = new Set<string>()
+  for (const v of (variants ?? []) as { attributes: { name?: string }[] }[]) {
+    for (const a of (v.attributes ?? [])) {
+      if (a.name) attrSet.add(a.name)
+    }
+  }
+  const knownAttributes = [...attrSet].sort()
+
+  return NextResponse.json({ data: filters ?? [], categories, knownAttributes })
 }
 
 // POST — opret ny category_attribute_filter

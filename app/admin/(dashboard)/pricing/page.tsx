@@ -131,6 +131,11 @@ function AdjustPricesPanel({
                 </button>
               ))}
             </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              {field === 'sales_price'
+                ? 'Salgspris er den normale pris kunden ser og betaler.'
+                : 'Tilbudspris er en midlertidig kampagnepris oven på salgsprisen. Produkter uden en eksisterende tilbudspris springes over ved "% ændring" — brug "Fast pris" eller "Beløb ±" for at sætte en ny tilbudspris fra bunden.'}
+            </p>
           </div>
 
           {/* Justeringsmetode */}
@@ -307,13 +312,15 @@ function CampaignPanel({
         <div className="flex-1 overflow-auto px-6 py-5 space-y-5">
           {/* Navn */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Kampagnenavn</label>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Kampagnenavn</label>
+            <p className="text-xs text-amber-600 mb-1.5">⚠ Kan være synligt for kunden som forklaring på prisen</p>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="F.eks. Sommersalg 2026"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Beskrivelse (valgfri)</label>
-            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Intern note om kampagnen…"
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">Beskrivelse (valgfri)</label>
+            <p className="text-xs text-amber-600 mb-1.5">⚠ Kan være synligt for kunden — beskriv tilbuddet som om kunden læser det</p>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="F.eks. &quot;Spar 20% på alt tilbehør i juli måned. Rabatten trækkes automatisk i kurven.&quot;"
               className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
 
@@ -474,9 +481,10 @@ export default function PricingPage() {
   const [searchInput, setSearchInput] = useState('')
   const [catFilter,   setCatFilter]   = useState('')
   const [categories,  setCategories]  = useState<string[]>([])
-  const [checkedIds,  setCheckedIds]  = useState<Set<string>>(new Set())
-  const [panel,       setPanel]       = useState<'adjust' | 'campaign' | null>(null)
-  const [detailId,    setDetailId]    = useState<string | null>(null)
+  const [checkedIds,      setCheckedIds]      = useState<Set<string>>(new Set())
+  const [selectingAll,    setSelectingAll]    = useState(false)
+  const [panel,           setPanel]           = useState<'adjust' | 'campaign' | null>(null)
+  const [detailId,        setDetailId]        = useState<string | null>(null)
 
   // Load pricing data (missing prices)
   async function loadPricing() {
@@ -539,11 +547,23 @@ export default function PricingPage() {
     setCheckedIds(prev => prev.size === ids.length && ids.every(id => prev.has(id)) ? new Set() : new Set(ids))
   }
 
-  // Select whole category
+  // Select all matching the current search + catFilter across all pages
+  async function selectAllMatching() {
+    setSelectingAll(true)
+    const params = new URLSearchParams({ per_page: '5000', sort: 'name', order: 'asc' })
+    if (search)    params.set('search',   search)
+    if (catFilter) params.set('category', catFilter)
+    const res  = await fetch(`/api/products?${params}`)
+    const json: AllProductsResponse = await res.json()
+    setCheckedIds(new Set((json.data ?? []).map(p => p.id)))
+    setSelectingAll(false)
+  }
+
+  // Select whole category (also applies filter)
   function selectCategory(cat: string) {
-    const catIds = allProducts.filter(p => p.categories?.includes(cat)).map(p => p.id)
-    setCheckedIds(new Set(catIds))
     setCatFilter(cat)
+    setAllPage(1)
+    // IDs are fetched via selectAllMatching after filter applies
   }
 
   const currentRows = tab === 'adjust' ? allProducts
@@ -554,8 +574,19 @@ export default function PricingPage() {
     !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.internal_sku?.toLowerCase().includes(search.toLowerCase())
   ) : currentRows
 
+  // For adjust tab: checkedProducts includes all selected IDs, even those not on current page.
+  // We store a map of all ever-loaded products to resolve off-page selections.
+  const [loadedProductMap, setLoadedProductMap] = useState<Map<string, ListProduct>>(new Map())
+  useEffect(() => {
+    setLoadedProductMap(prev => {
+      const next = new Map(prev)
+      allProducts.forEach(p => next.set(p.id, p))
+      return next
+    })
+  }, [allProducts])
+
   const checkedProducts = tab === 'adjust'
-    ? allProducts.filter(p => checkedIds.has(p.id))
+    ? [...checkedIds].map(id => loadedProductMap.get(id)).filter((p): p is ListProduct => !!p)
     : (searchFiltered as ListProduct[]).filter(p => checkedIds.has(p.id))
 
   const STATUS: Record<string, string> = { draft: 'bg-gray-100 text-gray-600', validated: 'bg-blue-100 text-blue-700', published: 'bg-green-100 text-green-700' }
@@ -633,10 +664,10 @@ export default function PricingPage() {
             {categories.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         )}
-        {tab === 'adjust' && catFilter && (
-          <button onClick={() => selectCategory(catFilter)}
-            className="px-3 py-1.5 text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
-            Vælg alle i &quot;{catFilter}&quot;
+        {tab === 'adjust' && (search || catFilter) && (
+          <button onClick={selectAllMatching} disabled={selectingAll}
+            className="px-3 py-1.5 text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors disabled:opacity-50">
+            {selectingAll ? 'Henter…' : `Vælg alle ${allTotal.toLocaleString('da-DK')} resultater`}
           </button>
         )}
 
