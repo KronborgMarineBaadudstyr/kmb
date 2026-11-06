@@ -20,7 +20,7 @@ export async function GET(
       product_files  ( id, url, file_name, file_type, language, position, source ),
       product_variants (
         id, internal_variant_sku, attributes, own_stock_quantity,
-        own_stock_reserved, sales_price, sale_price, ean, woo_variation_id, status,
+        own_stock_reserved, sales_price, sale_price, ean, status,
         variant_barcodes ( id, ean, is_primary, note, created_at )
       ),
       product_suppliers (

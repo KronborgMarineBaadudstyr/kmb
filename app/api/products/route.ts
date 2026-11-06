@@ -106,7 +106,6 @@ export async function GET(request: Request) {
       categories,
       brand,
       status,
-      woo_product_id,
       woo_bestillingsnummer,
       ean,
       manufacturer_sku,

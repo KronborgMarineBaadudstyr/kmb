@@ -26,7 +26,7 @@ export type Variant = {
   sales_price: number | null; sale_price: number | null; ean: string | null
   weight: number | null
   hide_when_out_of_stock: boolean
-  woo_variation_id: number | null; status: string
+  status: string
   variant_barcodes?: VariantBarcode[]
   supplier?: {
     name: string; supplier_sku: string; supplier_product_name: string | null
@@ -62,17 +62,14 @@ export type Product = {
   attributes: { name: string; value: string | string[] }[]
   specifications: Record<string, unknown> | null
   video_url: string | null
-  woo_product_id: number | null
   woo_bestillingsnummer: string | null
   pos_product_id: string | null
   meta_title: string | null
   meta_description: string | null
   status: string
-  woo_sync_status: string | null
   hide_when_out_of_stock: boolean
   created_at: string
   updated_at: string
-  last_synced_woo_at: string | null
   last_synced_pos_at: string | null
   original_number: string | null
   original_number_source: string | null
@@ -1020,12 +1017,6 @@ export function ProductDetail({
         <option value="validated">Valideret</option>
         <option value="published">Publiceret</option>
       </select>
-      {product.woo_product_id && (
-        <a href={`https://kronborgmarinebaadudstyr.dk/wp-admin/post.php?post=${product.woo_product_id}&action=edit`}
-          target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline shrink-0">
-          Woo →
-        </a>
-      )}
       {mode === 'panel' && onClose && (
         <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0 ml-1">×</button>
       )}
@@ -1472,14 +1463,6 @@ export function ProductDetail({
             onSave={v => patchField({ meta_description: v }, 'meta_description')} saving={saving.has('meta_description')} />
         </dl>
       </Section>
-      <Section title="WooCommerce">
-        <dl>
-          <Field label="Woo produkt-ID" value={product.woo_product_id} />
-          <Field label="Sync status"    value={product.woo_sync_status} />
-          <Field label="Sidst synkret"  value={product.last_synced_woo_at ? new Date(product.last_synced_woo_at).toLocaleString('da-DK') : null} />
-          <Field label="Bestillingsnr." value={product.woo_bestillingsnummer} mono />
-        </dl>
-      </Section>
       <Section title="POS (admind)">
         <dl>
           <Field label="POS produkt-ID" value={product.pos_product_id} mono />
@@ -1601,14 +1584,6 @@ export function ProductDetail({
                   onSave={v => patchField({ meta_title: v }, 'meta_title')} saving={saving.has('meta_title')} />
                 <InlineField label="Meta-beskrivelse" value={product.meta_description} multiline
                   onSave={v => patchField({ meta_description: v }, 'meta_description')} saving={saving.has('meta_description')} />
-              </dl>
-            </Section>
-            <Section title="WooCommerce">
-              <dl>
-                <Field label="Woo produkt-ID" value={product.woo_product_id} />
-                <Field label="Sync status"    value={product.woo_sync_status} />
-                <Field label="Sidst synkret"  value={product.last_synced_woo_at ? new Date(product.last_synced_woo_at).toLocaleString('da-DK') : null} />
-                <Field label="Bestillingsnr." value={product.woo_bestillingsnummer} mono />
               </dl>
             </Section>
             <Section title="POS (admind)">

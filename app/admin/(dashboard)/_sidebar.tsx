@@ -32,7 +32,6 @@ const navEntries: NavEntry[] = [
   { href: '/admin/navigation',       label: 'Båd-navigation',      icon: '⚓' },
   { href: '/admin/category-filters', label: 'Kategori-søgefiltre', icon: '🔍' },
   { href: '/admin/product-types',    label: 'Produkttyper',        icon: '🏷' },
-  { href: '/admin/sync',             label: 'Sync & Logs',         icon: '🔄' },
 ]
 
 export default function SidebarClient() {

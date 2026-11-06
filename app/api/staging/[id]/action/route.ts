@@ -174,7 +174,6 @@ export async function POST(
         unit:            row.normalized_unit      ?? null,
         unit_size:       row.normalized_unit_size ?? null,
         status:          'draft',
-        woo_sync_status: null,
       })
       .select('id')
       .single()

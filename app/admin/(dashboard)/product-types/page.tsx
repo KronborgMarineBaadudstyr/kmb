@@ -176,7 +176,7 @@ function ProductTypeForm({
           {form.variant_attributes.map((attr, i) => (
             <div key={i} className="flex gap-2 items-center">
               <div className="flex-1">
-                {i === 0 && <p className="text-xs text-gray-400 mb-1">Egenskabsnavn (vises i Woo)</p>}
+                {i === 0 && <p className="text-xs text-gray-400 mb-1">Egenskabsnavn (vises i shop)</p>}
                 <input type="text" value={attr.name} onChange={e => setAttr(i, 'name', e.target.value)}
                   placeholder="fx Godstyklelse, Længde, Bredde"
                   className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />

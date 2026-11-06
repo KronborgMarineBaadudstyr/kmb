@@ -170,7 +170,7 @@ export default function CategoryFiltersPage() {
         <h1 className="text-2xl font-bold text-gray-900 mb-1">Kategori-søgefiltre</h1>
         <p className="text-sm text-gray-500">
           Angiv hvilke variant-attributter der eksponeres som søgefiltre per kategori i shoppen.
-          Bruges ved WooCommerce-sync til at konfigurere attribut-filtre i layered navigation.
+          Styrer hvilke attribut-filtre der vises på kategorisiderne i shoppen.
         </p>
       </div>
 
@@ -267,7 +267,7 @@ export default function CategoryFiltersPage() {
         <div className="mt-6 p-4 bg-blue-50 rounded-xl border border-blue-200 text-xs text-blue-700 space-y-1">
           <p className="font-semibold">Sådan bruges konfigurationen:</p>
           <ul className="list-disc list-inside space-y-0.5 text-blue-600">
-            <li>Attributter med <strong>Søgefilter = ON</strong> markeres som filtrerbare i WooCommerce ved sync</li>
+            <li>Attributter med <strong>Søgefilter = ON</strong> vises som filtre i shoppen</li>
             <li>Filterlabel bruges som visningsnavn i shoppens filterpanel (layered navigation)</li>
             <li>Position styrer rækkefølgen af filtre i filterpanelet</li>
             <li>Attributter skal matche navne på produkt-varianter præcist (store/kleine bogstaver tæller)</li>

@@ -1,14 +1,13 @@
 # KronborgMarine Bådudstyr — PIM/Middleware System
 
 Central middleware der forbinder leverandører, Supabase (master database), egen webshop (LoveSailing.dk, `app/(shop)`) og admind POS.
-WooCommerce udfases — der bygges ingen ny Woo-integration; shop og betaling laves selv.
+Ingen WooCommerce-integration — shop og betaling bygges selv. Kolonnerne `woo_product_id`/`woo_bestillingsnummer` er historiske data fra engangsimporten (bestillingsnr. bruges i søgning).
 
 ## Tech Stack
 - **Framework:** Next.js (App Router), TypeScript, Tailwind CSS
 - **Database:** Supabase (PostgreSQL) — cloud, service role key til server-side
 - **FTP:** `basic-ftp` pakke
 - **XML parsing:** `fast-xml-parser`
-- **WooCommerce:** `@woocommerce/woocommerce-rest-api` — kun legacy (engangsimport af gamle produkter), udfases
 - **Cron jobs:** Vercel Cron (vercel.json) med `CRON_SECRET` Bearer token auth
 
 ## Projekt-struktur
@@ -126,10 +125,6 @@ SQL-funktion der stripper farver (rød/blå/sort/etc.) og retningsord inden fuzz
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-WOO_BASE_URL=
-WOO_CONSUMER_KEY=
-WOO_CONSUMER_SECRET=
-WOO_WEBHOOK_SECRET=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
 RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises linket kun på skærmen)
 ```

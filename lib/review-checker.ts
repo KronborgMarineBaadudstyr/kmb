@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 export type ReviewReason = 'ikke_i_salg' | 'mangler_beskrivelse' | 'mangler_salgspris'
 
 export const REVIEW_REASON_LABELS: Record<ReviewReason, string> = {
-  ikke_i_salg:         'Ikke i salg (ingen Woo/POS tilknytning)',
+  ikke_i_salg:         'Ikke i salg (gammel regel)',
   mangler_beskrivelse:  'Mangler beskrivelse',
   mangler_salgspris:    'Mangler salgspris',
 }
@@ -28,15 +28,13 @@ export async function flagRecentlyImportedForReview(
       id:             string
       description:    string | null
       sales_price:    number | null
-      woo_product_id: number | null
-      pos_product_id: string | null
     } | null
   }> = []
 
   for (let p = 0; ; p++) {
     const { data } = await supabase
       .from('product_suppliers')
-      .select('supplier_sku, supplier_product_name, product:products(id, description, sales_price, woo_product_id, pos_product_id)')
+      .select('supplier_sku, supplier_product_name, product:products(id, description, sales_price)')
       .eq('supplier_id', supplierId)
       .gt('updated_at', since.toISOString())
       .range(p * 1000, p * 1000 + 999)
@@ -59,8 +57,6 @@ export async function flagRecentlyImportedForReview(
     if (!row.product) continue
     const reasons: ReviewReason[] = []
 
-    if (!row.product.woo_product_id && !row.product.pos_product_id)
-      reasons.push('ikke_i_salg')
     if (!row.product.description)
       reasons.push('mangler_beskrivelse')
     if (!row.product.sales_price)

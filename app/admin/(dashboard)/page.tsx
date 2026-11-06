@@ -2,15 +2,15 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, wooLinked, suppliers, orders] = await Promise.all([
+  const [products, shopUsers, suppliers, orders] = await Promise.all([
     supabase.from('products').select('*', { count: 'exact', head: true }),
-    supabase.from('products').select('*', { count: 'exact', head: true }).not('woo_product_id', 'is', null),
+    supabase.from('shop_users').select('*', { count: 'exact', head: true }),
     supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('active', true),
     supabase.from('orders').select('*', { count: 'exact', head: true }),
   ])
   return {
     productCount:  products.count  ?? 0,
-    wooCount:      wooLinked.count ?? 0,
+    shopUserCount: shopUsers.count ?? 0,
     supplierCount: suppliers.count ?? 0,
     orderCount:    orders.count    ?? 0,
   }
@@ -25,21 +25,22 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   { label: 'Password-beskyttet dashboard (middleware + cookie)',                           done: true  },
   { label: 'Deploy til Vercel',                                                             done: true  },
 
-  // ── WooCommerce ──
-  { group: 'WooCommerce',      label: 'WooCommerce API forbundet (37.011 produkter)',      done: true  },
-  { label: 'WooCommerce → Supabase initial import kørt (idempotent upsert)',              done: true  },
+  // ── Produktdata ──
+  { group: 'Produktdata',      label: 'Engangsimport af eksisterende produkter (37.011)',  done: true  },
   { label: 'Produktliste med kolonne-vælger, filtrering og sortering',                    done: true  },
-  { label: 'Produkt detaljevisning med alle felter inkl. tomme',                          done: true  },
-  { label: 'Supabase → WooCommerce sync (publicér/opdatér produkter)',                    done: false, skipped: true },
-  { label: 'Løbende lagersync Woo → Supabase (ca. hvert 15 min, konfigurerbart)',         done: false, skipped: true },
-  { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: true  },
+  { label: 'Produktredigering inkl. billeder, varianter og variantfamilier',              done: true  },
+
+  // ── Webshop ──
+  { group: 'Webshop (LoveSailing.dk)', label: 'Shop-frontend: forside, kategorier, filtre, søgning, produktside', done: true },
+  { label: 'Kurv + "Gem kurv" med e-mail-link (shop_users)',                              done: true  },
+  { label: 'Checkout + eget betalingssystem',                                             done: false },
+  { label: 'Lagertræk ved salg (webshop + POS)',                                          done: false },
 
   // ── Leverandører ──
   { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: true  },
   { label: 'FTP/XML/CSV/XML import fra leverandør (6 leverandører implementeret)',        done: true  },
   { label: 'Sammenlign import med eksisterende Supabase data (staging + needs_review)',   done: true  },
   { label: 'Manuel godkendelsesproces for ændringer (staging review + matching pipeline)', done: true  },
-  { label: 'Opdater/upsert godkendte ændringer til Woo (og senere POS mv.)',              done: false },
 
   // ── Ordre & Forsendelse ──
   { group: 'Ordre & Forsendelse', label: 'Ordre-routing motor (optimal leverandørvalg pr. ordre)', done: false },
@@ -54,7 +55,7 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
 ]
 
 export default async function DashboardPage() {
-  const { productCount, wooCount, supplierCount, orderCount } = await getStats()
+  const { productCount, shopUserCount, supplierCount, orderCount } = await getStats()
 
   const doneCount = STEPS.filter(s => s.done).length
 
@@ -62,7 +63,7 @@ export default async function DashboardPage() {
     {
       label: 'Produkter i Supabase',
       value: productCount > 0 ? productCount.toLocaleString('da-DK') : '—',
-      sub:   productCount > 0 ? `${wooCount.toLocaleString('da-DK')} linket til WooCommerce` : 'Kør WooCommerce import',
+      sub:   productCount > 0 ? 'produkter i masterdatabasen' : 'Ingen produkter endnu',
       color: productCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
     {
@@ -72,15 +73,15 @@ export default async function DashboardPage() {
       color: supplierCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
     {
-      label: 'Woo-synkede produkter',
-      value: wooCount > 0 ? wooCount.toLocaleString('da-DK') : '—',
-      sub:   wooCount > 0 ? 'har woo_product_id' : 'Afventer import',
-      color: wooCount > 0 ? 'text-gray-900' : 'text-gray-400',
+      label: 'Shop-kunder',
+      value: shopUserCount > 0 ? shopUserCount.toLocaleString('da-DK') : '—',
+      sub:   shopUserCount > 0 ? 'e-mails i shop_users' : 'Ingen endnu',
+      color: shopUserCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
     {
       label: 'Ordre i systemet',
       value: orderCount > 0 ? orderCount.toLocaleString('da-DK') : '—',
-      sub:   orderCount > 0 ? 'ordre modtaget via webhook' : 'Afventer webhook opsætning',
+      sub:   orderCount > 0 ? 'ordrer i systemet' : 'Afventer checkout',
       color: orderCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
   ]
