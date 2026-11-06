@@ -1026,7 +1026,7 @@ export function ProductDetail({
   const variantOfBanner = product.variant_of_product_id ? (
     <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-800 shrink-0">
       <span className="font-semibold">↳ Variant af</span>
-      <a href={`/products/${product.variant_of_product_id}`} className="underline hover:text-amber-900 truncate">
+      <a href={`/admin/products/${product.variant_of_product_id}`} className="underline hover:text-amber-900 truncate">
         {product.variant_parent?.name ?? 'overprodukt'}
       </a>
       <span className="text-amber-600">— skjult i shop-grids</span>

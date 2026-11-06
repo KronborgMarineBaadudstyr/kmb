@@ -317,7 +317,7 @@ const ALL_COLUMNS: ColDef[] = [
   { key: 'internal_sku',        label: 'Varenr.',          sortable: 'internal_sku',       defaultOn: true  },
   { key: 'manufacturer_sku',    label: 'Prod. SKU',        defaultOn: false },
   { key: 'ean',                 label: 'EAN',              defaultOn: false },
-  { key: 'woo_bestillingsnummer', label: 'Bestillingsnr.', defaultOn: false },
+  { key: 'woo_bestillingsnummer', label: 'Bestillingsnr.', defaultOn: false }, // reference fra Woo-import
   { key: 'brand',               label: 'Brand',            defaultOn: false },
   { key: 'categories',          label: 'Kategori',         defaultOn: true  },
   { key: 'sales_price',         label: 'Pris',             sortable: 'sales_price',        defaultOn: true  },
@@ -794,7 +794,7 @@ export default function ProductsPage() {
                           Frigør
                         </button>
                       )}
-                      <Link href={`/products/${p.id}`}
+                      <Link href={`/admin/products/${p.id}`}
                         title="Åbn på egen side"
                         className="text-gray-300 hover:text-blue-500 text-base transition-colors">
                         ↗

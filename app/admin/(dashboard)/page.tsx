@@ -2,17 +2,19 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, shopUsers, suppliers, orders] = await Promise.all([
+  const [products, published, shopUsers, suppliers, orders] = await Promise.all([
     supabase.from('products').select('*', { count: 'exact', head: true }),
+    supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'published'),
     supabase.from('shop_users').select('*', { count: 'exact', head: true }),
     supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('active', true),
     supabase.from('orders').select('*', { count: 'exact', head: true }),
   ])
   return {
-    productCount:  products.count  ?? 0,
-    shopUserCount: shopUsers.count ?? 0,
-    supplierCount: suppliers.count ?? 0,
-    orderCount:    orders.count    ?? 0,
+    productCount:   products.count  ?? 0,
+    publishedCount: published.count ?? 0,
+    shopUserCount:  shopUsers.count ?? 0,
+    supplierCount:  suppliers.count ?? 0,
+    orderCount:     orders.count    ?? 0,
   }
 }
 
@@ -41,6 +43,7 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   { label: 'FTP/XML/CSV/XML import fra leverandør (6 leverandører implementeret)',        done: true  },
   { label: 'Sammenlign import med eksisterende Supabase data (staging + needs_review)',   done: true  },
   { label: 'Manuel godkendelsesproces for ændringer (staging review + matching pipeline)', done: true  },
+  { label: 'Eget lager-justering med årsagskode og audit-log',                            done: true  },
 
   // ── Ordre & Forsendelse ──
   { group: 'Ordre & Forsendelse', label: 'Ordre-routing motor (optimal leverandørvalg pr. ordre)', done: false },
@@ -55,15 +58,15 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
 ]
 
 export default async function DashboardPage() {
-  const { productCount, shopUserCount, supplierCount, orderCount } = await getStats()
+  const { productCount, publishedCount, shopUserCount, supplierCount, orderCount } = await getStats()
 
   const doneCount = STEPS.filter(s => s.done).length
 
   const cards = [
     {
-      label: 'Produkter i Supabase',
+      label: 'Produkter i alt',
       value: productCount > 0 ? productCount.toLocaleString('da-DK') : '—',
-      sub:   productCount > 0 ? 'produkter i masterdatabasen' : 'Ingen produkter endnu',
+      sub:   productCount > 0 ? `${publishedCount.toLocaleString('da-DK')} publicerede` : 'Ingen produkter endnu',
       color: productCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
     {

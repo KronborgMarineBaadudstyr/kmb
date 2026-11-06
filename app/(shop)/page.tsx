@@ -37,6 +37,13 @@ function slugify(s: string) {
 async function getHomeData() {
   const supabase = createServiceClient()
 
+  // Total product count (all non-archived/rejected)
+  const { count: totalCount } = await supabase
+    .from('products')
+    .select('id', { count: 'exact', head: true })
+    .not('status', 'eq', 'archived')
+    .not('status', 'eq', 'rejected')
+
   // Top categories by product count
   const { data: allProds } = await supabase
     .from('products')
@@ -75,7 +82,7 @@ async function getHomeData() {
     .order('sales_price', { ascending: true })
     .limit(12)
 
-  const total = allProds?.length ?? 0
+  const total = totalCount ?? 0
 
   return { topCategories, newest: newest ?? [], priced: priced ?? [], total }
 }
@@ -87,15 +94,32 @@ export default async function HomePage() {
     <>
       {/* Hero */}
       <div className="ls-hero">
-        <div className="ls-hero-kicker">Marine bådudstyr</div>
-        <h1>Udrust din båd<br />— til alle eventyr</h1>
-        <p>
-          {total.toLocaleString('da-DK')} produkter fra de bedste brands.
-          Sejl-, motor- og fritidsbåde.
-        </p>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <Link href="/kategorier" className="ls-btn-primary">Se alle kategorier</Link>
-          <Link href="/soeg" className="ls-btn-ghost">Søg i kataloget</Link>
+        {/* Dekorativ geometri */}
+        <div className="ls-hero-deco" aria-hidden="true">
+          <div className="ls-hero-deco-circle ls-hero-deco-circle--1" />
+          <div className="ls-hero-deco-circle ls-hero-deco-circle--2" />
+          <div className="ls-hero-deco-stripe" />
+        </div>
+
+        <div className="ls-hero-content">
+          <div className="ls-hero-kicker">
+            <span className="ls-hero-kicker-dot" />
+            Marine bådudstyr
+          </div>
+          <h1>Udrust din båd<br /><em>— til alle eventyr</em></h1>
+          <p>
+            {total.toLocaleString('da-DK')} produkter fra de bedste brands.
+            Til sejl-, motor- og fritidsbåde.
+          </p>
+          <div className="ls-hero-actions">
+            <Link href="/kategorier" className="ls-btn-primary">Se alle kategorier</Link>
+            <Link href="/soeg" className="ls-btn-ghost">Søg i kataloget</Link>
+          </div>
+          <div className="ls-hero-usps">
+            <span>✓ Gratis fragt over 500 kr</span>
+            <span>✓ Hurtig levering</span>
+            <span>✓ 30 dages returret</span>
+          </div>
         </div>
       </div>
 
@@ -133,7 +157,7 @@ export default async function HomePage() {
       {priced.length > 0 && (
         <>
           <div className="ls-section-header" style={{ marginTop: 8 }}>
-            <h2>Fra kr 0 og op</h2>
+            <h2>Populære produkter</h2>
             <Link href="/soeg">Udforsk</Link>
           </div>
           <div className="ls-rail">

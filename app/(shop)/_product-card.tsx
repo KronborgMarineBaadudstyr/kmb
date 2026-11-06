@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCart, fmtPrice } from './_cart'
+import { useCart } from './_cart'
 import { useState } from 'react'
 
 type Product = {
@@ -16,6 +16,18 @@ type Product = {
   primary_image_url?: string | null
 }
 
+function PriceDisplay({ price }: { price: number }) {
+  const whole = Math.floor(price)
+  const cents = Math.round((price - whole) * 100)
+  return (
+    <span className="ls-prodcard-price-wrap">
+      <span className="ls-prodcard-price-kr">kr</span>
+      <span className="ls-prodcard-price-whole">{whole.toLocaleString('da-DK')}</span>
+      {cents > 0 && <span className="ls-prodcard-price-cents">,{String(cents).padStart(2, '0')}</span>}
+    </span>
+  )
+}
+
 export function ProductCard({ product: p }: { product: Product }) {
   const { add } = useCart()
   const [toasted, setToasted] = useState(false)
@@ -25,10 +37,8 @@ export function ProductCard({ product: p }: { product: Product }) {
     ?? p.product_images?.[0]?.url
 
   const hasVariants = (p.variant_count ?? 0) > 0
-  // Vis "fra X kr" fra laveste variant — eller produktets egen pris
-  const displayPrice = hasVariants
-    ? (p.min_variant_price ?? p.sales_price)
-    : p.sales_price
+  const displayPrice = hasVariants ? (p.min_variant_price ?? p.sales_price) : p.sales_price
+  const firstCat = p.categories?.[0]
 
   function handleAdd(e: React.MouseEvent) {
     e.preventDefault()
@@ -55,33 +65,22 @@ export function ProductCard({ product: p }: { product: Product }) {
         )}
       </div>
       <div className="ls-prodcard-body">
-        {p.brand && <div className="ls-prodcard-brand">{p.brand}</div>}
+        <div className="ls-prodcard-meta">
+          {p.brand && <span className="ls-prodcard-brand">{p.brand}</span>}
+          {firstCat && <span className="ls-prodcard-cat">{firstCat}</span>}
+        </div>
         <div className="ls-prodcard-name">{p.name}</div>
         <div className="ls-prodcard-price">
           {displayPrice
             ? <>
                 {hasVariants && <span className="ls-prodcard-price-from">fra </span>}
-                {fmtPrice(displayPrice)}
+                <PriceDisplay price={displayPrice} />
               </>
-            : <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>Pris ukendt</span>
-          }
+            : <span className="ls-prodcard-price-unknown">Pris ukendt</span>}
         </div>
         <button
           onClick={handleAdd}
-          style={{
-            marginTop: 8,
-            padding: '7px 12px',
-            background: toasted ? 'var(--stock)' : 'var(--navy)',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 'var(--r-sm)',
-            fontSize: 12,
-            fontWeight: 700,
-            cursor: 'pointer',
-            fontFamily: 'var(--sans)',
-            transition: 'background .2s',
-            width: '100%',
-          }}
+          className={`ls-prodcard-btn${toasted ? ' toasted' : ''}`}
         >
           {toasted ? '✓ Lagt i kurv' : hasVariants ? 'Vælg variant →' : 'Læg i kurv'}
         </button>

@@ -2,18 +2,17 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { AddToCartBtn } from './_add-to-cart'
+import { VariantPicker } from './_variant-picker'
+import { WishlistBtn } from './_wishlist-btn'
+import { ProductCard } from '../../_product-card'
 
 export const dynamic = 'force-dynamic'
 
 function formatDescription(text: string): string {
   return text
-    // literal \n → real newline
     .replace(/\\n/g, '\n')
-    // **bold** → <strong>
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // · → bullet (already correct, but normalize escaped versions)
     .replace(/\\·/g, '·')
-    // newline → <br>
     .replace(/\n/g, '<br>')
 }
 
@@ -63,7 +62,6 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     .sort((a, b) => (b.is_primary ? 1 : 0) - (a.is_primary ? 1 : 0) || a.position - b.position)
 
   const primaryImage = images[0]?.url
-
   const cats = (p.categories as string[] | null) ?? []
   const firstCat = cats[0]
 
@@ -79,13 +77,49 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   }
 
   const specs: [string, string][] = []
-  if (p.ean)               specs.push(['EAN', p.ean])
-  if (p.manufacturer_sku)  specs.push(['Producent varenr.', p.manufacturer_sku])
-  if (p.internal_sku)      specs.push(['Varenr.', p.internal_sku])
-  if (p.weight)            specs.push(['Vægt', `${p.weight} kg`])
-  if (p.length)            specs.push(['Længde', `${p.length} cm`])
-  if (p.width)             specs.push(['Bredde', `${p.width} cm`])
-  if (p.height)            specs.push(['Højde', `${p.height} cm`])
+  if (p.ean)              specs.push(['EAN', p.ean])
+  if (p.manufacturer_sku) specs.push(['Producent varenr.', p.manufacturer_sku])
+  if (p.internal_sku)     specs.push(['Varenr.', p.internal_sku])
+  if (p.weight)           specs.push(['Vægt', `${p.weight} kg`])
+  if (p.length)           specs.push(['Længde', `${p.length} cm`])
+  if (p.width)            specs.push(['Bredde', `${p.width} cm`])
+  if (p.height)           specs.push(['Højde', `${p.height} cm`])
+
+  // Fetch variants
+  const { data: variantRows } = await supabase
+    .from('product_variants')
+    .select('id, internal_variant_sku, attributes, sales_price, own_stock_quantity')
+    .eq('product_id', id)
+    .eq('status', 'active')
+    .order('internal_variant_sku')
+
+  const variants = (variantRows ?? []) as {
+    id: string
+    internal_variant_sku: string
+    attributes: { name: string; value: string }[]
+    sales_price: number | null
+    own_stock_quantity: number
+  }[]
+
+  // Fetch related products from same category (excluding this product)
+  const { data: relatedRows } = firstCat
+    ? await supabase
+        .from('products')
+        .select('id, name, categories, sales_price, brand, product_images(url, is_primary)')
+        .contains('categories', [firstCat])
+        .not('status', 'eq', 'archived')
+        .not('status', 'eq', 'rejected')
+        .neq('id', id)
+        .limit(8)
+    : { data: [] }
+
+  const related = (relatedRows ?? []) as {
+    id: string; name: string; categories: string[];
+    sales_price: number | null; brand: string | null;
+    product_images: { url: string; is_primary: boolean }[]
+  }[]
+
+  const hasVariants = variants.length > 0
 
   return (
     <>
@@ -117,10 +151,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           {p.brand && <div className="ls-pdp-brand">{p.brand}</div>}
           <h1 className="ls-pdp-name">{p.name}</h1>
 
-          {p.sales_price ? (
-            <div className="ls-pdp-price">{fmtPrice(p.sales_price)}</div>
-          ) : (
-            <div className="ls-pdp-price" style={{ fontSize: 16, color: 'var(--ink-3)' }}>Kontakt for pris</div>
+          {!hasVariants && (
+            p.sales_price
+              ? <div className="ls-pdp-price">{fmtPrice(p.sales_price)}</div>
+              : <div className="ls-pdp-price" style={{ fontSize: 16, color: 'var(--ink-3)' }}>Kontakt for pris</div>
           )}
 
           {p.short_description && (
@@ -128,9 +162,21 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
               dangerouslySetInnerHTML={{ __html: formatDescription(p.short_description) }} />
           )}
 
-          <AddToCartBtn
-            product={{ id: p.id, name: p.name, price: p.sales_price ?? 0, image: primaryImage }}
-          />
+          {/* Variant picker — replaces simple add-to-cart when variants exist */}
+          {hasVariants
+            ? <VariantPicker
+                variants={variants}
+                productId={p.id}
+                productName={p.name}
+                basePrice={p.sales_price ?? null}
+                image={primaryImage}
+              />
+            : <AddToCartBtn
+                product={{ id: p.id, name: p.name, price: p.sales_price ?? 0, image: primaryImage }}
+              />
+          }
+
+          <WishlistBtn name={p.name} price={p.sales_price} image={primaryImage} />
 
           {p.description && (
             <div className="ls-pdp-desc" style={{ marginTop: 8 }}
@@ -152,14 +198,27 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
           {suppliers.length > 0 && (
             <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              Leverandør: {suppliers.map(s => {
+              Leverandør: {[...new Set(suppliers.map(s => {
                 const sup = Array.isArray(s.suppliers) ? s.suppliers[0] : s.suppliers
                 return sup?.name
-              }).filter(Boolean).join(', ')}
+              }).filter(Boolean))].join(', ')}
             </div>
           )}
         </div>
       </div>
+
+      {/* Relaterede produkter */}
+      {related.length > 0 && (
+        <>
+          <div className="ls-section-header" style={{ marginTop: 48 }}>
+            <h2>Flere i {firstCat}</h2>
+            <Link href={`/kategorier/${slugify(firstCat!)}`}>Se alle</Link>
+          </div>
+          <div className="ls-prodgrid ls-prodgrid--related">
+            {related.map(r => <ProductCard key={r.id} product={r as any} />)}
+          </div>
+        </>
+      )}
 
       <div style={{ height: 48 }} />
     </>
