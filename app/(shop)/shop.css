@@ -1,6 +1,5 @@
-/* Kronborg Marine Bådudstyr — design tokens + base styles
-   Brand: Navy #1a2543 / #242f62 · Accent orange #FF8500
-   Fonts: Playfair Display (serif) · Source Sans Pro (sans)
+/* LoveSailing.dk — design tokens + base styles
+   Farvepalette: Kronborg Marine navy + orange accent
    ================================================================ */
 
 :root {
@@ -9,8 +8,8 @@
   --navy-ink:  #0f1829;
   --navy-soft: #242f62;
   --navy-700:  #2e3d7a;
-  --accent:    #FF8500;
-  --accent-deep:#d97000;
+  --red:       #FF8500;
+  --red-deep:  #d97000;
   --cream:     #f4f6fa;
   --bone:      #f8f9fc;
   --paper:     #f0f2f8;
@@ -37,8 +36,8 @@
   --r-xl: 20px;
 
   /* shadows */
-  --sh-card: 0 1px 2px rgba(13,42,74,.05), 0 1px 1px rgba(13,42,74,.04);
-  --sh-pop:  0 2px 8px rgba(13,42,74,.10), 0 18px 40px rgba(13,42,74,.16);
+  --sh-card: 0 1px 2px rgba(26,37,67,.05), 0 1px 1px rgba(26,37,67,.04);
+  --sh-pop:  0 2px 8px rgba(26,37,67,.10), 0 18px 40px rgba(26,37,67,.16);
 
   /* fonts */
   --sans:  var(--font-sans, "Source Sans Pro", system-ui, sans-serif);
@@ -155,7 +154,7 @@
 .ls-header-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
 .ls-header-btn.active { background: rgba(255,255,255,.15); color: #fff; }
 .ls-cart-badge {
-  background: var(--accent);
+  background: var(--red);
   color: #fff;
   font-size: 10px;
   font-weight: 800;
@@ -256,7 +255,7 @@
   align-items: center;
   gap: 7px;
   padding: 11px 22px;
-  background: var(--accent);
+  background: var(--red);
   color: #fff;
   font-family: var(--sans);
   font-weight: 700;
@@ -267,7 +266,7 @@
   text-decoration: none;
   transition: background .15s;
 }
-.ls-btn-primary:hover { background: var(--accent-deep); }
+.ls-btn-primary:hover { background: var(--red-deep); }
 .ls-btn-ghost {
   display: inline-flex;
   align-items: center;

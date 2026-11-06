@@ -22,7 +22,7 @@ export function ShopHeader() {
     <header className="ls-header">
       <div className="ls-header-inner">
         <Link href="/" className="ls-logo">
-          <span className="ls-logo-text">Kronborg Marine<span> Bådudstyr</span></span>
+          <img src="/Logo-horisontal-dark.png" alt="LoveSailing.dk" height={40} />
         </Link>
 
         <form className="ls-search-bar" onSubmit={handleSearch}>
@@ -107,7 +107,7 @@ function CartIcon({ c }: { c: number }) {
         <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
       </svg>
       {c > 0 && (
-        <span style={{ position:'absolute', top:-5, right:-6, background:'var(--accent)', color:'#fff',
+        <span style={{ position:'absolute', top:-5, right:-6, background:'#c8102e', color:'#fff',
           fontSize:9, fontWeight:800, minWidth:16, height:16, borderRadius:8,
           display:'flex', alignItems:'center', justifyContent:'center', padding:'0 3px' }}>
           {c}

@@ -54,7 +54,7 @@ export function ProductCard({ product: p }: { product: Product }) {
           style={{
             marginTop: 8,
             padding: '7px 12px',
-            background: toasted ? 'var(--stock)' : 'var(--accent)',
+            background: toasted ? 'var(--stock)' : 'var(--navy)',
             color: '#fff',
             border: 'none',
             borderRadius: 'var(--r-sm)',

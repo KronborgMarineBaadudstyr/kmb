@@ -19,8 +19,8 @@ const playfair = Playfair_Display({
 })
 
 export const metadata: Metadata = {
-  title: { default: 'Kronborg Marine Bådudstyr', template: '%s — Kronborg Marine Bådudstyr' },
-  description: 'Bådudstyr til sejl- og motorbåde. Stort udvalg fra de bedste brands til konkurrencedygtige priser.',
+  title: { default: 'LoveSailing.dk', template: '%s — LoveSailing.dk' },
+  description: 'Marine bådudstyr til sejl- og motorbåde. Stort udvalg fra de bedste brands.',
 }
 
 export default function ShopLayout({ children }: { children: React.ReactNode }) {
