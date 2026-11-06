@@ -37,6 +37,13 @@ function slugify(s: string) {
 async function getHomeData() {
   const supabase = createServiceClient()
 
+  // Total product count (all non-archived/rejected)
+  const { count: totalCount } = await supabase
+    .from('products')
+    .select('id', { count: 'exact', head: true })
+    .not('status', 'eq', 'archived')
+    .not('status', 'eq', 'rejected')
+
   // Top categories by product count
   const { data: allProds } = await supabase
     .from('products')
@@ -75,7 +82,7 @@ async function getHomeData() {
     .order('sales_price', { ascending: true })
     .limit(12)
 
-  const total = allProds?.length ?? 0
+  const total = totalCount ?? 0
 
   return { topCategories, newest: newest ?? [], priced: priced ?? [], total }
 }
