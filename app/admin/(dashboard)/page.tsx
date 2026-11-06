@@ -2,17 +2,17 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, wooLinked, suppliers, orders] = await Promise.all([
+  const [products, published, suppliers, orders] = await Promise.all([
     supabase.from('products').select('*', { count: 'exact', head: true }),
-    supabase.from('products').select('*', { count: 'exact', head: true }).not('woo_product_id', 'is', null),
+    supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'published'),
     supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('active', true),
     supabase.from('orders').select('*', { count: 'exact', head: true }),
   ])
   return {
-    productCount:  products.count  ?? 0,
-    wooCount:      wooLinked.count ?? 0,
-    supplierCount: suppliers.count ?? 0,
-    orderCount:    orders.count    ?? 0,
+    productCount:   products.count  ?? 0,
+    publishedCount: published.count ?? 0,
+    supplierCount:  suppliers.count ?? 0,
+    orderCount:     orders.count    ?? 0,
   }
 }
 
@@ -25,14 +25,10 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   { label: 'Password-beskyttet dashboard (middleware + cookie)',                           done: true  },
   { label: 'Deploy til Vercel',                                                             done: true  },
 
-  // ── WooCommerce ──
-  { group: 'WooCommerce',      label: 'WooCommerce API forbundet (37.011 produkter)',      done: true  },
-  { label: 'WooCommerce → Supabase initial import kørt (idempotent upsert)',              done: true  },
-  { label: 'Produktliste med kolonne-vælger, filtrering og sortering',                    done: true  },
-  { label: 'Produkt detaljevisning med alle felter inkl. tomme',                          done: true  },
-  { label: 'Supabase → WooCommerce sync (publicér/opdatér produkter)',                    done: false, skipped: true },
-  { label: 'Løbende lagersync Woo → Supabase (ca. hvert 15 min, konfigurerbart)',         done: false, skipped: true },
-  { label: 'Webhook: ordre modtaget i Woo → lagerreservation i Supabase (realtid)',       done: true  },
+  // ── Produkter ──
+  { group: 'Produkter',        label: 'Produktliste med kolonne-vælger, filtrering og sortering', done: true  },
+  { label: 'Produkt detaljevisning og redigering med alle felter',                        done: true  },
+  { label: 'Webhook: ordre modtaget → lagerreservation i Supabase (realtid)',             done: true  },
 
   // ── Leverandører ──
   { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: true  },
@@ -54,15 +50,15 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
 ]
 
 export default async function DashboardPage() {
-  const { productCount, wooCount, supplierCount, orderCount } = await getStats()
+  const { productCount, publishedCount, supplierCount, orderCount } = await getStats()
 
   const doneCount = STEPS.filter(s => s.done).length
 
   const cards = [
     {
-      label: 'Produkter i Supabase',
+      label: 'Produkter i alt',
       value: productCount > 0 ? productCount.toLocaleString('da-DK') : '—',
-      sub:   productCount > 0 ? `${wooCount.toLocaleString('da-DK')} linket til WooCommerce` : 'Kør WooCommerce import',
+      sub:   productCount > 0 ? `${publishedCount.toLocaleString('da-DK')} publicerede` : 'Ingen produkter endnu',
       color: productCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
     {
@@ -70,12 +66,6 @@ export default async function DashboardPage() {
       value: supplierCount > 0 ? supplierCount.toLocaleString('da-DK') : '—',
       sub:   supplierCount > 0 ? 'leverandører konfigureret' : 'Ingen leverandører oprettet endnu',
       color: supplierCount > 0 ? 'text-gray-900' : 'text-gray-400',
-    },
-    {
-      label: 'Woo-synkede produkter',
-      value: wooCount > 0 ? wooCount.toLocaleString('da-DK') : '—',
-      sub:   wooCount > 0 ? 'har woo_product_id' : 'Afventer import',
-      color: wooCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
     {
       label: 'Ordre i systemet',

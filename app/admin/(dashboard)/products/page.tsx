@@ -256,7 +256,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 type ColKey =
   | 'image' | 'name' | 'internal_sku' | 'manufacturer_sku' | 'ean'
   | 'woo_bestillingsnummer' | 'brand' | 'categories' | 'sales_price'
-  | 'own_stock_quantity' | 'weight' | 'status' | 'woo_sync_status'
+  | 'own_stock_quantity' | 'weight' | 'status'
   | 'shop_visibility' | 'image_count' | 'created_at' | 'updated_at'
 
 type ColDef = { key: ColKey; label: string; sortable?: string; defaultOn: boolean }
@@ -267,7 +267,7 @@ const ALL_COLUMNS: ColDef[] = [
   { key: 'internal_sku',        label: 'Varenr.',          sortable: 'internal_sku',       defaultOn: true  },
   { key: 'manufacturer_sku',    label: 'Prod. SKU',        defaultOn: false },
   { key: 'ean',                 label: 'EAN',              defaultOn: false },
-  { key: 'woo_bestillingsnummer', label: 'Bestillingsnr.', defaultOn: false },
+  { key: 'woo_bestillingsnummer', label: 'Bestillingsnr.', defaultOn: false }, // reference fra Woo-import
   { key: 'brand',               label: 'Brand',            defaultOn: false },
   { key: 'categories',          label: 'Kategori',         defaultOn: true  },
   { key: 'sales_price',         label: 'Pris',             sortable: 'sales_price',        defaultOn: true  },
@@ -276,7 +276,6 @@ const ALL_COLUMNS: ColDef[] = [
   { key: 'shop_visibility',      label: 'Shop synlighed',   defaultOn: true  },
   { key: 'image_count',         label: 'Billeder',         defaultOn: false },
   { key: 'status',              label: 'Status',           defaultOn: true  },
-  { key: 'woo_sync_status',     label: 'Woo sync',         defaultOn: true  },
   { key: 'created_at',          label: 'Oprettet',         sortable: 'created_at',         defaultOn: false },
   { key: 'updated_at',          label: 'Sidst opdateret',  sortable: 'updated_at',         defaultOn: false },
 ]
@@ -537,14 +536,6 @@ export default function ProductsPage() {
           </button>
         )
       }
-      case 'woo_sync_status':
-        return p.woo_product_id ? (
-          <span className={`text-xs px-2 py-0.5 rounded-full ${
-            p.woo_sync_status === 'synced' ? 'bg-green-50 text-green-600' :
-            p.woo_sync_status === 'error'  ? 'bg-red-50 text-red-600'    :
-                                             'bg-yellow-50 text-yellow-600'
-          }`}>{p.woo_sync_status ?? 'ukendt'}</span>
-        ) : <span className="text-xs text-gray-300">—</span>
       case 'created_at':
         return <span className="text-xs text-gray-500">{new Date(p.created_at).toLocaleDateString('da-DK')}</span>
       case 'updated_at':

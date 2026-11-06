@@ -9,7 +9,6 @@ export async function GET() {
       service_key:   !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       anon_key:      !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
       dashboard_pw:  !!process.env.DASHBOARD_PASSWORD,
-      woo_url:       !!process.env.WOO_BASE_URL,
     }
   })
 }
