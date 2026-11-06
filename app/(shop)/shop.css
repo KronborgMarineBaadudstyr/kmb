@@ -223,38 +223,104 @@
 .ls-hero {
   background: var(--navy);
   border-radius: var(--r-xl);
-  padding: 40px 36px;
-  margin: 24px 0;
+  padding: 48px 40px 44px;
+  margin: 20px 0;
   color: #fff;
   position: relative;
   overflow: hidden;
 }
+
+/* Dekorativ geometri */
+.ls-hero-deco { position: absolute; inset: 0; pointer-events: none; }
+.ls-hero-deco-circle {
+  position: absolute;
+  border-radius: 50%;
+  opacity: .07;
+  background: #fff;
+}
+.ls-hero-deco-circle--1 {
+  width: 420px; height: 420px;
+  right: -120px; top: -140px;
+}
+.ls-hero-deco-circle--2 {
+  width: 240px; height: 240px;
+  right: 80px; bottom: -100px;
+  opacity: .04;
+}
+.ls-hero-deco-stripe {
+  position: absolute;
+  top: 0; right: 160px; bottom: 0;
+  width: 4px;
+  background: var(--red);
+  opacity: .6;
+  transform: skewX(-8deg);
+}
+
+.ls-hero-content { position: relative; z-index: 1; max-width: 560px; }
+
 .ls-hero-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-size: 11px;
   font-weight: 800;
   letter-spacing: .15em;
   text-transform: uppercase;
-  color: rgba(255,255,255,.55);
-  margin-bottom: 10px;
+  color: var(--red);
+  margin-bottom: 14px;
 }
+.ls-hero-kicker-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+}
+
 .ls-hero h1 {
   font-family: var(--serif);
-  font-size: 42px;
-  font-weight: 600;
-  line-height: 1.1;
-  margin: 0 0 12px;
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1.08;
+  margin: 0 0 16px;
+  letter-spacing: -.01em;
 }
+.ls-hero h1 em {
+  font-style: italic;
+  font-weight: 400;
+  color: rgba(255,255,255,.75);
+}
+
 .ls-hero p {
-  font-size: 15px;
-  color: rgba(255,255,255,.7);
-  margin: 0 0 24px;
-  max-width: 400px;
+  font-size: 16px;
+  color: rgba(255,255,255,.65);
+  margin: 0 0 28px;
+  line-height: 1.55;
 }
+
+.ls-hero-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.ls-hero-usps {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.ls-hero-usps span {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,.5);
+  letter-spacing: .01em;
+}
+
 .ls-btn-primary {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 11px 22px;
+  padding: 12px 24px;
   background: var(--red);
   color: #fff;
   font-family: var(--sans);
@@ -264,15 +330,15 @@
   border: none;
   cursor: pointer;
   text-decoration: none;
-  transition: background .15s;
+  transition: background .15s, transform .1s;
 }
-.ls-btn-primary:hover { background: var(--red-deep); }
+.ls-btn-primary:hover { background: var(--red-deep); transform: translateY(-1px); }
 .ls-btn-ghost {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 11px 22px;
-  background: rgba(255,255,255,.12);
+  padding: 12px 24px;
+  background: rgba(255,255,255,.1);
   color: #fff;
   font-family: var(--sans);
   font-weight: 600;
@@ -283,11 +349,15 @@
   text-decoration: none;
   transition: background .15s;
 }
-.ls-btn-ghost:hover { background: rgba(255,255,255,.18); }
+.ls-btn-ghost:hover { background: rgba(255,255,255,.17); }
 
 @media (max-width: 767px) {
-  .ls-hero { padding: 28px 20px; margin: 12px 0; border-radius: var(--r-lg); }
-  .ls-hero h1 { font-size: 30px; }
+  .ls-hero { padding: 32px 20px 28px; margin: 12px 0; border-radius: var(--r-lg); }
+  .ls-hero h1 { font-size: 34px; }
+  .ls-hero p { font-size: 14px; }
+  .ls-hero-deco-circle--1 { width: 280px; height: 280px; right: -80px; top: -100px; }
+  .ls-hero-usps { gap: 12px; }
+  .ls-hero-usps span { font-size: 11px; }
 }
 
 /* ── SECTION HEADER ──────────────────────────────────────────── */
