@@ -133,7 +133,7 @@ export default async function HomePage() {
       {priced.length > 0 && (
         <>
           <div className="ls-section-header" style={{ marginTop: 8 }}>
-            <h2>Fra kr 0 og op</h2>
+            <h2>Populære produkter</h2>
             <Link href="/soeg">Udforsk</Link>
           </div>
           <div className="ls-rail">

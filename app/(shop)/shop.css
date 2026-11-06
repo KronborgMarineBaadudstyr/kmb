@@ -1,27 +1,28 @@
-/* LoveSailing.dk — design tokens + base styles
-   Baseret på design handoff (styles.css + desktop.css fra mockup)
+/* Kronborg Marine Bådudstyr — design tokens + base styles
+   Brand: Navy #1a2543 / #242f62 · Accent orange #FF8500
+   Fonts: Playfair Display (serif) · Source Sans Pro (sans)
    ================================================================ */
 
 :root {
   /* brand */
-  --navy:      #0d2a4a;
-  --navy-ink:  #07172b;
-  --navy-soft: #1a3a63;
-  --navy-700:  #234b78;
-  --red:       #c8102e;
-  --red-deep:  #a50d26;
-  --cream:     #f4ede0;
-  --bone:      #faf6ee;
-  --paper:     #f6efe1;
+  --navy:      #1a2543;
+  --navy-ink:  #0f1829;
+  --navy-soft: #242f62;
+  --navy-700:  #2e3d7a;
+  --accent:    #FF8500;
+  --accent-deep:#d97000;
+  --cream:     #f4f6fa;
+  --bone:      #f8f9fc;
+  --paper:     #f0f2f8;
 
   /* neutrals */
   --ink:    #11202f;
   --ink-2:  #41505f;
   --ink-3:  #6b7888;
-  --line:   #e7e1d4;
-  --line-2: #efe9dd;
+  --line:   #dde2ef;
+  --line-2: #e8ecf5;
   --card:   #ffffff;
-  --bg:     #f3eee3;
+  --bg:     #f0f2f8;
 
   /* functional */
   --stock:    #1f8a5b;
@@ -40,8 +41,8 @@
   --sh-pop:  0 2px 8px rgba(13,42,74,.10), 0 18px 40px rgba(13,42,74,.16);
 
   /* fonts */
-  --sans:  var(--font-sans, "Hanken Grotesk", system-ui, sans-serif);
-  --serif: var(--font-serif, "Cormorant Garamond", Georgia, serif);
+  --sans:  var(--font-sans, "Source Sans Pro", system-ui, sans-serif);
+  --serif: var(--font-serif, "Playfair Display", Georgia, serif);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -154,7 +155,7 @@
 .ls-header-btn:hover { background: rgba(255,255,255,.1); color: #fff; }
 .ls-header-btn.active { background: rgba(255,255,255,.15); color: #fff; }
 .ls-cart-badge {
-  background: var(--red);
+  background: var(--accent);
   color: #fff;
   font-size: 10px;
   font-weight: 800;
@@ -255,7 +256,7 @@
   align-items: center;
   gap: 7px;
   padding: 11px 22px;
-  background: var(--red);
+  background: var(--accent);
   color: #fff;
   font-family: var(--sans);
   font-weight: 700;
@@ -266,7 +267,7 @@
   text-decoration: none;
   transition: background .15s;
 }
-.ls-btn-primary:hover { background: var(--red-deep); }
+.ls-btn-primary:hover { background: var(--accent-deep); }
 .ls-btn-ghost {
   display: inline-flex;
   align-items: center;
