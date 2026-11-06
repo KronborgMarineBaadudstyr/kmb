@@ -86,6 +86,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - … (012–049 ✅ kørt)
 - `050_variant_of_product.sql` — `products.variant_of_product_id` (skjuler absorberede varianter fra grids) ✅ kørt
 - `051_shop_users_saved_carts.sql` — `shop_users` (kunder, ikke admin) + `saved_carts` ✅ kørt
+- `052_shop_orders.sql` — `orders` udvidet til webshop-ordrer (ordrenr. LS-10001+, betalingsstatus, access_token) ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -138,12 +139,22 @@ RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises 
 
 ### Fremtidige features
 - [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
-- [ ] **Checkout + eget betalingssystem** — ordre-tabel, betaling, ordrebekræftelse (erstatter "kommer snart"-knappen i kurven)
+- [x] **Checkout uden betaling** — `/checkout` → `POST /api/shop/orders` → `/checkout/bekraeftelse/[id]?t=` + admin `/admin/orders`
+- [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
+- [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
 - [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
 - [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook
 - [ ] **Staging batch-behandling** — godkend/afvis mange ad gangen
 - [ ] **admind POS integration** — venter på API docs
 - [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
+
+## Checkout-flow
+- Kurv ligger i `localStorage` (`ls_cart`); linje-id er `produktId` eller `produktId__variantId`
+- `POST /api/shop/orders` genberegner pris (variant `sales_price` ?? produkt `sales_price`) og fragt (`lib/shop/shipping.ts`) — stol aldrig på klientens pris. 409 = priser ændret / vare utilgængelig (klienten retter kurven), 503 = databasefejl
+- Ordren gemmes med `payment_status = 'unpaid'`; `startPayment()` i `lib/shop/payment.ts` er stedet betalingsudbyderen kobles på
+- Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
+- E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
+- Server actions/API-ruter med admin-data skal selv kalde `isAdmin()` (`lib/admin-auth.ts`) — layout-tjekket dækker kun sider
 
 ## Vigtige kodningsmønstre
 

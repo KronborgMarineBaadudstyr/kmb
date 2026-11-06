@@ -5,9 +5,8 @@ import { useEffect, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useCart, fmtPrice, CartItem } from '../_cart'
 import { SaveCart } from './_save-cart'
+import { FREE_SHIPPING_THRESHOLD as SHIPPING_THRESHOLD, shippingCost } from '@/lib/shop/shipping'
 
-const SHIPPING_THRESHOLD = 499
-const SHIPPING_COST      = 49
 
 export function CartView() {
   const { items, remove, setQty, total, count, add, clear } = useCart()
@@ -38,7 +37,7 @@ export function CartView() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
-  const shipping   = total >= SHIPPING_THRESHOLD ? 0 : SHIPPING_COST
+  const shipping   = shippingCost(total, 'delivery')
   const orderTotal = total + shipping
 
   if (count === 0) {
@@ -137,9 +136,9 @@ export function CartView() {
             <span>{fmtPrice(orderTotal)}</span>
           </div>
 
-          <button className="ls-checkout-btn" onClick={() => alert('Betalingsgateway — kommer snart')}>
-            Gå til betaling →
-          </button>
+          <Link href="/checkout" className="ls-checkout-btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+            Gå til kassen →
+          </Link>
 
           <div style={{ marginTop: 12, textAlign: 'center' }}>
             <Link href="/" style={{ fontSize: 12, color: 'var(--ink-3)' }}>← Fortsæt med at handle</Link>
