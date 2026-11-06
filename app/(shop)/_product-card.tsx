@@ -9,19 +9,30 @@ type Product = {
   name: string
   brand?: string | null
   sales_price?: number | null
+  min_variant_price?: number | null
+  variant_count?: number
   categories?: string[]
   product_images?: { url: string; is_primary: boolean }[]
+  primary_image_url?: string | null
 }
 
 export function ProductCard({ product: p }: { product: Product }) {
   const { add } = useCart()
   const [toasted, setToasted] = useState(false)
 
-  const img = p.product_images?.find(i => i.is_primary)?.url
+  const img = p.primary_image_url
+    ?? p.product_images?.find(i => i.is_primary)?.url
     ?? p.product_images?.[0]?.url
+
+  const hasVariants = (p.variant_count ?? 0) > 0
+  // Vis "fra X kr" fra laveste variant — eller produktets egen pris
+  const displayPrice = hasVariants
+    ? (p.min_variant_price ?? p.sales_price)
+    : p.sales_price
 
   function handleAdd(e: React.MouseEvent) {
     e.preventDefault()
+    if (hasVariants) return // varianter vælges på detaljesiden
     add({
       id:    p.id,
       name:  p.name,
@@ -47,7 +58,13 @@ export function ProductCard({ product: p }: { product: Product }) {
         {p.brand && <div className="ls-prodcard-brand">{p.brand}</div>}
         <div className="ls-prodcard-name">{p.name}</div>
         <div className="ls-prodcard-price">
-          {p.sales_price ? fmtPrice(p.sales_price) : <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>Pris ukendt</span>}
+          {displayPrice
+            ? <>
+                {hasVariants && <span className="ls-prodcard-price-from">fra </span>}
+                {fmtPrice(displayPrice)}
+              </>
+            : <span style={{ color: 'var(--ink-3)', fontSize: 12 }}>Pris ukendt</span>
+          }
         </div>
         <button
           onClick={handleAdd}
@@ -66,7 +83,7 @@ export function ProductCard({ product: p }: { product: Product }) {
             width: '100%',
           }}
         >
-          {toasted ? '✓ Lagt i kurv' : 'Læg i kurv'}
+          {toasted ? '✓ Lagt i kurv' : hasVariants ? 'Vælg variant →' : 'Læg i kurv'}
         </button>
       </div>
     </Link>

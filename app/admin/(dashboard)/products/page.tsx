@@ -82,11 +82,17 @@ function ProductVariantFamilyPanel({
       return { productId: p.id, attrs: [{ key: 'størrelse', val: hint }] }
     })
 
-  const [parentName,   setParentName]   = useState(defaultName)
-  const [variantRows,  setVariantRows]  = useState<VariantRow[]>(() => initRows(defaultName))
-  const [expandedIdxs, setExpandedIdxs] = useState<Set<number>>(new Set())
-  const [saving,       setSaving]       = useState(false)
-  const [msg,          setMsg]          = useState<string | null>(null)
+  // Billeder tilgængelige fra originalprodukternes primary_image_url
+  const availableImages = products
+    .map(p => ({ productId: p.id, name: p.name, url: p.primary_image_url }))
+    .filter((x): x is { productId: string; name: string; url: string } => !!x.url)
+
+  const [parentName,    setParentName]    = useState(defaultName)
+  const [variantRows,   setVariantRows]   = useState<VariantRow[]>(() => initRows(defaultName))
+  const [expandedIdxs,  setExpandedIdxs]  = useState<Set<number>>(new Set())
+  const [selectedImgUrl, setSelectedImgUrl] = useState<string | null>(availableImages[0]?.url ?? null)
+  const [saving,        setSaving]        = useState(false)
+  const [msg,           setMsg]           = useState<string | null>(null)
 
   function onParentNameChange(val: string) {
     setParentName(val)
@@ -127,6 +133,15 @@ function ProductVariantFamilyPanel({
     const createJson = await createRes.json()
     const parentId   = createJson.data?.id
     if (!parentId) { setMsg('Fejl: ' + (createJson.error ?? 'Kunne ikke oprette overprodukt')); setSaving(false); return }
+
+    // 1b. Kopiér valgt billede til parent (direkte via admin-API)
+    if (selectedImgUrl) {
+      await fetch(`/api/admin/products/${parentId}/copy-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: selectedImgUrl }),
+      }).catch(() => {}) // billede-fejl er ikke kritisk
+    }
 
     // 2. Opret product_variants rækker + marker originalprodukter som "variant af" parent
     let errors = 0
@@ -178,6 +193,32 @@ function ProductVariantFamilyPanel({
               placeholder="F.eks. Wirelås rustfri Duplex" />
             <p className="text-xs text-gray-400 mt-1">Det fælles overprodukt. Varianterne grupperes under det.</p>
           </div>
+
+          {/* Billedvælger */}
+          {availableImages.length > 0 && (
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">Overprodukt-billede</label>
+              <p className="text-xs text-gray-400 mb-2">Vælg hvilket billede overprodukt-kortet viser. Du kan skifte det igen i produktdetaljen bagefter.</p>
+              <div className="flex gap-2 flex-wrap">
+                {availableImages.map(img => (
+                  <button key={img.url} type="button" onClick={() => setSelectedImgUrl(img.url)}
+                    title={img.name}
+                    className={`w-16 h-16 border-2 rounded-lg overflow-hidden transition-all ${
+                      selectedImgUrl === img.url ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200 hover:border-gray-400'
+                    }`}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={img.url} alt={img.name} className="w-full h-full object-contain p-1" />
+                  </button>
+                ))}
+                <button type="button" onClick={() => setSelectedImgUrl(null)}
+                  className={`w-16 h-16 border-2 rounded-lg text-xs text-gray-400 transition-all ${
+                    selectedImgUrl === null ? 'border-blue-500 ring-2 ring-blue-200 text-blue-500' : 'border-gray-200 hover:border-gray-400'
+                  }`}>
+                  Intet
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Per-variant attributter */}
           <div>
