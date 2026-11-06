@@ -8,7 +8,7 @@ interface CampaignProduct {
   product_id: string
   quantity: number
   override_price: number | null
-  product?: { name: string; internal_sku: string }
+  product?: { name: string; internal_sku: string; sales_price: number | null }
 }
 
 interface Record_ {
@@ -119,6 +119,41 @@ function ExpandedRecord({ rec, onSaved }: { rec: Record_; onSaved: () => void })
           <p className="text-xs text-gray-400 mt-1 italic">Ingen datoer sat — aktiv/inaktiv styres kun manuelt</p>
         )}
       </div>
+
+      {/* Produkter i denne kampagne/bundle */}
+      {(rec.campaign_products?.length ?? 0) > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Produkter ({rec.campaign_products!.length})
+          </p>
+          <div className="rounded-lg border border-gray-200 overflow-hidden bg-white">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr>
+                  <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium">Produkt</th>
+                  <th className="text-left px-3 py-2 text-xs text-gray-500 font-medium">SKU</th>
+                  <th className="text-right px-3 py-2 text-xs text-gray-500 font-medium">Normalpris</th>
+                  <th className="text-right px-3 py-2 text-xs text-gray-500 font-medium">Tilbudspris</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rec.campaign_products!.map(cp => (
+                  <tr key={cp.id} className="hover:bg-gray-50">
+                    <td className="px-3 py-2 text-gray-900">{cp.product?.name ?? '—'}</td>
+                    <td className="px-3 py-2 text-gray-400 text-xs">{cp.product?.internal_sku ?? '—'}</td>
+                    <td className="px-3 py-2 text-right text-gray-500">
+                      {cp.product?.sales_price != null ? fmt(cp.product.sales_price) : '—'}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium text-red-600">
+                      {cp.sale_price != null ? fmt(cp.sale_price) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="text-xs text-gray-400">ID: {rec.id}</div>
       <p className="text-sm text-gray-400 italic">
@@ -366,6 +401,11 @@ export default function BundlesPage() {
                   {rec.kit_price != null && (
                     <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
                       Kit-pris {fmt(rec.kit_price)}
+                    </span>
+                  )}
+                  {(rec.campaign_products?.length ?? 0) > 0 && (
+                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                      {rec.campaign_products!.length} produkt{rec.campaign_products!.length !== 1 ? 'er' : ''}
                     </span>
                   )}
                 </div>

@@ -88,6 +88,8 @@ export async function POST(request: Request) {
       bundle_qty, kit_price,
       start_date: start_date || starts_at || null,
       end_date:   end_date   || ends_at   || null,
+      starts_at:  starts_at  || start_date || null,
+      ends_at:    ends_at    || end_date   || null,
       status,
       ...(is_active !== undefined ? { is_active } : {}),
     })
