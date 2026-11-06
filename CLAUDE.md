@@ -1,13 +1,14 @@
 # KronborgMarine Bådudstyr — PIM/Middleware System
 
-Central middleware der forbinder leverandører, Supabase (master database), WooCommerce og admind POS.
+Central middleware der forbinder leverandører, Supabase (master database), egen webshop (LoveSailing.dk, `app/(shop)`) og admind POS.
+WooCommerce udfases — der bygges ingen ny Woo-integration; shop og betaling laves selv.
 
 ## Tech Stack
 - **Framework:** Next.js (App Router), TypeScript, Tailwind CSS
 - **Database:** Supabase (PostgreSQL) — cloud, service role key til server-side
 - **FTP:** `basic-ftp` pakke
 - **XML parsing:** `fast-xml-parser`
-- **WooCommerce:** `@woocommerce/woocommerce-rest-api`
+- **WooCommerce:** `@woocommerce/woocommerce-rest-api` — kun legacy (engangsimport af gamle produkter), udfases
 - **Cron jobs:** Vercel Cron (vercel.json) med `CRON_SECRET` Bearer token auth
 
 ## Projekt-struktur
@@ -142,8 +143,8 @@ RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises 
 
 ### Fremtidige features
 - [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
-- [ ] **Supabase → WooCommerce** produkt-sync (push validerede draft-produkter til Woo)
-- [ ] **Woo → Supabase** løbende lagersync (webhook fra Woo ved salg)
+- [ ] **Checkout + eget betalingssystem** — ordre-tabel, betaling, ordrebekræftelse (erstatter "kommer snart"-knappen i kurven)
+- [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
 - [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook
 - [ ] **Staging batch-behandling** — godkend/afvis mange ad gangen
 - [ ] **admind POS integration** — venter på API docs
