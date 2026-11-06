@@ -42,8 +42,9 @@ function InlineText({ value, onSave, placeholder, mono }: {
 }
 
 // ── Add form ───────────────────────────────────────────────────────────────────
-function AddFilterForm({ categories, onAdded }: {
+function AddFilterForm({ categories, knownAttributes, onAdded }: {
   categories: string[]
+  knownAttributes: string[]
   onAdded: (row: FilterRow) => void
 }) {
   const [category,  setCategory]  = useState('')
@@ -86,10 +87,17 @@ function AddFilterForm({ categories, onAdded }: {
         )}
       </div>
       <div className="flex-1 min-w-28">
-        <label className="block text-xs text-gray-500 mb-1 font-medium">Attributnavn</label>
+        <label className="block text-xs text-gray-500 mb-1 font-medium">
+          Attributnavn
+          {knownAttributes.length > 0 && <span className="ml-1 text-gray-300 font-normal">({knownAttributes.length} kendte)</span>}
+        </label>
         <input value={attrName} onChange={e => setAttrName(e.target.value)}
+          list="known-attributes"
           placeholder="fx Størrelse, Farve"
           className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400" />
+        <datalist id="known-attributes">
+          {knownAttributes.map(a => <option key={a} value={a} />)}
+        </datalist>
       </div>
       <div className="flex-1 min-w-28">
         <label className="block text-xs text-gray-500 mb-1 font-medium">Filterlabel <span className="text-gray-300 font-normal">(valgfrit)</span></label>
@@ -110,10 +118,11 @@ function AddFilterForm({ categories, onAdded }: {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 export default function CategoryFiltersPage() {
-  const [rows,       setRows]       = useState<FilterRow[]>([])
-  const [categories, setCategories] = useState<string[]>([])
-  const [loading,    setLoading]    = useState(true)
-  const [search,     setSearch]     = useState('')
+  const [rows,            setRows]            = useState<FilterRow[]>([])
+  const [categories,      setCategories]      = useState<string[]>([])
+  const [knownAttributes, setKnownAttributes] = useState<string[]>([])
+  const [loading,         setLoading]         = useState(true)
+  const [search,          setSearch]          = useState('')
 
   useEffect(() => {
     fetch('/api/category-filters')
@@ -121,6 +130,7 @@ export default function CategoryFiltersPage() {
       .then(j => {
         setRows(j.data ?? [])
         setCategories(j.categories ?? [])
+        setKnownAttributes(j.knownAttributes ?? [])
       })
       .finally(() => setLoading(false))
   }, [])
@@ -165,7 +175,7 @@ export default function CategoryFiltersPage() {
       </div>
 
       <div className="mb-6">
-        <AddFilterForm categories={categories} onAdded={row => setRows(prev => [...prev, row])} />
+        <AddFilterForm categories={categories} knownAttributes={knownAttributes} onAdded={row => setRows(prev => [...prev, row])} />
       </div>
 
       {rows.length > 0 && (
