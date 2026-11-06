@@ -747,8 +747,24 @@ export default function ProductsPage() {
                           : renderCell(col, p)}
                       </td>
                     ))}
-                    <td className="px-3 py-2">
-                      <Link href={`/products/${p.id}`} onClick={e => e.stopPropagation()}
+                    <td className="px-3 py-2 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      {isVariantOf && (
+                        <button
+                          title="Frigør fra parent — produktet vises igen i grids"
+                          onClick={async () => {
+                            if (!confirm(`Frigør "${p.name}" fra parent?\n\nProduktet vil igen vises selvstændigt i shop og admin.`)) return
+                            await fetch(`/api/products/${p.id}`, {
+                              method: 'PATCH',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ variant_of_product_id: null }),
+                            })
+                            fetchProducts()
+                          }}
+                          className="text-[11px] text-amber-600 hover:text-amber-800 border border-amber-300 hover:border-amber-500 rounded px-1.5 py-0.5 transition-colors mr-1">
+                          Frigør
+                        </button>
+                      )}
+                      <Link href={`/products/${p.id}`}
                         title="Åbn på egen side"
                         className="text-gray-300 hover:text-blue-500 text-base transition-colors">
                         ↗
