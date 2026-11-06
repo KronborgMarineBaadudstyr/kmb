@@ -3,18 +3,29 @@ import { NextResponse } from 'next/server'
 
 export const dynamic = 'force-dynamic'
 
-// GET /api/staging?status=pending_review&supplier_id=&search=&page=1&per_page=50
+// GET /api/staging?status=pending_review&supplier_id=&search=&page=1&per_page=50&ids_only=1
 export async function GET(request: Request) {
   const url        = new URL(request.url)
   const status     = url.searchParams.get('status')      || 'pending_review'
   const supplierId = url.searchParams.get('supplier_id') || ''
   const search     = url.searchParams.get('search')      || ''
+  const idsOnly    = url.searchParams.get('ids_only')    === '1'
   const page       = Math.max(1, parseInt(url.searchParams.get('page')     || '1',  10))
   const perPage    = Math.min(100, parseInt(url.searchParams.get('per_page') || '50', 10))
   const from       = (page - 1) * perPage
   const to         = from + perPage - 1
 
   const supabase = createServiceClient()
+
+  if (idsOnly) {
+    let q = supabase.from('supplier_product_staging').select('id')
+    if (status !== 'all')  q = q.eq('status', status)
+    if (supplierId)        q = q.eq('supplier_id', supplierId)
+    if (search)            q = q.ilike('normalized_name', `%${search}%`)
+    const { data, error } = await q
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ ids: (data ?? []).map(r => r.id) })
+  }
 
   let query = supabase
     .from('supplier_product_staging')

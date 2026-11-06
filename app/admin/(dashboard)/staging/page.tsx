@@ -294,8 +294,9 @@ export default function OpretProdukterPage() {
   const [filter,      setFilter]      = useState<FilterType>('all')
   const [search,      setSearch]      = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkSaving,  setBulkSaving]  = useState(false)
-  const [bulkMsg,     setBulkMsg]     = useState<string | null>(null)
+  const [bulkSaving,    setBulkSaving]    = useState(false)
+  const [bulkMsg,       setBulkMsg]       = useState<string | null>(null)
+  const [selectingAll,  setSelectingAll]  = useState(false)
   const [counts,      setCounts]      = useState({ all: 0, single: 0, multi: 0 })
 
   const fetchRows = useCallback(async () => {
@@ -330,29 +331,43 @@ export default function OpretProdukterPage() {
 
   useEffect(() => { fetchRows() }, [fetchRows])
 
-  async function handleBulkCreate() {
+  async function selectAllMatching() {
+    setSelectingAll(true)
+    const params = new URLSearchParams({ status: 'pending_review', ids_only: '1', ...(search ? { search } : {}) })
+    const res  = await fetch(`/api/staging?${params}`)
+    const json = await res.json() as { ids: string[] }
+    setSelectedIds(new Set(json.ids ?? []))
+    setSelectingAll(false)
+  }
+
+  async function bulkAction(action: 'new_product' | 'reject') {
     const ids = [...selectedIds]
     if (ids.length === 0) return
-    if (!confirm(`Opret ${ids.length} produkter som nye selvstændige produkter?`)) return
+    const label = action === 'new_product' ? 'oprette' : 'afvise'
+    if (!confirm(`Vil du ${label} ${ids.length} produkter?`)) return
     setBulkSaving(true)
     setBulkMsg(null)
 
-    let created = 0
+    let done = 0
     for (let i = 0; i < ids.length; i += 20) {
       const batch = ids.slice(i, i + 20)
       await Promise.allSettled(batch.map(id =>
         fetch(`/api/staging/${id}/action`, {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ action: 'new_product' }),
-        }).then(r => r.ok && created++)
+          body:    JSON.stringify({ action }),
+        }).then(r => r.ok && done++)
       ))
     }
 
-    setBulkMsg(`${created} produkter oprettet`)
+    const verb = action === 'new_product' ? 'oprettet' : 'afvist'
+    setBulkMsg(`${done} produkter ${verb}`)
     setBulkSaving(false)
     fetchRows()
   }
+
+  function handleBulkCreate() { return bulkAction('new_product') }
+  function handleBulkReject()  { return bulkAction('reject') }
 
   const FILTER_TABS: { key: FilterType; label: string }[] = [
     { key: 'all',    label: `Alle (${total.toLocaleString('da-DK')})` },
@@ -410,40 +425,56 @@ export default function OpretProdukterPage() {
           className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg w-60 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
 
-        {/* Bulk */}
-        {selectedIds.size > 0 && (
-          <div className="flex items-center gap-2 ml-auto">
-            {bulkMsg ? (
-              <span className="text-xs text-green-600">{bulkMsg}</span>
-            ) : (
-              <>
-                <span className="text-xs text-gray-500">{selectedIds.size} valgt</span>
-                <button
-                  onClick={handleBulkCreate}
-                  disabled={bulkSaving}
-                  className="px-4 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-40"
-                >
-                  {bulkSaving ? 'Opretter…' : `Opret ${selectedIds.size} som nye produkter`}
-                </button>
-                <button
-                  onClick={() => setSelectedIds(new Set())}
-                  className="text-xs text-gray-400 hover:text-gray-600"
-                >
-                  Ryd valg
-                </button>
-              </>
-            )}
-          </div>
-        )}
+        {/* Bulk toolbar */}
+        <div className="ml-auto flex items-center gap-2">
+          {bulkMsg && <span className="text-xs text-green-600 font-medium">{bulkMsg}</span>}
 
-        {selectedIds.size === 0 && rows.length > 0 && (
-          <button
-            onClick={() => setSelectedIds(new Set(rows.map(r => r.id)))}
-            className="ml-auto text-xs text-blue-600 hover:underline"
-          >
-            Vælg alle på siden
-          </button>
-        )}
+          {selectedIds.size > 0 && !bulkSaving && !bulkMsg && (
+            <>
+              <span className="text-xs text-gray-500">{selectedIds.size} valgt</span>
+              <button
+                onClick={handleBulkCreate}
+                className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                ✚ Opret {selectedIds.size} som nye produkter
+              </button>
+              <button
+                onClick={handleBulkReject}
+                className="px-3 py-1.5 text-xs bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100"
+              >
+                ✕ Afvis {selectedIds.size}
+              </button>
+              <button
+                onClick={() => { setSelectedIds(new Set()); setBulkMsg(null) }}
+                className="text-xs text-gray-400 hover:text-gray-600"
+              >
+                Ryd
+              </button>
+            </>
+          )}
+
+          {bulkSaving && <span className="text-xs text-gray-500">Behandler…</span>}
+
+          {selectedIds.size === 0 && !bulkMsg && rows.length > 0 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setSelectedIds(new Set(rows.map(r => r.id)))}
+                className="text-xs text-blue-600 hover:underline"
+              >
+                Vælg side ({rows.length})
+              </button>
+              {total > rows.length && (
+                <button
+                  onClick={selectAllMatching}
+                  disabled={selectingAll}
+                  className="text-xs text-blue-700 font-medium hover:underline disabled:opacity-50"
+                >
+                  {selectingAll ? 'Henter…' : `Vælg alle ${total.toLocaleString('da-DK')} resultater`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* List */}
