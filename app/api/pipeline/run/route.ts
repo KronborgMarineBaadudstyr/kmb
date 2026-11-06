@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { runMatchingEngine } from '@/lib/matching-engine'
 import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
+import { PipelineRun } from '@/lib/pipeline-run'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -19,10 +20,14 @@ export async function GET() {
   ;(async () => {
     const supabase = createServiceClient()
     const summary: Record<string, number> = { categories_updated: 0, groups_created: 0, auto_confirmed: 0, products_created: 0, skipped: 0, remaining: 0 }
+    const run = await PipelineRun.create()
+    // Send run id so create-products can attach to same run
+    send({ stage: 'run_id', run_id: run.id })
 
     try {
       // ── STEP 1: Apply standard categories + strip prefixes ──────
       send({ stage: 'categories', status: 'running', message: 'Anvender standardstruktur på kategorier…' })
+      await run.updateStep('categories', { status: 'running', message: 'Anvender standardstruktur på kategorier…' })
 
       const { data: catRows } = await supabase
         .from('product_types')
@@ -52,9 +57,11 @@ export async function GET() {
       }
 
       send({ stage: 'categories', status: 'done', updated: summary.categories_updated, message: `${summary.categories_updated} kategorier opdateret` })
+      await run.updateStep('categories', { status: 'done', detail: `${summary.categories_updated} kategorier opdateret` })
 
       // ── STEP 2: Run matching engine ─────────────────────────────
       send({ stage: 'matching', status: 'running', message: 'Kører matching-motor…' })
+      await run.updateStep('matching', { status: 'running', message: 'Kører matching-motor…' })
 
       await runMatchingEngine((event) => {
         // Proxy matching engine SSE events (override stage so UI maps correctly)
@@ -67,9 +74,11 @@ export async function GET() {
       })
 
       send({ stage: 'matching', status: 'done', message: 'Matching-motor færdig' })
+      await run.updateStep('matching', { status: 'done', detail: `${summary.groups_created} grupper oprettet` })
 
       // ── STEP 3: Auto-confirm EAN groups ────────────────────────
       send({ stage: 'auto_confirm', status: 'running', message: 'Auto-bekræfter EAN-grupper…' })
+      await run.updateStep('auto_confirm', { status: 'running', message: 'Auto-bekræfter EAN-grupper…' })
 
       // EAN is a definitive identifier — confirm all pending EAN groups without name-overlap checks
       const eanGroupIds: string[] = []
@@ -116,12 +125,15 @@ export async function GET() {
         confirmed: summary.auto_confirmed,
         message: `${summary.auto_confirmed} grupper bekræftet (${toConfirm.length} EAN, ${singleAndVariantIds.length} enkelt/variant/parent-SKU)`,
       })
+      await run.updateStep('auto_confirm', { status: 'done', detail: `${summary.auto_confirmed} bekræftet` })
 
       // ── DONE (trin 4-6 håndteres af /api/pipeline/create-products) ─
-      send({ stage: 'done', summary })
+      // run_id sendes så create-products kan fortsætte på samme run
+      send({ stage: 'done', summary, run_id: run.id })
 
     } catch (err) {
       send({ stage: 'error', message: String(err) })
+      await run.fail(String(err))
     } finally {
       ctrl.close()
     }

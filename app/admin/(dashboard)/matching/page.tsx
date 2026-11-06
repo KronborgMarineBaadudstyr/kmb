@@ -591,8 +591,49 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
   const [done,     setDone]     = useState(false)
   const [summary,  setSummary]  = useState<Record<string, number> | null>(null)
   const [error,    setError]    = useState<string | null>(null)
-  const esRef    = useRef<EventSource | null>(null)
-  const retryRef = useRef(0)
+  const [lastRunAt, setLastRunAt] = useState<string | null>(null)
+  const [loopIteration, setLoopIteration] = useState(0)
+  const esRef      = useRef<EventSource | null>(null)
+  const retryRef   = useRef(0)
+  const runIdRef   = useRef<string | null>(null)
+  const loopRef    = useRef(0)   // tracks current auto-loop iteration
+  const totalSummaryRef = useRef<Record<string, number>>({})  // accumulated totals across loops
+
+  // Hent seneste kørsel ved mount
+  useEffect(() => {
+    fetch('/api/pipeline/status')
+      .then(r => r.json())
+      .then(j => {
+        const run = j.data
+        if (!run) return
+        setLastRunAt(run.started_at)
+        if (run.status === 'running') {
+          // Pipeline kørte stadig — genopret SSE-forbindelse
+          setRunning(true)
+          runIdRef.current = run.id
+          retryRef.current = 0
+          connectToEndpoint('/api/pipeline/create-products?run_id=' + run.id, {})
+        } else if (run.status === 'done') {
+          setDone(true)
+          setSummary(run.summary ?? {})
+          // Gendan trin-status fra DB
+          const dbSteps: Record<string, PipelineStep> = {}
+          for (const [key, val] of Object.entries(run.steps ?? {})) {
+            dbSteps[key] = val as PipelineStep
+          }
+          setSteps(dbSteps)
+        } else if (run.status === 'error') {
+          setError(run.error ?? 'Ukendt fejl')
+          const dbSteps: Record<string, PipelineStep> = {}
+          for (const [key, val] of Object.entries(run.steps ?? {})) {
+            dbSteps[key] = val as PipelineStep
+          }
+          setSteps(dbSteps)
+        }
+      })
+      .catch(() => {})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function connectToEndpoint(url: string, summaryRef: Record<string, number>) {
     const es = new EventSource(url)
@@ -602,6 +643,12 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
       const ev = JSON.parse(e.data) as Record<string, unknown>
       const stage = ev.stage as string
 
+      // Gem run_id fra /run så vi kan sende den videre til create-products
+      if (stage === 'run_id') {
+        runIdRef.current = ev.run_id as string
+        return
+      }
+
       if (stage === 'done') {
         es.close()
         // Merge partial summary
@@ -609,15 +656,33 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
         if (partial) Object.assign(summaryRef, partial)
 
         if (url.includes('create-products')) {
-          // Fully done
-          setSummary({ ...summaryRef })
-          setDone(true)
-          setRunning(false)
-          onDone()
+          // Accumulate totals
+          for (const [k, v] of Object.entries(summaryRef)) {
+            totalSummaryRef.current[k] = (totalSummaryRef.current[k] ?? 0) + (v as number)
+          }
+          const remaining = summaryRef.remaining ?? 0
+          if (remaining > 0) {
+            // Auto-restart: der er stadig produkter at køre
+            loopRef.current += 1
+            setLoopIteration(loopRef.current)
+            setSteps({})
+            runIdRef.current = null
+            retryRef.current = 0
+            connectToEndpoint('/api/pipeline/run', {})
+          } else {
+            // Fully done
+            setSummary({ ...totalSummaryRef.current })
+            setDone(true)
+            setRunning(false)
+            onDone()
+          }
         } else {
-          // /run finished — start /create-products with fresh retry counter
+          // /run finished — start /create-products med run_id
           retryRef.current = 0
-          connectToEndpoint('/api/pipeline/create-products', summaryRef)
+          const cpUrl = runIdRef.current
+            ? `/api/pipeline/create-products?run_id=${runIdRef.current}`
+            : '/api/pipeline/create-products'
+          connectToEndpoint(cpUrl, summaryRef)
         }
         return
       }
@@ -663,7 +728,12 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
     setError(null)
     setSummary(null)
     setSteps({})
+    runIdRef.current = null
     retryRef.current = 0
+    loopRef.current = 0
+    totalSummaryRef.current = {}
+    setLoopIteration(0)
+    setLastRunAt(new Date().toISOString())
     connectToEndpoint('/api/pipeline/run', {})
   }
 
@@ -684,7 +754,9 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
           className="shrink-0 px-5 py-2 bg-white text-gray-900 font-semibold text-sm rounded-lg hover:bg-gray-100 disabled:opacity-50 flex items-center gap-2"
         >
           {running && <span className="inline-block w-3.5 h-3.5 border-2 border-gray-600 border-t-transparent rounded-full animate-spin" />}
-          {running ? 'Kører pipeline…' : done ? '↺ Kør igen' : '▶ Kør pipeline'}
+          {running
+            ? loopIteration > 0 ? `Kører runde ${loopIteration + 1}…` : 'Kører pipeline…'
+            : done ? '↺ Kør igen' : '▶ Kør pipeline'}
         </button>
       </div>
 
