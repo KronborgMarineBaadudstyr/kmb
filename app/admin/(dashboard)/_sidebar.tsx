@@ -16,6 +16,7 @@ const navItems = [
   { href: '/admin/navigation',       label: 'Båd-navigation',        icon: '⚓' },
   { href: '/admin/bundles',          label: 'Bundler & Kampagner',   icon: '🏷️' },
   { href: '/admin/brands',           label: 'Brands',                icon: '🔖' },
+  { href: '/admin/categories',        label: 'Kategorier',            icon: '📂' },
   { href: '/admin/category-filters', label: 'Kategori-søgefiltre',   icon: '🔍' },
   { href: '/admin/product-types',    label: 'Produkttyper',          icon: '🏷' },
   { href: '/admin/sync',             label: 'Sync & Logs',           icon: '🔄' },
