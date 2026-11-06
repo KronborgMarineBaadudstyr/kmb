@@ -185,6 +185,31 @@ function InlineField({
   )
 }
 
+// ─── Editable product name in header ──────────────────────────────────────────
+function EditableName({ value, saving, onSave }: { value: string; saving: boolean; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const ref = useRef<HTMLInputElement>(null)
+
+  function open() { setDraft(value); setEditing(true); setTimeout(() => ref.current?.select(), 0) }
+  function commit() {
+    setEditing(false)
+    if (draft.trim() && draft.trim() !== value) onSave(draft.trim())
+  }
+
+  if (editing) return (
+    <input ref={ref} className="text-base font-bold text-gray-900 border-b-2 border-blue-400 bg-transparent outline-none w-72 leading-tight"
+      value={draft} onChange={e => setDraft(e.target.value)}
+      onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }} />
+  )
+  return (
+    <button onClick={open} title="Klik for at redigere navn"
+      className={`text-base font-bold text-gray-900 truncate leading-tight hover:text-blue-600 transition-colors text-left ${saving ? 'opacity-60' : ''}`}>
+      {saving ? <span className="text-blue-400">Gemmer…</span> : value}
+    </button>
+  )
+}
+
 // ─── Section card ──────────────────────────────────────────────────────────────
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -880,6 +905,7 @@ export function ProductDetail({
   const [saving,    setSaving]   = useState<Set<string>>(new Set())
   const [statusSaving, setStatusSaving] = useState(false)
   const [variants,  setVariants] = useState<Variant[]>([])
+  const [images,    setImages]   = useState<ProductImage[]>([])
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [suppliersState, setSuppliersState] = useState<ProductSupplier[]>([])
   const [prioSaving, setPrioSaving] = useState(false)
@@ -898,6 +924,7 @@ export function ProductDetail({
         else {
           setProduct(j.data)
           setVariants(j.data?.product_variants ?? [])
+          setImages([...(j.data?.product_images ?? [])].sort((a: ProductImage, b: ProductImage) => a.position - b.position))
           setSuppliersState([...(j.data?.product_suppliers ?? [])].sort((a: ProductSupplier, b: ProductSupplier) => a.priority - b.priority))
         }
       })
@@ -955,7 +982,7 @@ export function ProductDetail({
     <div className="flex items-center justify-center h-full text-red-500 text-sm py-20">{error ?? 'Produkt ikke fundet'}</div>
   )
 
-  const images  = product.product_images.slice().sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+  // images state bruges i stedet for product.product_images (muteres ved upload/slet)
   const files   = product.product_files
   const suppls  = product.product_suppliers.slice().sort((a, b) => a.priority - b.priority)
   const ownAvailable      = product.own_stock_quantity - product.own_stock_reserved
@@ -970,7 +997,11 @@ export function ProductDetail({
       )}
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 min-w-0">
-          <h2 className="text-base font-bold text-gray-900 truncate leading-tight">{product.name}</h2>
+          <EditableName
+            value={product.name}
+            saving={saving.has('name')}
+            onSave={v => { if (v.trim()) patchField({ name: v.trim() }, 'name') }}
+          />
           <span className="text-xs font-mono text-gray-400 shrink-0">{product.internal_sku}</span>
           {variants.length === 0 && suppls.some(s => s.variant_id) && (
             <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full shrink-0">Variant</span>
@@ -997,31 +1028,101 @@ export function ProductDetail({
   )
 
   // ── Shared sections ──────────────────────────────────────────────────────────
+  const [imgUploading, setImgUploading] = useState(false)
+  const [imgMsg, setImgMsg] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  async function uploadImage(file: File) {
+    if (!product) return
+    setImgUploading(true); setImgMsg('')
+    const fd = new FormData()
+    fd.append('file', file)
+    const r = await fetch(`/api/products/${product.id}/images`, { method: 'POST', body: fd })
+    const j = await r.json()
+    setImgUploading(false)
+    if (j.error) { setImgMsg(`Fejl: ${j.error}`); return }
+    setImages(prev => [...prev, j.data])
+    setActiveImg(images.length)
+  }
+
+  async function deleteImage(imgId: string) {
+    if (!product) return
+    if (!confirm('Slet dette billede?')) return
+    const r = await fetch(`/api/products/${product.id}/images?image_id=${imgId}`, { method: 'DELETE' })
+    if (r.ok) {
+      setImages(prev => {
+        const next = prev.filter(x => x.id !== imgId)
+        setActiveImg(i => Math.min(i, Math.max(0, next.length - 1)))
+        return next
+      })
+    }
+  }
+
+  async function setPrimary(imgId: string) {
+    if (!product) return
+    await fetch(`/api/products/${product.id}/images`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([{ id: imgId, is_primary: true }]),
+    })
+    setImages(prev => prev.map(x => ({ ...x, is_primary: x.id === imgId })))
+  }
+
   const imagesSection = (
     <Section title={`Billeder (${images.length})`}>
-      {images.length > 0 ? (
+      {images.length > 0 && (
         <div>
-          <div className="relative w-full h-52 bg-gray-50 rounded-lg border border-gray-100 overflow-hidden mb-3">
+          <div className="relative w-full h-52 bg-gray-50 rounded-lg border border-gray-100 overflow-hidden mb-3 group">
             <Image src={images[activeImg]?.url} alt={images[activeImg]?.alt_text ?? product.name}
               fill className="object-contain" unoptimized />
-            <span className="absolute top-2 right-2 text-xs bg-black/40 text-white px-2 py-0.5 rounded">
-              {images[activeImg]?.source}
-            </span>
+            <div className="absolute top-2 right-2 flex gap-1.5">
+              <span className="text-xs bg-black/40 text-white px-2 py-0.5 rounded">
+                {images[activeImg]?.source}
+              </span>
+              {images[activeImg]?.is_primary && (
+                <span className="text-xs bg-yellow-400/90 text-yellow-900 px-2 py-0.5 rounded font-medium">★ Primær</span>
+              )}
+            </div>
+            <div className="absolute bottom-2 left-2 flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              {!images[activeImg]?.is_primary && (
+                <button onClick={() => setPrimary(images[activeImg].id)}
+                  className="text-xs bg-white/90 text-gray-700 px-2 py-0.5 rounded hover:bg-yellow-50 hover:text-yellow-700 border border-gray-200">
+                  Sæt primær
+                </button>
+              )}
+              <button onClick={() => deleteImage(images[activeImg].id)}
+                className="text-xs bg-white/90 text-red-600 px-2 py-0.5 rounded hover:bg-red-50 border border-gray-200">
+                Slet
+              </button>
+            </div>
           </div>
           <div className="flex gap-2 flex-wrap">
             {images.map((img, i) => (
               <button key={img.id} onClick={() => setActiveImg(i)}
                 className={`w-12 h-12 rounded-lg border-2 overflow-hidden relative bg-gray-50 transition-colors ${i === activeImg ? 'border-blue-500' : 'border-gray-200 hover:border-gray-400'}`}>
                 <Image src={img.url} alt="" fill className="object-contain" unoptimized />
+                {img.is_primary && (
+                  <span className="absolute bottom-0 right-0 text-yellow-500 text-xs leading-none">★</span>
+                )}
               </button>
             ))}
           </div>
         </div>
-      ) : (
+      )}
+      {images.length === 0 && (
         <div className="h-28 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-gray-300 text-sm">
           Ingen billeder
         </div>
       )}
+      <div className="mt-3 flex items-center gap-3">
+        <input ref={fileInputRef} type="file" accept="image/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) uploadImage(f); e.target.value = '' }} />
+        <button onClick={() => fileInputRef.current?.click()} disabled={imgUploading}
+          className="text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+          {imgUploading ? 'Uploader…' : '+ Upload billede'}
+        </button>
+        {imgMsg && <span className="text-xs text-red-600">{imgMsg}</span>}
+      </div>
     </Section>
   )
 

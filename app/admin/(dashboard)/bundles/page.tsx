@@ -8,6 +8,7 @@ interface CampaignProduct {
   product_id: string
   quantity: number
   override_price: number | null
+  sale_price: number | null
   product?: { name: string; internal_sku: string; sales_price: number | null }
 }
 

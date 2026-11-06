@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     const imgs = (p.product_images ?? []) as { url: string; is_primary: boolean; position: number }[]
     const primaryImg = imgs.find(i => i.is_primary) ?? imgs.sort((a, b) => a.position - b.position)[0]
 
-    const suppliers = ((p.product_suppliers ?? []) as {
+    const suppliers = ((p.product_suppliers ?? []) as unknown as {
       id: string; priority: number; is_active: boolean
       supplier_stock_quantity: number | null; supplier_stock_reserved: number | null
       suppliers: { id: string; name: string } | null
