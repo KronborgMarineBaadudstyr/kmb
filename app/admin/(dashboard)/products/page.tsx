@@ -18,7 +18,6 @@ type Product = {
   categories: string[]
   brand: string | null
   status: 'draft' | 'validated' | 'published'
-  woo_sync_status: string | null
   woo_product_id: number | null
   woo_bestillingsnummer: string | null
   ean: string | null

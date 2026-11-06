@@ -68,11 +68,9 @@ export type Product = {
   meta_title: string | null
   meta_description: string | null
   status: string
-  woo_sync_status: string | null
   hide_when_out_of_stock: boolean
   created_at: string
   updated_at: string
-  last_synced_woo_at: string | null
   last_synced_pos_at: string | null
   original_number: string | null
   original_number_source: string | null
