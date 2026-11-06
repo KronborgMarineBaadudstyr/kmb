@@ -3,6 +3,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { AddToCartBtn } from './_add-to-cart'
 import { VariantPicker } from './_variant-picker'
+import { WishlistBtn } from './_wishlist-btn'
 import { ProductCard } from '../../_product-card'
 
 export const dynamic = 'force-dynamic'
@@ -174,6 +175,8 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
                 product={{ id: p.id, name: p.name, price: p.sales_price ?? 0, image: primaryImage }}
               />
           }
+
+          <WishlistBtn name={p.name} price={p.sales_price} image={primaryImage} />
 
           {p.description && (
             <div className="ls-pdp-desc" style={{ marginTop: 8 }}

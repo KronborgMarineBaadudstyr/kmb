@@ -1218,3 +1218,29 @@
 .ls-prodgrid--related {
   margin-top: 0;
 }
+
+/* ── ØNSKESKYEN WISHLIST BUTTON ──────────────────────────────── */
+.ls-wishlist-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--line);
+  background: var(--card);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color .15s, color .15s, background .15s;
+  margin-top: 8px;
+}
+.ls-wishlist-btn svg { flex-shrink: 0; color: #e55; }
+.ls-wishlist-btn:hover {
+  border-color: #e55;
+  color: #c0392b;
+  background: #fef8f8;
+}
