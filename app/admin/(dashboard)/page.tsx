@@ -31,7 +31,8 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   { label: 'FTP/XML/CSV/XML import fra leverandør (6 leverandører implementeret)',        done: true  },
   { label: 'Sammenlign import med eksisterende Supabase data (staging + needs_review)',   done: true  },
   { label: 'Manuel godkendelsesproces for ændringer (staging review + matching pipeline)', done: true  },
-  { label: 'Opdater/upsert godkendte ændringer til Woo (og senere POS mv.)',              done: false },
+  { label: 'Eget lager-justering med årsagskode og audit-log',                            done: true  },
+  { label: 'Push validerede produkter til salgskanal (admind POS / webshop)',             done: false },
 
   // ── Ordre & Forsendelse ──
   { group: 'Ordre & Forsendelse', label: 'Ordre-routing motor (optimal leverandørvalg pr. ordre)', done: false },
