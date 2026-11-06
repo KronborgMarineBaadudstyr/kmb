@@ -131,6 +131,11 @@ function AdjustPricesPanel({
                 </button>
               ))}
             </div>
+            <p className="text-xs text-gray-400 mt-1.5">
+              {field === 'sales_price'
+                ? 'Salgspris er den normale pris kunden ser og betaler.'
+                : 'Tilbudspris er en midlertidig kampagnepris oven på salgsprisen. Produkter uden en eksisterende tilbudspris springes over ved "% ændring" — brug "Fast pris" eller "Beløb ±" for at sætte en ny tilbudspris fra bunden.'}
+            </p>
           </div>
 
           {/* Justeringsmetode */}
