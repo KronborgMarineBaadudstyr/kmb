@@ -83,6 +83,9 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `009_kaphorn_supplier.sql` — Kap-Horn leverandør-række ✅ kørt
 - `010_needs_review_status.sql` — `needs_review` status på staging ✅ kørt
 - `011_staging_match_groups.sql` — `staging_match_groups` tabel + `normalize_for_matching()` + `find_fuzzy_staging_matches()` RPC ✅ kørt
+- … (012–049 ✅ kørt)
+- `050_variant_of_product.sql` — `products.variant_of_product_id` (skjuler absorberede varianter fra grids) ✅ kørt
+- `051_shop_users_saved_carts.sql` — `shop_users` (kunder, ikke admin) + `saved_carts` ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -127,6 +130,7 @@ WOO_CONSUMER_KEY=
 WOO_CONSUMER_SECRET=
 WOO_WEBHOOK_SECRET=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
+RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises linket kun på skærmen)
 ```
 
 ## TODO — Udestående opgaver
@@ -137,7 +141,7 @@ CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel da
 - [ ] **Sync interval** — Kap-Horn viser "Hver 8760 timer". Juster så alle leverandører viser samme daglige interval.
 
 ### Fremtidige features
-- [ ] **Produktredigering** — `/products/[id]` side til at redigere navn, beskrivelse, pris, billeder inden Woo-push
+- [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
 - [ ] **Supabase → WooCommerce** produkt-sync (push validerede draft-produkter til Woo)
 - [ ] **Woo → Supabase** løbende lagersync (webhook fra Woo ved salg)
 - [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook

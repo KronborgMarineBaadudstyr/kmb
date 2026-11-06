@@ -4,8 +4,8 @@ import { NextResponse } from 'next/server'
 export const dynamic = 'force-dynamic'
 
 // POST /api/admin/products/[id]/copy-image
-// Kopierer en ekstern billed-URL direkte til product_images (ingen re-upload).
-// Bruges når parent-produkt oprettes og skal arve billede fra en variant.
+// Body: { url, is_primary?: boolean (default true), source?: string }
+// Tilføjer en eksisterende billed-URL til product_images uden re-upload.
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -13,32 +13,38 @@ export async function POST(
   const { id: productId } = await params
   const supabase = createServiceClient()
 
-  let body: { url?: string }
+  let body: { url?: string; is_primary?: boolean; source?: string }
   try { body = await request.json() } catch {
     return NextResponse.json({ error: 'Ugyldig JSON' }, { status: 400 })
   }
 
   const url = (body.url ?? '').trim()
-  if (!url) return NextResponse.json({ error: 'Ingen URL' }, { status: 400 })
+  if (!/^https?:\/\//i.test(url)) return NextResponse.json({ error: 'Ugyldig URL' }, { status: 400 })
 
-  // Sæt eksisterende som ikke-primær
-  await supabase
+  const isPrimary = body.is_primary !== false
+  const source    = body.source === 'supplier' ? 'supplier' : 'copied_from_variant'
+
+  const { data: existing } = await supabase
     .from('product_images')
-    .update({ is_primary: false })
+    .select('id')
     .eq('product_id', productId)
+
+  if (isPrimary) {
+    await supabase.from('product_images').update({ is_primary: false }).eq('product_id', productId)
+  }
 
   const { data, error } = await supabase
     .from('product_images')
     .insert({
-      product_id:  productId,
+      product_id: productId,
       url,
-      is_primary:  true,
-      position:    0,
-      source:      'copied_from_variant',
+      is_primary: isPrimary,
+      position:   isPrimary ? 0 : (existing ?? []).length,
+      source,
     })
-    .select('id')
+    .select('id, url, alt_text, is_primary, position, source, storage_path')
     .single()
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json({ ok: true, id: data.id })
+  return NextResponse.json({ ok: true, data })
 }

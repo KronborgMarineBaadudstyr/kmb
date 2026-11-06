@@ -76,6 +76,8 @@ export type Product = {
   last_synced_pos_at: string | null
   original_number: string | null
   original_number_source: string | null
+  variant_of_product_id: string | null
+  variant_parent: { id: string; name: string } | null
   manufacturers: { id: string; name: string; country: string | null; website: string | null } | null
   product_images: ProductImage[]
   product_files: ProductFile[]
@@ -909,6 +911,9 @@ export function ProductDetail({
   const [campaigns, setCampaigns] = useState<Campaign[]>([])
   const [suppliersState, setSuppliersState] = useState<ProductSupplier[]>([])
   const [prioSaving, setPrioSaving] = useState(false)
+  const [imgUploading, setImgUploading] = useState(false)
+  const [imgMsg, setImgMsg] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -1027,11 +1032,26 @@ export function ProductDetail({
     </div>
   )
 
-  // ── Shared sections ──────────────────────────────────────────────────────────
-  const [imgUploading, setImgUploading] = useState(false)
-  const [imgMsg, setImgMsg] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const variantOfBanner = product.variant_of_product_id ? (
+    <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center gap-3 text-xs text-amber-800 shrink-0">
+      <span className="font-semibold">↳ Variant af</span>
+      <a href={`/products/${product.variant_of_product_id}`} className="underline hover:text-amber-900 truncate">
+        {product.variant_parent?.name ?? 'overprodukt'}
+      </a>
+      <span className="text-amber-600">— skjult i shop-grids</span>
+      <button
+        onClick={() => {
+          if (confirm('Frigør fra overprodukt? Produktet vises igen selvstændigt i shop.'))
+            patchField({ variant_of_product_id: null, variant_parent: null } as Record<string, unknown>, 'variant_of')
+        }}
+        disabled={saving.has('variant_of')}
+        className="ml-auto border border-amber-300 hover:border-amber-500 rounded px-2 py-0.5 disabled:opacity-50">
+        Frigør
+      </button>
+    </div>
+  ) : null
 
+  // ── Shared sections ──────────────────────────────────────────────────────────
   async function uploadImage(file: File) {
     if (!product) return
     setImgUploading(true); setImgMsg('')
@@ -1066,6 +1086,31 @@ export function ProductDetail({
       body: JSON.stringify([{ id: imgId, is_primary: true }]),
     })
     setImages(prev => prev.map(x => ({ ...x, is_primary: x.id === imgId })))
+  }
+
+  // Leverandørbilleder der endnu ikke er overtaget som produktbilleder
+  const ownUrls = new Set(images.map(i => i.url))
+  const supplierImgs: { url: string; supplier: string }[] = []
+  for (const s of suppliersState) {
+    const raw = Array.isArray(s.supplier_images) ? s.supplier_images as unknown[] : []
+    for (const it of raw) {
+      const url = typeof it === 'string' ? it : (it as { url?: string })?.url
+      if (url && !ownUrls.has(url) && !supplierImgs.some(x => x.url === url)) {
+        supplierImgs.push({ url, supplier: s.suppliers.name })
+      }
+    }
+  }
+
+  async function adoptSupplierImage(url: string) {
+    if (!product) return
+    const r = await fetch(`/api/admin/products/${product.id}/copy-image`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, is_primary: images.length === 0, source: 'supplier' }),
+    })
+    const j = await r.json()
+    if (j.error) { setImgMsg(`Fejl: ${j.error}`); return }
+    setImages(prev => [...prev, j.data])
   }
 
   const imagesSection = (
@@ -1123,6 +1168,24 @@ export function ProductDetail({
         </button>
         {imgMsg && <span className="text-xs text-red-600">{imgMsg}</span>}
       </div>
+      {supplierImgs.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-gray-100">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            Leverandørbilleder — klik for at tilføje
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {supplierImgs.map(si => (
+              <button key={si.url} onClick={() => adoptSupplierImage(si.url)}
+                title={`Tilføj fra ${si.supplier}`}
+                className="w-14 h-14 rounded-lg border border-dashed border-gray-300 hover:border-blue-500 overflow-hidden relative bg-white group">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={si.url} alt="" className="w-full h-full object-contain p-1" />
+                <span className="absolute inset-0 bg-blue-600/70 text-white text-lg font-bold flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">+</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </Section>
   )
 
@@ -1444,6 +1507,7 @@ export function ProductDetail({
     return (
       <div className="flex flex-col h-full bg-gray-50">
         {header}
+        {variantOfBanner}
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 space-y-4">
             {imagesSection}
@@ -1483,6 +1547,7 @@ export function ProductDetail({
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {header}
+      {variantOfBanner}
       <div className="flex-1 overflow-y-auto">
         <div className="p-5 grid grid-cols-3 gap-4 max-w-7xl">
           <div className="col-span-2 space-y-4">

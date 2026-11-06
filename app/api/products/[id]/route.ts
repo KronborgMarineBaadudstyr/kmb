@@ -73,8 +73,19 @@ export async function GET(
       supplier: supplierByVariant.get(v.id) ?? null,
     }))
 
+  let variantParent: { id: string; name: string } | null = null
+  if (product.variant_of_product_id) {
+    const { data: parent } = await supabase
+      .from('products')
+      .select('id, name')
+      .eq('id', product.variant_of_product_id)
+      .single()
+    variantParent = parent ?? null
+  }
+
   const sorted = {
     ...product,
+    variant_parent: variantParent,
     product_images:    [...(product.product_images ?? [])].sort((a, b) => a.position - b.position),
     product_files:     [...(product.product_files   ?? [])].sort((a, b) => a.position - b.position),
     product_variants:  enrichedVariants,
