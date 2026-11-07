@@ -8,6 +8,10 @@ import { createServiceClient } from '@/lib/supabase/server'
 //   2) ellers laveste indkøbspris for det, der skal bestilles (pris × max(antal, minimumsordre))
 // Kandidater: rækker på varianten → rækker på produktet → for varianter i en variantfamilie:
 // det oprindelige produkt med samme EAN (variant_of_product_id = overproduktet).
+//
+// Bestilt: "Markér som bestilt" skriver en post i line_items[].ordered på hver berørt ordrelinje
+// (reference, antal, leverandør, tidspunkt, admin). Det bestilte trækkes fra det manglende antal.
+// order_stock_apply bevarer øvrige felter på linjerne, så reservation og bestilling lever side om side.
 
 export type PurchaseLine = {
   key:            string
@@ -24,6 +28,7 @@ export type PurchaseLine = {
   supplier_stock: number | null
   moq:            number
   reason:         'preferred' | 'cheapest' | 'only' | null
+  sources:        { order_id: string; index: number; product_id: string; missing: number }[]
 }
 
 export type PurchaseGroup = {
@@ -34,7 +39,11 @@ export type PurchaseGroup = {
   total:         number            // indkøbsværdi ekskl. moms (linjer med kendt pris)
 }
 
-type Line  = { product_id?: string; variant_id?: string | null; name?: string; sku?: string; qty?: number; reserved_qty?: number }
+export type OrderedEntry = { ref: string; qty: number; supplier_id: string; supplier_name: string; at: string; by: string }
+type Line  = { product_id?: string; variant_id?: string | null; name?: string; sku?: string; qty?: number; reserved_qty?: number; ordered?: OrderedEntry[] }
+
+export const orderedQty = (l: { ordered?: OrderedEntry[] }) =>
+  (Array.isArray(l.ordered) ? l.ordered : []).reduce((s, e) => s + (Number(e.qty) || 0), 0)
 type PS    = {
   id: string; product_id: string; variant_id: string | null; priority: number; is_active: boolean; item_status: string
   supplier_sku: string; purchase_price: number | null; supplier_stock_quantity: number; moq: number
@@ -65,26 +74,30 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
   const supabase = createServiceClient()
 
   const { data: orders, error } = await supabase.from('orders')
-    .select('order_number, line_items')
+    .select('id, order_number, line_items')
     .eq('stock_state', 'reserved')
     .not('status', 'in', '(completed,cancelled)')
     .limit(2000)
   if (error) return { groups: [], error: error.message }
 
   // Saml manglende antal pr. vare
-  const need = new Map<string, { product_id: string; variant_id: string | null; name: string; sku: string; missing: number; orders: Set<string> }>()
+  type Need = { product_id: string; variant_id: string | null; name: string; sku: string; missing: number
+                orders: Set<string>; sources: PurchaseLine['sources'] }
+  const need = new Map<string, Need>()
   for (const o of orders ?? []) {
-    for (const l of (Array.isArray(o.line_items) ? o.line_items : []) as Line[]) {
+    const lines = (Array.isArray(o.line_items) ? o.line_items : []) as Line[]
+    lines.forEach((l, index) => {
       const pid = l.product_id && UUID.test(l.product_id) ? l.product_id : null
       const vid = l.variant_id && UUID.test(l.variant_id) ? l.variant_id : null
-      const missing = Math.max(0, (Number(l.qty) || 0) - (Number(l.reserved_qty) || 0))
-      if (!pid || missing === 0) continue
+      const missing = Math.max(0, (Number(l.qty) || 0) - (Number(l.reserved_qty) || 0) - orderedQty(l))
+      if (!pid || missing === 0) return
       const key = `${pid}__${vid ?? ''}`
-      const n = need.get(key) ?? { product_id: pid, variant_id: vid, name: l.name ?? '', sku: l.sku ?? '', missing: 0, orders: new Set<string>() }
+      const n = need.get(key) ?? { product_id: pid, variant_id: vid, name: l.name ?? '', sku: l.sku ?? '', missing: 0, orders: new Set<string>(), sources: [] }
       n.missing += missing
+      n.sources.push({ order_id: o.id, index, product_id: pid, missing })
       if (o.order_number) n.orders.add(o.order_number)
       need.set(key, n)
-    }
+    })
   }
   if (need.size === 0) return { groups: [], error: null }
 
@@ -138,6 +151,7 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
       missing: n.missing, order_qty: Math.max(n.missing, moq), orders: [...n.orders].sort(),
       supplier_sku: ps?.supplier_sku ?? null, purchase_price: ps?.purchase_price ?? null,
       supplier_stock: ps ? ps.supplier_stock_quantity : null, moq, reason: pick?.reason ?? null,
+      sources: n.sources,
     }
 
     const gid = ps?.suppliers?.id ?? 'none'
@@ -170,4 +184,117 @@ export function purchaseCsv(group: PurchaseGroup): string {
     ...group.lines.map(l => [l.supplier_sku, l.ean, l.name, l.order_qty, num(l.purchase_price), l.sku, l.orders.join(', ')]),
   ]
   return '﻿' + rows.map(r => r.map(esc).join(';')).join('\r\n') + '\r\n'
+}
+
+// ── Bestilt ──────────────────────────────────────────────────────────────────────
+
+type OrderRow = { line_items: unknown; updated_at: string }
+
+// Opdatér en ordres linjer, kun hvis ordren ikke er ændret siden læsning (fx af lagerreservationen)
+async function updateOrderLines(orderId: string, change: (lines: Line[]) => Line[] | null): Promise<boolean> {
+  const supabase = createServiceClient()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data: o } = await supabase.from('orders').select('line_items, updated_at').eq('id', orderId).maybeSingle<OrderRow>()
+    if (!o) return false
+    const lines = (Array.isArray(o.line_items) ? structuredClone(o.line_items) : []) as Line[]
+    const next = change(lines)
+    if (!next) return true
+    const { data } = await supabase.from('orders')
+      .update({ line_items: next, updated_at: new Date().toISOString() })
+      .eq('id', orderId).eq('updated_at', o.updated_at)
+      .select('id')
+    if (data?.length) return true
+  }
+  return false
+}
+
+function newRef(supplierName: string): string {
+  const d = new Date()
+  const stamp = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+  const slug = supplierName.toUpperCase().replace(/[^A-ZÆØÅ0-9]+/g, '').slice(0, 10) || 'LEV'
+  return `IND-${stamp}-${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
+}
+
+// Markér alt, der skal bestilles hos én leverandør, som bestilt. Listen beregnes igen på serveren.
+export async function markSupplierOrdered(supplierId: string, by: string):
+  Promise<{ ref: string; lines: number; orders: number; failed: number } | { error: string }> {
+  const { groups, error } = await buildPurchaseList()
+  if (error) return { error }
+  const group = groups.find(g => g.supplier_id === supplierId)
+  if (!group) return { error: 'Intet at bestille hos denne leverandør' }
+
+  const ref = newRef(group.supplier_name)
+  const at  = new Date().toISOString()
+  const byOrder = new Map<string, PurchaseLine['sources']>()
+  for (const l of group.lines) for (const s of l.sources) byOrder.set(s.order_id, [...(byOrder.get(s.order_id) ?? []), s])
+
+  let failed = 0
+  for (const [orderId, sources] of byOrder) {
+    const ok = await updateOrderLines(orderId, lines => {
+      let changed = false
+      for (const s of sources) {
+        const l = lines[s.index]
+        if (!l || l.product_id !== s.product_id) continue          // linjen er flyttet — spring over
+        const still = Math.max(0, (Number(l.qty) || 0) - (Number(l.reserved_qty) || 0) - orderedQty(l))
+        const qty = Math.min(still, s.missing)
+        if (qty <= 0) continue
+        const entry: OrderedEntry = { ref, qty, supplier_id: supplierId, supplier_name: group.supplier_name, at, by }
+        l.ordered = [...(Array.isArray(l.ordered) ? l.ordered : []), entry]
+        changed = true
+      }
+      return changed ? lines : null
+    })
+    if (!ok) failed++
+  }
+  return { ref, lines: group.lines.length, orders: byOrder.size, failed }
+}
+
+export type OrderedBatch = {
+  ref: string; supplier_name: string; at: string; by: string
+  lines: { name: string; sku: string; qty: number; order_number: string | null; order_id: string }[]
+}
+
+// Bestillinger på åbne ordrer, nyeste først
+export async function buildOrderedList(): Promise<{ batches: OrderedBatch[]; error: string | null }> {
+  const { data: orders, error } = await createServiceClient().from('orders')
+    .select('id, order_number, line_items')
+    .not('status', 'in', '(completed,cancelled)')
+    .limit(2000)
+  if (error) return { batches: [], error: error.message }
+
+  const batches = new Map<string, OrderedBatch>()
+  for (const o of orders ?? []) {
+    for (const l of (Array.isArray(o.line_items) ? o.line_items : []) as Line[]) {
+      for (const e of Array.isArray(l.ordered) ? l.ordered : []) {
+        const b = batches.get(e.ref) ?? { ref: e.ref, supplier_name: e.supplier_name, at: e.at, by: e.by, lines: [] }
+        b.lines.push({ name: l.name ?? '', sku: l.sku ?? '', qty: Number(e.qty) || 0, order_number: o.order_number, order_id: o.id })
+        batches.set(e.ref, b)
+      }
+    }
+  }
+  return { batches: [...batches.values()].sort((a, b) => b.at.localeCompare(a.at)), error: null }
+}
+
+// Fortryd en bestilling: fjern dens poster fra alle åbne ordrer
+export async function undoOrdered(ref: string): Promise<{ orders: number; failed: number }> {
+  const { batches } = await buildOrderedList()
+  const batch = batches.find(b => b.ref === ref)
+  if (!batch) return { orders: 0, failed: 0 }
+  const orderIds = [...new Set(batch.lines.map(l => l.order_id))]
+  let failed = 0
+  for (const id of orderIds) {
+    const ok = await updateOrderLines(id, lines => {
+      let changed = false
+      for (const l of lines) {
+        if (!Array.isArray(l.ordered) || !l.ordered.some(e => e.ref === ref)) continue
+        const rest = l.ordered.filter(e => e.ref !== ref)
+        if (rest.length) l.ordered = rest
+        else delete l.ordered
+        changed = true
+      }
+      return changed ? lines : null
+    })
+    if (!ok) failed++
+  }
+  return { orders: orderIds.length, failed }
 }
