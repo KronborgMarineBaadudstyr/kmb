@@ -1,8 +1,9 @@
 import { headers } from 'next/headers'
 
 // E-mail via Resend. Uden RESEND_API_KEY sendes intet (returnerer false), så flows virker lokalt.
-// Afsenderens domæne skal være verificeret i Resend.
-const FROM = process.env.EMAIL_FROM || 'LoveSailing <no-reply@lovesailing.dk>'
+// Afsenderens domæne skal være verificeret i Resend. Midlertidigt Resends testafsender, der kun
+// leverer til Resend-kontoens egen e-mail — skift til no-reply@lovesailing.dk når domænet er verificeret.
+const FROM = process.env.EMAIL_FROM || 'LoveSailing <onboarding@resend.dev>'
 
 export type Email = { to: string; subject: string; html: string; headers?: Record<string, string> }
 

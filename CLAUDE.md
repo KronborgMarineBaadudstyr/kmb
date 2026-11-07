@@ -132,7 +132,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
 RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
-EMAIL_FROM=           # Afsender, fx "LoveSailing <no-reply@lovesailing.dk>" (standard) — domænet skal være verificeret i Resend
+EMAIL_FROM=           # Afsender — standard midlertidigt "LoveSailing <onboarding@resend.dev>" (leverer KUN til Resend-kontoens egen e-mail)
 NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brugeren står på (fx kmb-nine.vercel.app)
 ```
 
@@ -149,6 +149,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
 - [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
 - [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
+- [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
 - [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
 - [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
