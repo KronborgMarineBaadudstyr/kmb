@@ -183,6 +183,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Ordren kunne ikke oprettes. Prøv igen.' }, { status: 500 })
   }
 
+  // Reservér fra eget lager. Fejler det, er ordren stadig gyldig — admin kan reservere via status.
+  const { error: stockErr } = await supabase.rpc('order_stock_apply', { p_order: order.id, p_action: 'reserve', p_actor: 'webshop' })
+  if (stockErr) console.error(`[ordre ${order.order_number}] lagerreservation fejlede: ${stockErr.message}`)
+
   await sendEmail(
     customer.email,
     `Ordrebekræftelse ${order.order_number} — LoveSailing`,

@@ -9,7 +9,11 @@ type Variant = {
   attributes:         { name: string; value: string }[]
   sales_price:        number | null
   own_stock_quantity: number
+  own_stock_reserved?: number
 }
+
+// Ledigt = beholdning minus det, der er reserveret til andre ordrer
+const available = (v: Variant) => Math.max(0, v.own_stock_quantity - (v.own_stock_reserved ?? 0))
 
 type Props = {
   variants:    Variant[]
@@ -48,7 +52,7 @@ export function VariantPicker({ variants, productId, productName, basePrice, ima
   ) ?? null
 
   const price     = matched?.sales_price ?? basePrice
-  const inStock   = matched ? matched.own_stock_quantity > 0 : true
+  const inStock   = matched ? available(matched) > 0 : true
 
   function handleAdd() {
     if (!matched) return
@@ -80,7 +84,7 @@ export function VariantPicker({ variants, productId, productName, basePrice, ima
                 // Check if this value leads to an in-stock variant
                 const hasStock = variants.some(v =>
                   v.attributes.some(a => a.name === attrName && a.value === val) &&
-                  v.own_stock_quantity > 0
+                  available(v) > 0
                 )
                 return (
                   <button
@@ -105,7 +109,7 @@ export function VariantPicker({ variants, productId, productName, basePrice, ima
         <div className="ls-varpicker-summary">
           {price && <span className="ls-varpicker-price">{fmtPrice(price)}</span>}
           <span className={`ls-varpicker-stock ${inStock ? 'in' : 'out'}`}>
-            {inStock ? `${matched.own_stock_quantity} på lager` : 'Ikke på lager'}
+            {inStock ? `${available(matched)} på lager` : 'Ikke på lager'}
           </span>
         </div>
       )}
