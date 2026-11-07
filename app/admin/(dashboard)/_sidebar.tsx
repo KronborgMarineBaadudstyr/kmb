@@ -21,6 +21,12 @@ const navEntries: NavEntry[] = [
     { href: '/admin/lifecycle',      label: 'Vedligehold',         icon: '⏳' },
   ]},
 
+  { group: 'Salg & AI', icon: '📈', items: [
+    { href: '/admin/insights',       label: 'Salgsindsigt',        icon: '💡' },
+    { href: '/admin/ai',             label: 'AI-assistent',        icon: '🤖' },
+    { href: '/admin/ai-viden',       label: 'AI-viden',            icon: '📚' },
+  ]},
+
   { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
   { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
   { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },
@@ -72,7 +78,7 @@ export default function SidebarClient({ admin }: { admin: { email: string; role:
   }
 
   function isActive(href: string) {
-    return href === '/admin' ? pathname === '/admin' : pathname.startsWith(href)
+    return href === '/admin' ? pathname === '/admin' : pathname === href || pathname.startsWith(href + '/')
   }
 
   function isOpen(g: NavGroup) {
