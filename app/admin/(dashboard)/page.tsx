@@ -72,7 +72,7 @@ const STEPS: Step[] = [
   { label: 'Salgsindsigt: pakkekandidater, sæson, topsælgere, kategorier, kampagner',                   status: 'done' },
   { label: 'AI-assistent til salg, prissætning og kampagner (Claude)',                                  status: 'done' },
   { label: 'Pålidelige analyser og prisforslag',                                                         status: 'waiting', note: 'mere salgshistorik — import af gamle ordrer' },
-  { label: 'Egen AI-nøgle til butikken i admin',                                                         status: 'todo' },
+  { label: 'Egen AI-nøgle til butikken i admin',                                                         status: 'done' },
 
   // ── POS ──
   { group: 'POS',              label: 'admind POS-integration',                                              status: 'waiting', note: 'API-dokumentation fra admind' },

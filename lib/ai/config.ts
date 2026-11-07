@@ -1,7 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { INDUSTRY_GUIDE } from './knowledge'
 
-// AI-assistent til salgsanalyse. Kører på ANTHROPIC_API_KEY (indtil butikken tilknytter sin egen nøgle).
+// AI-assistent til salgsanalyse. Nøgle: butikkens egen (lib/ai/key.ts) eller ANTHROPIC_API_KEY.
 
 export const AI_MODEL  = 'claude-opus-5-5'
 export const AI_EFFORT = 'high' as const        // prissætning og kampagner kræver grundig analyse

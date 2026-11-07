@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getCurrentAdmin } from '@/lib/admin-auth'
 import { AI_MODEL, AI_EFFORT, MAX_TOOL_ROUNDS, buildSystem } from '@/lib/ai/config'
 import { TOOLS, TOOL_LABELS, runTool } from '@/lib/ai/tools'
+import { anthropicClient } from '@/lib/ai/key'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -13,8 +14,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export async function POST(request: Request) {
   const admin = await getCurrentAdmin()
   if (!admin) return Response.json({ error: 'Ikke logget ind' }, { status: 401 })
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json({ error: 'AI-assistenten er ikke sat op (ANTHROPIC_API_KEY mangler)' }, { status: 503 })
+  const client = await anthropicClient()
+  if (!client) {
+    return Response.json({ error: 'AI-assistenten er ikke sat op — en ejer kan indtaste en Anthropic-nøgle under Indstillinger → AI-nøgle' }, { status: 503 })
   }
 
   let body: { conversation_id?: unknown; message?: unknown }
@@ -56,7 +58,6 @@ export async function POST(request: Request) {
   await save('user', userContent)
 
   const encoder = new TextEncoder()
-  const client  = new Anthropic()
 
   const stream = new ReadableStream<Uint8Array>({
     async start(ctrl) {
