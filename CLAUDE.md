@@ -91,6 +91,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ✅ kørt
 - `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ✅ kørt
 - `056_admin_users.sql` — admin-konti med e-mail + magic link (`admin_users`, `admin_login_tokens`, `admin_sessions`), første ejer ✅ kørt
+- `057_order_stock.sql` — `orders.stock_state` + `order_stock_apply()` (reservér/træk/frigiv eget lager pr. ordre, logges i `stock_adjustments`) ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -141,7 +142,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 ### I gang / næste skridt
 - [ ] **Kør matching** — åbn `/matching`, tryk "Kør matching", vurder grupperingskvalitet
 - [ ] **Gennemgå match-grupper** — bekræft høj-konfidens grupper, opret draft-produkter
-- [ ] **Sync interval** — Kap-Horn viser "Hver 8760 timer". Juster så alle leverandører viser samme daglige interval.
+- [x] **Sync interval** — Kap-Horn sat til dagligt (migration 041)
 
 ### Fremtidige features
 - [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
@@ -152,7 +153,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
 - [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
-- [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
+- [x] **Lagertræk ved salg (webshop)** — reservation ved ordre, træk ved afhentning, frigivelse ved annullering (`order_stock_apply`, migration 057). POS afventer admind
 - [x] **Eget lager justering** — lageroptælling med årsagskode og log (`/admin/inventory`). POS-webhook afventer admind
 - [x] **Staging batch-behandling** — opret/afvis mange ad gangen (`/admin/staging`)
 - [ ] **admind POS integration** — venter på API docs
@@ -165,6 +166,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - Betal ved afhentning kræver login + kendt kunde (`payAtPickupEligible`: afsluttet eller gammel/importeret ordre, eller admin-overstyring i `/admin/customers`) + afhentning i butik — tjekkes på serveren
 - Uden online betaling kan ukendte kunder ikke bestille (knappen er låst)
 - Afhentningsflow i `/admin/orders`: Ny → Klar til afhentning (mail til kunden, én gang) → Afhentet og betalt
+- Lager: ny ordre reserverer min(antal, ledigt) pr. linje (`line_items[].reserved_qty`); resten skal bestilles hos leverandør (vises i admin). Afsluttet → træk fra beholdning, annulleret → frigiv, genåbnet → reservér igen. Én transaktion pr. ordre med rækkelåse, idempotent via `orders.stock_state`
 - Butikkens adresse/åbningstider til mails: `lib/shop/store.ts`
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
 - E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat

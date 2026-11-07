@@ -1,6 +1,6 @@
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
-import { isAdmin } from '@/lib/admin-auth'
+import { getCurrentAdmin } from '@/lib/admin-auth'
 import { SHIPPING_METHODS, isShippingMethod } from '@/lib/shop/shipping'
 import { confirmationPath } from '@/lib/shop/payment'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
@@ -23,25 +23,34 @@ const PAYMENT: Record<string, { label: string; cls: string }> = {
 }
 const PICKUP_UNPAID = { label: 'Betales ved afhentning', cls: 'bg-purple-50 text-purple-700 border-purple-200' }
 
-type Line     = { cart_id: string; sku: string; name: string; qty: number; price: number; line_total: number }
+type Line     = { cart_id: string; sku: string; name: string; qty: number; price: number; line_total: number; reserved_qty?: number }
+
+// Lager følger status: annulleret frigiver, afsluttet trækker fra, åben (gen)reserverer
+async function applyStock(orderId: string, status: string, actor: string) {
+  const action = status === 'cancelled' ? 'release' : status === 'completed' ? 'deduct' : 'reserve'
+  const { error } = await createServiceClient().rpc('order_stock_apply', { p_order: orderId, p_action: action, p_actor: actor })
+  if (error) console.error(`[ordre ${orderId}] lager (${action}) fejlede: ${error.message}`)
+}
 type Customer = { name?: string; email?: string; phone?: string; address?: string; postcode?: string; city?: string }
 
 async function updateStatus(formData: FormData) {
   'use server'
-  if (!(await isAdmin())) return
+  const me = await getCurrentAdmin()
+  if (!me) return
   const id     = String(formData.get('id') ?? '')
   const status = String(formData.get('status') ?? '')
   if (!id || !(status in STATUSES)) return
   await createServiceClient().from('orders')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
+  await applyStock(id, status, me.email)
   revalidatePath('/admin/orders')
 }
 
 // Klar til afhentning: sæt status og send mail til kunden (kun første gang)
 async function markReady(formData: FormData) {
   'use server'
-  if (!(await isAdmin())) return
+  if (!(await getCurrentAdmin())) return
   const id = String(formData.get('id') ?? '')
   const supabase = createServiceClient()
   const { data: o } = await supabase.from('orders')
@@ -61,12 +70,14 @@ async function markReady(formData: FormData) {
 
 async function markPickedUpPaid(formData: FormData) {
   'use server'
-  if (!(await isAdmin())) return
+  const me = await getCurrentAdmin()
+  if (!me) return
   const id  = String(formData.get('id') ?? '')
   const now = new Date().toISOString()
   await createServiceClient().from('orders')
     .update({ status: 'completed', payment_status: 'paid', paid_at: now, updated_at: now })
     .eq('id', id)
+  await applyStock(id, 'completed', me.email)
   revalidatePath('/admin/orders')
 }
 
@@ -101,7 +112,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const { status } = await searchParams
   let query = createServiceClient()
     .from('orders')
-    .select('id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at')
+    .select('id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state')
     .order('ordered_at', { ascending: false })
     .limit(200)
   if (status && status in STATUSES) query = query.eq('status', status)
@@ -142,6 +153,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           const pay      = payAtPickup ? PICKUP_UNPAID : (PAYMENT[o.payment_status] ?? PAYMENT.unpaid)
           const method   = isShippingMethod(o.shipping_method) ? SHIPPING_METHODS[o.shipping_method].label : o.shipping_method
           const open     = !['completed', 'cancelled'].includes(o.status)
+          const tracked  = o.stock_state === 'reserved' || o.stock_state === 'deducted'
+          const toOrder  = tracked ? lines.reduce((s, l) => s + Math.max(0, (Number(l.qty) || 0) - (l.reserved_qty ?? 0)), 0) : 0
           return (
             <details key={o.id} className="bg-white rounded-lg border border-gray-200 group">
               <summary className="list-none cursor-pointer px-4 py-3 grid grid-cols-[110px_120px_1fr_150px_100px_auto] gap-4 items-center text-sm hover:bg-gray-50">
@@ -157,6 +170,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <span className="text-xs text-gray-500">{method} · {lines.reduce((s, l) => s + (Number(l.qty) || 1), 0)} stk.</span>
                 <span className="font-semibold text-gray-900 text-right tabular-nums">{kr(o.order_total)}</span>
                 <span className="flex gap-1.5 justify-end">
+                  {open && toOrder > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full border whitespace-nowrap bg-amber-50 text-amber-800 border-amber-200"
+                      title="Ikke nok på eget lager — skal bestilles hos leverandør">{toOrder} skal bestilles</span>
+                  )}
                   <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${pay.cls}`}>{pay.label}</span>
                   <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${st.cls}`}>{st.label}</span>
                 </span>
@@ -168,7 +185,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     {lines.map((l, i) => (
                       <tr key={l.cart_id ?? i} className="border-b border-gray-50 last:border-0">
                         <td className="py-1.5 pr-3 text-gray-500 tabular-nums w-10">{l.qty}×</td>
-                        <td className="py-1.5 pr-3 text-gray-900">{l.name}<span className="ml-2 font-mono text-xs text-gray-400">{l.sku}</span></td>
+                        <td className="py-1.5 pr-3 text-gray-900">
+                          {l.name}<span className="ml-2 font-mono text-xs text-gray-400">{l.sku}</span>
+                          {tracked && <StockNote qty={Number(l.qty) || 0} reserved={l.reserved_qty ?? 0} deducted={o.stock_state === 'deducted'} />}
+                        </td>
                         <td className="py-1.5 text-right tabular-nums text-gray-700 whitespace-nowrap">{kr(l.line_total)}</td>
                       </tr>
                     ))}
@@ -219,6 +239,18 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           )
         })}
       </div>
+    </div>
+  )
+}
+
+function StockNote({ qty, reserved, deducted }: { qty: number; reserved: number; deducted: boolean }) {
+  const missing = qty - reserved
+  if (missing <= 0) {
+    return <div className="text-xs text-green-700">{deducted ? 'Trukket fra eget lager' : 'Reserveret på eget lager'}</div>
+  }
+  return (
+    <div className="text-xs text-amber-700">
+      {reserved > 0 ? `${reserved} fra eget lager · ` : ''}{missing} bestilles hos leverandør
     </div>
   )
 }

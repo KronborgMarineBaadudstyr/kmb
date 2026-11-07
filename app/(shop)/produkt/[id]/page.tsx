@@ -88,7 +88,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   // Fetch variants
   const { data: variantRows } = await supabase
     .from('product_variants')
-    .select('id, internal_variant_sku, attributes, sales_price, own_stock_quantity')
+    .select('id, internal_variant_sku, attributes, sales_price, own_stock_quantity, own_stock_reserved')
     .eq('product_id', id)
     .eq('status', 'active')
     .order('internal_variant_sku')
@@ -99,6 +99,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
     attributes: { name: string; value: string }[]
     sales_price: number | null
     own_stock_quantity: number
+    own_stock_reserved: number
   }[]
 
   // Fetch related products from same category (excluding this product)
