@@ -59,7 +59,7 @@ const STEPS: Step[] = [
   // ── Lager & indkøb ──
   { group: 'Lager & indkøb',   label: 'Eget lager-justering med årsagskode og log',                         status: 'done' },
   { label: 'Lagertræk ved salg',                                                                             status: 'progress', note: 'webshop virker — POS afventer admind' },
-  { label: 'Indkøbsliste pr. leverandør med CSV',                                                           status: 'done' },
+  { label: 'Indkøbsliste pr. leverandør med CSV og markering af bestilte varer',                                                           status: 'done' },
   { label: 'Automatiske bestillinger til leverandører',                                                     status: 'waiting', note: 'afklaring af hvordan hver leverandør modtager bestillinger' },
 
   // ── Ordre & forsendelse ──

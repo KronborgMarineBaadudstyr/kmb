@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { isAdmin } from '@/lib/admin-auth'
 import { emailConfigured, sendEmailBatch, escapeHtml, siteUrl, type Email } from '@/lib/shop/email'
 import { LIFECYCLE_COLUMNS, type LifecycleRow, dueStatus, fmtDate, lifespanLabel, addDays } from '@/lib/shop/lifecycle'
-import { ConfirmSubmit } from './_confirm-submit'
+import { ConfirmSubmit } from '../_confirm-submit'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 60

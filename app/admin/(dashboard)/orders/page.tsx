@@ -5,6 +5,7 @@ import { SHIPPING_METHODS, isShippingMethod } from '@/lib/shop/shipping'
 import { confirmationPath } from '@/lib/shop/payment'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 import { STORE, pickupPlaceHtml } from '@/lib/shop/store'
+import { orderedQty, type OrderedEntry } from '@/lib/purchasing'
 
 export const dynamic = 'force-dynamic'
 
@@ -23,7 +24,7 @@ const PAYMENT: Record<string, { label: string; cls: string }> = {
 }
 const PICKUP_UNPAID = { label: 'Betales ved afhentning', cls: 'bg-purple-50 text-purple-700 border-purple-200' }
 
-type Line     = { cart_id: string; sku: string; name: string; qty: number; price: number; line_total: number; reserved_qty?: number }
+type Line     = { cart_id: string; sku: string; name: string; qty: number; price: number; line_total: number; reserved_qty?: number; ordered?: OrderedEntry[] }
 
 // Lager følger status: annulleret frigiver, afsluttet trækker fra, åben (gen)reserverer
 async function applyStock(orderId: string, status: string, actor: string) {
@@ -154,7 +155,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           const method   = isShippingMethod(o.shipping_method) ? SHIPPING_METHODS[o.shipping_method].label : o.shipping_method
           const open     = !['completed', 'cancelled'].includes(o.status)
           const tracked  = o.stock_state === 'reserved' || o.stock_state === 'deducted'
-          const toOrder  = tracked ? lines.reduce((s, l) => s + Math.max(0, (Number(l.qty) || 0) - (l.reserved_qty ?? 0)), 0) : 0
+          const toOrder  = tracked ? lines.reduce((s, l) => s + Math.max(0, (Number(l.qty) || 0) - (l.reserved_qty ?? 0) - orderedQty(l)), 0) : 0
           return (
             <details key={o.id} className="bg-white rounded-lg border border-gray-200 group">
               <summary className="list-none cursor-pointer px-4 py-3 grid grid-cols-[110px_120px_1fr_150px_100px_auto] gap-4 items-center text-sm hover:bg-gray-50">
@@ -187,7 +188,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                         <td className="py-1.5 pr-3 text-gray-500 tabular-nums w-10">{l.qty}×</td>
                         <td className="py-1.5 pr-3 text-gray-900">
                           {l.name}<span className="ml-2 font-mono text-xs text-gray-400">{l.sku}</span>
-                          {tracked && <StockNote qty={Number(l.qty) || 0} reserved={l.reserved_qty ?? 0} deducted={o.stock_state === 'deducted'} />}
+                          {tracked && <StockNote qty={Number(l.qty) || 0} reserved={l.reserved_qty ?? 0} ordered={Array.isArray(l.ordered) ? l.ordered : []} deducted={o.stock_state === 'deducted'} />}
                         </td>
                         <td className="py-1.5 text-right tabular-nums text-gray-700 whitespace-nowrap">{kr(l.line_total)}</td>
                       </tr>
@@ -243,14 +244,20 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   )
 }
 
-function StockNote({ qty, reserved, deducted }: { qty: number; reserved: number; deducted: boolean }) {
-  const missing = qty - reserved
-  if (missing <= 0) {
+function StockNote({ qty, reserved, ordered, deducted }: { qty: number; reserved: number; ordered: OrderedEntry[]; deducted: boolean }) {
+  const orderedTotal = ordered.reduce((n, e) => n + (Number(e.qty) || 0), 0)
+  const missing = qty - reserved - orderedTotal
+  if (reserved >= qty) {
     return <div className="text-xs text-green-700">{deducted ? 'Trukket fra eget lager' : 'Reserveret på eget lager'}</div>
   }
-  return (
-    <div className="text-xs text-amber-700">
-      {reserved > 0 ? `${reserved} fra eget lager · ` : ''}{missing} bestilles hos leverandør
-    </div>
-  )
+  const parts: React.ReactNode[] = []
+  if (reserved > 0) parts.push(<span key="r" className="text-green-700">{reserved} fra eget lager</span>)
+  for (const e of ordered) {
+    parts.push(
+      <span key={e.ref} className="text-blue-700" title={e.ref}>
+        {e.qty} bestilt hos {e.supplier_name} {new Date(e.at).toLocaleDateString('da-DK', { day: 'numeric', month: 'short' })}
+      </span>)
+  }
+  if (missing > 0) parts.push(<span key="m" className="text-amber-700">{missing} skal bestilles</span>)
+  return <div className="text-xs">{parts.flatMap((p, i) => i ? [<span key={`s${i}`} className="text-gray-300"> · </span>, p] : [p])}</div>
 }
