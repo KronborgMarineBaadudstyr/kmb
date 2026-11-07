@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getCurrentAdmin } from '@/lib/admin-auth'
-import { AI_MODEL, AI_EFFORT, MAX_TOOL_ROUNDS, SYSTEM_PROMPT } from '@/lib/ai/config'
+import { AI_MODEL, AI_EFFORT, MAX_TOOL_ROUNDS, buildSystem } from '@/lib/ai/config'
 import { TOOLS, TOOL_LABELS, runTool } from '@/lib/ai/tools'
 
 export const dynamic = 'force-dynamic'
@@ -35,6 +35,9 @@ export async function POST(request: Request) {
     conversationId = data.id
   }
 
+  const { data: knowledge } = await supabase.from('ai_knowledge').select('content').eq('id', 'shop').maybeSingle()
+  const system = buildSystem(knowledge?.content ?? '')
+
   const { data: rows } = await supabase.from('ai_messages').select('role, content')
     .eq('conversation_id', conversationId).order('id')
   const messages: Anthropic.MessageParam[] = (rows ?? []).map(r => ({ role: r.role, content: r.content }))
@@ -66,7 +69,7 @@ export async function POST(request: Request) {
             model: AI_MODEL,
             max_tokens: 64000,
             output_config: { effort: AI_EFFORT },
-            system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+            system,
             tools: TOOLS,
             cache_control: { type: 'ephemeral' },
             messages,

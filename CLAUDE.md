@@ -94,6 +94,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `057_order_stock.sql` — `orders.stock_state` + `order_stock_apply()` (reservér/træk/frigiv eget lager pr. ordre, logges i `stock_adjustments`) ✅ kørt
 - `058_price_history.sql` — `price_history` + triggere der logger hver ændring af salgs-/tilbudspris (produkter og varianter) ⏳ skal køres
 - `059_sales_analytics.sql` — view `sales_lines` + `analytics_*()` (dækning, kategorier, topsælgere, måned, sæson, sæsontoppe, købes sammen, kategori-affinitet, prisændringer, kampagner, stk. pr. ordre) + `ai_conversations`/`ai_messages` ⏳ skal køres
+- `060_ai_knowledge.sql` — `ai_knowledge` (butikkens egen viden til AI-assistenten) ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -197,6 +198,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - `lib/ai/tools.ts`: værktøjer til modellen (kun læsning/beregning) med egen inputvalidering (input streames og valideres ikke af API'et)
 - `POST /api/ai/chat`: manuel værktøjsløkke med streaming (SSE), model `claude-opus-5-5`, effort `high`, cache på systemprompt og historik. Samtaler gemmes i `ai_messages` som rå content-blokke (append-only — thinking-blokke skal sendes uændret tilbage). Dato sendes i brugerens tur, ikke i systemprompten (cache)
 - Nøgle: `ANTHROPIC_API_KEY` (samme som produkttype-forslag)
+- Viden: systemprompt = grundinstruks + branchekendskab (`lib/ai/knowledge.ts`, i koden) + butikkens egen viden (`ai_knowledge.id='shop'`, redigeres på `/admin/ai-viden`). Cache-breakpoint på sidste blok — cachen brydes kun når butikkens viden ændres
 
 ## Vigtige kodningsmønstre
 

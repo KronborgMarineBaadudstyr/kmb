@@ -1,3 +1,6 @@
+import type Anthropic from '@anthropic-ai/sdk'
+import { INDUSTRY_GUIDE } from './knowledge'
+
 // AI-assistent til salgsanalyse. Kører på ANTHROPIC_API_KEY (indtil butikken tilknytter sin egen nøgle).
 
 export const AI_MODEL  = 'claude-opus-5-5'
@@ -14,7 +17,24 @@ Sådan arbejder du:
 - Simuleringer er estimater. Gengiv de vigtigste antagelser fra værktøjet, især om prisfølsomheden er estimeret fra data eller en antagelse, og vis gerne et par varianter (fx anden opgraderingsrate eller elasticitet), når usikkerheden er stor.
 - Salgspriser er inkl. 25 % moms. Dækningsbidrag og indkøbspriser er ekskl. moms. Sig hvilken, når du nævner beløb.
 - Lift over 1 betyder, at varer eller kategorier købes oftere sammen end tilfældigt. Forklar det i almindeligt sprog.
+- Du har branchekendskab og butikkens egen viden nedenfor. Brug dem til at tolke tallene og foreslå hypoteser, men lad data afgøre konklusionen, og sig hvornår du bygger på erfaring frem for tal.
 
 Svar på dansk, kort og konkret. Brug tabeller, når du sammenligner tal eller scenarier. Slut med en anbefaling eller et forslag til næste skridt, når spørgsmålet lægger op til det.`
 
 export type ChatItem = { role: 'user' | 'assistant'; text: string; tools: string[] }
+
+export const SHOP_KNOWLEDGE_MAX = 20000
+
+// Faste dele først, butikkens viden sidst: cache-breakpoint på sidste blok, så alt caches
+// og cachen kun brydes, når butikkens viden redigeres.
+export function buildSystem(shopKnowledge: string): Anthropic.TextBlockParam[] {
+  const shop = shopKnowledge.trim()
+  return [
+    { type: 'text', text: SYSTEM_PROMPT },
+    { type: 'text', text: INDUSTRY_GUIDE },
+    { type: 'text', text: shop
+        ? `# Butikkens egen viden\n\nSkrevet af butikkens administratorer. Vægter højere end det generelle branchekendskab.\n\n${shop}`
+        : '# Butikkens egen viden\n\n(Ikke udfyldt endnu.)',
+      cache_control: { type: 'ephemeral' } },
+  ]
+}
