@@ -130,7 +130,8 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
-RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises linket kun på skærmen)
+RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv" — afsender no-reply@lovesailing.dk (domænet skal være verificeret i Resend)
+DASHBOARD_PASSWORD=   # Admin-login — falder tilbage til KMB3000 hvis ikke sat
 ```
 
 ## TODO — Udestående opgaver
