@@ -104,6 +104,7 @@ const ALLOWED_FIELDS = [
   'original_number', 'original_number_source',
   'own_stock_quantity', 'own_stock_reserved',
   'variant_of_product_id',
+  'expected_lifespan_months', 'lifespan_note',
 ]
 
 export async function PATCH(

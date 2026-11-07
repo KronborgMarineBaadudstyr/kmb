@@ -87,6 +87,8 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `050_variant_of_product.sql` — `products.variant_of_product_id` (skjuler absorberede varianter fra grids) ✅ kørt
 - `051_shop_users_saved_carts.sql` — `shop_users` (kunder, ikke admin) + `saved_carts` ✅ kørt
 - `052_shop_orders.sql` — `orders` udvidet til webshop-ordrer (ordrenr. LS-10001+, betalingsstatus, access_token) ⏳ skal køres
+- `053_rls_lockdown.sql` — RLS på alle tabeller + fjerner anon/authenticated-rettigheder (appen bruger kun service role) ⏳ skal køres
+- `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -142,6 +144,9 @@ RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises 
 - [x] **Checkout uden betaling** — `/checkout` → `POST /api/shop/orders` → `/checkout/bekraeftelse/[id]?t=` + admin `/admin/orders`
 - [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
 - [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
+- [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
+- [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
+- [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
 - [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
 - [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook
 - [ ] **Staging batch-behandling** — godkend/afvis mange ad gangen
@@ -155,6 +160,15 @@ RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises 
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
 - E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
 - Server actions/API-ruter med admin-data skal selv kalde `isAdmin()` (`lib/admin-auth.ts`) — layout-tjekket dækker kun sider
+
+## Kundekonto & levetid
+- Login uden adgangskode: `/konto` → `POST /api/shop/auth/request` (e-mail eller telefon) → mail med `/konto/login?token=` → knap → server action `verifyLogin` → cookie `ls_session`
+- Linket kræver et klik på siden (mail-scannere må ikke bruge engangstokenet). Tokens 30 min, maks 5 pr. time pr. kunde
+- Telefon-login: SMS-udbyder ikke valgt (`lib/shop/sms.ts`) — indtil da sendes linket til kundens e-mail, hvis den kendes
+- Ved login knyttes gamle ordrer til kunden via `link_orders_to_shop_user()` — kun via den kanal kunden har bekræftet
+- Importerede ordrer: sæt `ordered_at` (købsdato), `email` og/eller `customer_info.phone`, `line_items[].product_id` = vores produkt-UUID
+- Levetid: `products.expected_lifespan_months` (+ `lifespan_note`). Forfald = `ordered_at` + levetid (view `customer_product_lifecycle`)
+- `/admin/lifecycle` sender påmindelser (kun samtykke + e-mail, én gang pr. kunde/ordre/produkt). Afmelding via `/afmeld?t=`
 
 ## Vigtige kodningsmønstre
 

@@ -24,6 +24,7 @@ const navEntries: NavEntry[] = [
 
   { href: '/admin/changes',          label: 'Import-ændringer',    icon: '📋' },
   { href: '/admin/orders',           label: 'Ordrer',              icon: '🧾' },
+  { href: '/admin/lifecycle',        label: 'Udskiftninger',       icon: '⏳' },
   { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
   { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
   { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },

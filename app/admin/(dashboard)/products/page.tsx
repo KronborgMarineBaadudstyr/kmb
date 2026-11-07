@@ -396,6 +396,20 @@ export default function ProductsPage() {
   }
 
   // Bulk set for checked products OR whole category
+  async function bulkSetLifespan() {
+    const raw = window.prompt(`Forventet levetid i måneder for ${checkedIds.size} produkter (fx 60 = 5 år). Tomt felt fjerner levetiden.`)
+    if (raw === null) return
+    setVisMsg(null)
+    const res  = await fetch('/api/products/lifespan', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_ids: [...checkedIds], months: raw.trim() === '' ? null : Number(raw) }),
+    })
+    const json = await res.json()
+    if (json.error) setVisMsg({ text: json.error, ok: false })
+    else { setVisMsg({ text: `✓ Levetid sat på ${json.updated} produkter`, ok: true }); setTimeout(() => setVisMsg(null), 3000) }
+  }
+
   async function bulkSetVisibility(hide: boolean, wholeCategory = false) {
     setVisMsg(null)
     const body: Record<string, unknown> = { hide_when_out_of_stock: hide }
@@ -839,6 +853,11 @@ export default function ProductsPage() {
                 </button>
               )}
             </div>
+
+            <button onClick={bulkSetLifespan}
+              className="px-3 py-1.5 text-sm bg-white border border-purple-300 text-purple-800 rounded-lg hover:bg-purple-100 font-medium shrink-0">
+              ⏳ Sæt levetid
+            </button>
 
             {checkedIds.size >= 2 && (
               <button onClick={() => setFamilyPanelOpen(true)}

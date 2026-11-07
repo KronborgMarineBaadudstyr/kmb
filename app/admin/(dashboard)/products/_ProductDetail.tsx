@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
+import { lifespanLabel } from '@/lib/shop/lifecycle'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type Supplier = { id: string; name: string; contact_email: string | null; data_format: string | null }
@@ -74,6 +75,8 @@ export type Product = {
   original_number: string | null
   original_number_source: string | null
   variant_of_product_id: string | null
+  expected_lifespan_months: number | null
+  lifespan_note: string | null
   variant_parent: { id: string; name: string } | null
   manufacturers: { id: string; name: string; country: string | null; website: string | null } | null
   product_images: ProductImage[]
@@ -1389,6 +1392,26 @@ export function ProductDetail({
     </Section>
   )
 
+  const lifespanSection = (
+    <Section title="Levetid & service">
+      <dl>
+        <InlineField label="Forventet levetid (mdr.)" value={product.expected_lifespan_months}
+          displayValue={product.expected_lifespan_months != null ? lifespanLabel(product.expected_lifespan_months) : null}
+          type="number"
+          onSave={v => {
+            const n = v == null ? null : Math.round(Number(v))
+            if (n === null || (n >= 1 && n <= 600)) patchField({ expected_lifespan_months: n }, 'expected_lifespan_months')
+          }}
+          saving={saving.has('expected_lifespan_months')} />
+        <InlineField label="Anbefaling" value={product.lifespan_note}
+          onSave={v => patchField({ lifespan_note: v }, 'lifespan_note')} saving={saving.has('lifespan_note')} />
+      </dl>
+      <p className="text-xs text-gray-400 mt-2">
+        Bruges til påmindelser om udskiftning på kundens konto og i e-mails. Anbefaling fx &quot;Udskift patron og udløser&quot;.
+      </p>
+    </Section>
+  )
+
   const dimsSection = (
     <Section title="Pakkedimensioner">
       <dl>
@@ -1500,6 +1523,7 @@ export function ProductDetail({
             {visibilitySection}
             {stockSection}
             {pricesSection}
+            {lifespanSection}
             {identSection}
             {originalNumberSection}
             {dimsSection}
@@ -1557,6 +1581,7 @@ export function ProductDetail({
             {visibilitySection}
             {stockSection}
             {pricesSection}
+            {lifespanSection}
             {identSection}
             {originalNumberSection}
             {product.manufacturers && (
