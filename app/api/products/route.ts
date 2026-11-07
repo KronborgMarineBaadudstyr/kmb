@@ -14,8 +14,8 @@ export async function GET(request: Request) {
   const inStock    = url.searchParams.get('in_stock')    === '1'
   const minPrice   = url.searchParams.get('min_price')   || ''
   const maxPrice   = url.searchParams.get('max_price')   || ''
-  // shop=1 → exclude archived + rejected automatically (no status param needed)
-  const shopMode   = url.searchParams.get('shop')        === '1'
+  // shop=1 → exclude archived + rejected + variant_of products automatically
+  const shopMode = url.searchParams.get('shop') === '1'
   const page       = Math.max(1, parseInt(url.searchParams.get('page')     || '1',  10))
   const perPage    = Math.min(100, parseInt(url.searchParams.get('per_page') || '50', 10))
   const sort       = url.searchParams.get('sort')  || 'name'
@@ -106,7 +106,6 @@ export async function GET(request: Request) {
       categories,
       brand,
       status,
-      woo_product_id,
       woo_bestillingsnummer,
       ean,
       manufacturer_sku,
@@ -115,6 +114,7 @@ export async function GET(request: Request) {
       unit_size,
       boat_type,
       hide_when_out_of_stock,
+      variant_of_product_id,
       created_at,
       updated_at,
       product_images ( url, alt_text, is_primary, position )
@@ -135,7 +135,11 @@ export async function GET(request: Request) {
   }
   if (status)             query = query.eq('status', status)
   if (shopMode) {
-    query = query.not('status', 'eq', 'archived').not('status', 'eq', 'rejected')
+    // Shop: skip archived/rejected AND products that are sub-variants of a parent
+    query = query
+      .not('status', 'eq', 'archived')
+      .not('status', 'eq', 'rejected')
+      .is('variant_of_product_id', null)
   }
   if (category)           query = query.contains('categories', [category])
   if (brand)              query = query.eq('brand', brand)
@@ -155,23 +159,31 @@ export async function GET(request: Request) {
   const { data: variantRows } = pageIds.length
     ? await supabase
         .from('product_variants')
-        .select('product_id')
+        .select('product_id, sales_price')
         .in('product_id', pageIds)
+        .eq('status', 'active')
     : { data: [] }
 
-  const variantCounts = new Map<string, number>()
-  for (const row of (variantRows ?? []) as { product_id: string }[]) {
+  const variantCounts   = new Map<string, number>()
+  const variantMinPrice = new Map<string, number>()
+  for (const row of (variantRows ?? []) as { product_id: string; sales_price: number | null }[]) {
     variantCounts.set(row.product_id, (variantCounts.get(row.product_id) ?? 0) + 1)
+    if (row.sales_price != null) {
+      const cur = variantMinPrice.get(row.product_id)
+      if (cur === undefined || row.sales_price < cur) variantMinPrice.set(row.product_id, row.sales_price)
+    }
   }
 
   const products = productList.map(p => {
     const imgs    = (p.product_images as { url: string; is_primary: boolean; position: number }[]) ?? []
     const primary = imgs.find(i => i.is_primary) ?? imgs.sort((a, b) => a.position - b.position)[0]
+    const vc      = variantCounts.get(p.id) ?? 0
     return {
       ...p,
       primary_image_url: primary?.url ?? null,
       image_count:       imgs.length,
-      variant_count:     variantCounts.get(p.id) ?? 0,
+      variant_count:     vc,
+      min_variant_price: vc > 0 ? (variantMinPrice.get(p.id) ?? null) : null,
       product_images:    undefined,
     }
   })

@@ -41,6 +41,7 @@ export function ShopHeader() {
         <div className="ls-header-actions">
           <Link href="/kategorier" className="ls-header-btn">Kategorier</Link>
           <Link href="/min-baad" className="ls-header-btn">Min båd</Link>
+          <Link href="/konto" className="ls-header-btn">Konto</Link>
           <CartBtn />
         </div>
       </div>

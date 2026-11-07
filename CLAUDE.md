@@ -1,13 +1,13 @@
 # KronborgMarine Bådudstyr — PIM/Middleware System
 
-Central middleware der forbinder leverandører, Supabase (master database), WooCommerce og admind POS.
+Central middleware der forbinder leverandører, Supabase (master database), egen webshop (LoveSailing.dk, `app/(shop)`) og admind POS.
+Ingen WooCommerce-integration — shop og betaling bygges selv. Kolonnerne `woo_product_id`/`woo_bestillingsnummer` er historiske data fra engangsimporten (bestillingsnr. bruges i søgning).
 
 ## Tech Stack
 - **Framework:** Next.js (App Router), TypeScript, Tailwind CSS
 - **Database:** Supabase (PostgreSQL) — cloud, service role key til server-side
 - **FTP:** `basic-ftp` pakke
 - **XML parsing:** `fast-xml-parser`
-- **WooCommerce:** `@woocommerce/woocommerce-rest-api`
 - **Cron jobs:** Vercel Cron (vercel.json) med `CRON_SECRET` Bearer token auth
 
 ## Projekt-struktur
@@ -83,6 +83,14 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `009_kaphorn_supplier.sql` — Kap-Horn leverandør-række ✅ kørt
 - `010_needs_review_status.sql` — `needs_review` status på staging ✅ kørt
 - `011_staging_match_groups.sql` — `staging_match_groups` tabel + `normalize_for_matching()` + `find_fuzzy_staging_matches()` RPC ✅ kørt
+- … (012–049 ✅ kørt)
+- `050_variant_of_product.sql` — `products.variant_of_product_id` (skjuler absorberede varianter fra grids) ✅ kørt
+- `051_shop_users_saved_carts.sql` — `shop_users` (kunder, ikke admin) + `saved_carts` ✅ kørt
+- `052_shop_orders.sql` — `orders` udvidet til webshop-ordrer (ordrenr. LS-10001+, betalingsstatus, access_token) ✅ kørt
+- `053_rls_lockdown.sql` — RLS på alle tabeller + fjerner anon/authenticated-rettigheder (appen bruger kun service role) ✅ kørt
+- `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ✅ kørt
+- `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ✅ kørt
+- `056_admin_users.sql` — admin-konti med e-mail + magic link (`admin_users`, `admin_login_tokens`, `admin_sessions`), første ejer ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -122,11 +130,10 @@ SQL-funktion der stripper farver (rød/blå/sort/etc.) og retningsord inden fuzz
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-WOO_BASE_URL=
-WOO_CONSUMER_KEY=
-WOO_CONSUMER_SECRET=
-WOO_WEBHOOK_SECRET=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
+RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
+EMAIL_FROM=           # Afsender — standard midlertidigt "LoveSailing <onboarding@resend.dev>" (leverer KUN til Resend-kontoens egen e-mail)
+NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brugeren står på (fx kmb-nine.vercel.app)
 ```
 
 ## TODO — Udestående opgaver
@@ -137,13 +144,42 @@ CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel da
 - [ ] **Sync interval** — Kap-Horn viser "Hver 8760 timer". Juster så alle leverandører viser samme daglige interval.
 
 ### Fremtidige features
-- [ ] **Produktredigering** — `/products/[id]` side til at redigere navn, beskrivelse, pris, billeder inden Woo-push
-- [ ] **Supabase → WooCommerce** produkt-sync (push validerede draft-produkter til Woo)
-- [ ] **Woo → Supabase** løbende lagersync (webhook fra Woo ved salg)
+- [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
+- [x] **Checkout uden betaling** — `/checkout` → `POST /api/shop/orders` → `/checkout/bekraeftelse/[id]?t=` + admin `/admin/orders`
+- [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
+- [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
+- [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
+- [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
+- [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
+- [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
+- [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
 - [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook
 - [ ] **Staging batch-behandling** — godkend/afvis mange ad gangen
 - [ ] **admind POS integration** — venter på API docs
 - [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
+
+## Checkout-flow
+- Kurv ligger i `localStorage` (`ls_cart`); linje-id er `produktId` eller `produktId__variantId`
+- `POST /api/shop/orders` genberegner pris (variant `sales_price` ?? produkt `sales_price`) og fragt (`lib/shop/shipping.ts`) — stol aldrig på klientens pris. 409 = priser ændret / vare utilgængelig (klienten retter kurven), 503 = databasefejl
+- Betaling: `online` (slås til i `onlinePaymentAvailable()` når udbyder er koblet på `startPayment()`) eller `pickup` = betal ved afhentning
+- Betal ved afhentning kræver login + kendt kunde (`payAtPickupEligible`: afsluttet eller gammel/importeret ordre, eller admin-overstyring i `/admin/customers`) + afhentning i butik — tjekkes på serveren
+- Uden online betaling kan ukendte kunder ikke bestille (knappen er låst)
+- Afhentningsflow i `/admin/orders`: Ny → Klar til afhentning (mail til kunden, én gang) → Afhentet og betalt
+- Butikkens adresse/åbningstider til mails: `lib/shop/store.ts`
+- Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
+- E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
+- **Admin-login:** `/login` → e-mail → magic link `/login/bekraeft?token=` → knap → cookie `kmb_admin` (session i `admin_sessions`, 14 dage). Ejere opretter/deaktiverer admins på `/admin/admins`. Kan mailen ikke sendes, logges linket i serverloggen (Vercel) som nødadgang
+- **`middleware.ts` (Node.js-runtime) kræver admin-session på alt under `/api`**, undtagen `/api/shop/*`, `/api/cron/*` (egen Bearer), `/api/auth/login`, `/api/health` og `GET /api/products?shop=1`. Nye offentlige ruter skal lægges under `/api/shop/`
+- Server actions går ikke gennem middleware — kald selv `isAdmin()` (`lib/admin-auth.ts`)
+
+## Kundekonto & levetid
+- Login uden adgangskode: `/konto` → `POST /api/shop/auth/request` (e-mail eller telefon) → mail med `/konto/login?token=` → knap → server action `verifyLogin` → cookie `ls_session`
+- Linket kræver et klik på siden (mail-scannere må ikke bruge engangstokenet). Tokens 30 min, maks 5 pr. time pr. kunde
+- Telefon-login: SMS-udbyder ikke valgt (`lib/shop/sms.ts`) — indtil da sendes linket til kundens e-mail, hvis den kendes
+- Ved login knyttes gamle ordrer til kunden via `link_orders_to_shop_user()` — kun via den kanal kunden har bekræftet
+- Importerede ordrer: sæt `ordered_at` (købsdato), `email` og/eller `customer_info.phone`, `line_items[].product_id` = vores produkt-UUID
+- Levetid: `products.expected_lifespan_months` (+ `lifespan_note`). Forfald = `ordered_at` + levetid (view `customer_product_lifecycle`)
+- `/admin/lifecycle` sender påmindelser (kun samtykke + e-mail, én gang pr. kunde/ordre/produkt). Afmelding via `/afmeld?t=`
 
 ## Vigtige kodningsmønstre
 

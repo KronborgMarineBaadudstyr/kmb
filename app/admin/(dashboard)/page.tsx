@@ -2,15 +2,19 @@ import { createServiceClient } from '@/lib/supabase/server'
 
 async function getStats() {
   const supabase = createServiceClient()
-  const [products, published, suppliers] = await Promise.all([
+  const [products, published, shopUsers, suppliers, orders] = await Promise.all([
     supabase.from('products').select('*', { count: 'exact', head: true }),
     supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'published'),
+    supabase.from('shop_users').select('*', { count: 'exact', head: true }),
     supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('active', true),
+    supabase.from('orders').select('*', { count: 'exact', head: true }),
   ])
   return {
     productCount:   products.count  ?? 0,
     publishedCount: published.count ?? 0,
+    shopUserCount:  shopUsers.count ?? 0,
     supplierCount:  suppliers.count ?? 0,
+    orderCount:     orders.count    ?? 0,
   }
 }
 
@@ -23,16 +27,23 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
   { label: 'Password-beskyttet dashboard (middleware + cookie)',                           done: true  },
   { label: 'Deploy til Vercel',                                                             done: true  },
 
-  // ── Produkter ──
-  { group: 'Produkter',        label: 'Produktliste med kolonne-vælger, filtrering og sortering', done: true  },
-  { label: 'Produkt detaljevisning og redigering med alle felter',                        done: true  },
+  // ── Produktdata ──
+  { group: 'Produktdata',      label: 'Engangsimport af eksisterende produkter (37.011)',  done: true  },
+  { label: 'Produktliste med kolonne-vælger, filtrering og sortering',                    done: true  },
+  { label: 'Produktredigering inkl. billeder, varianter og variantfamilier',              done: true  },
+
+  // ── Webshop ──
+  { group: 'Webshop (LoveSailing.dk)', label: 'Shop-frontend: forside, kategorier, filtre, søgning, produktside', done: true },
+  { label: 'Kurv + "Gem kurv" med e-mail-link (shop_users)',                              done: true  },
+  { label: 'Checkout + eget betalingssystem',                                             done: false },
+  { label: 'Lagertræk ved salg (webshop + POS)',                                          done: false },
+
   // ── Leverandører ──
   { group: 'Leverandører',     label: 'Leverandørstyring — opret og konfigurér leverandører', done: true  },
   { label: 'FTP/XML/CSV/XML import fra leverandør (6 leverandører implementeret)',        done: true  },
   { label: 'Sammenlign import med eksisterende Supabase data (staging + needs_review)',   done: true  },
   { label: 'Manuel godkendelsesproces for ændringer (staging review + matching pipeline)', done: true  },
   { label: 'Eget lager-justering med årsagskode og audit-log',                            done: true  },
-  { label: 'Push validerede produkter til salgskanal (admind POS / webshop)',             done: false },
 
   // ── Ordre & Forsendelse ──
   { group: 'Ordre & Forsendelse', label: 'Ordre-routing motor (optimal leverandørvalg pr. ordre)', done: false },
@@ -47,7 +58,7 @@ const STEPS: { label: string; done: boolean; group?: string; skipped?: boolean }
 ]
 
 export default async function DashboardPage() {
-  const { productCount, publishedCount, supplierCount } = await getStats()
+  const { productCount, publishedCount, shopUserCount, supplierCount, orderCount } = await getStats()
 
   const doneCount = STEPS.filter(s => s.done).length
 
@@ -63,6 +74,18 @@ export default async function DashboardPage() {
       value: supplierCount > 0 ? supplierCount.toLocaleString('da-DK') : '—',
       sub:   supplierCount > 0 ? 'leverandører konfigureret' : 'Ingen leverandører oprettet endnu',
       color: supplierCount > 0 ? 'text-gray-900' : 'text-gray-400',
+    },
+    {
+      label: 'Shop-kunder',
+      value: shopUserCount > 0 ? shopUserCount.toLocaleString('da-DK') : '—',
+      sub:   shopUserCount > 0 ? 'e-mails i shop_users' : 'Ingen endnu',
+      color: shopUserCount > 0 ? 'text-gray-900' : 'text-gray-400',
+    },
+    {
+      label: 'Ordre i systemet',
+      value: orderCount > 0 ? orderCount.toLocaleString('da-DK') : '—',
+      sub:   orderCount > 0 ? 'ordrer i systemet' : 'Afventer checkout',
+      color: orderCount > 0 ? 'text-gray-900' : 'text-gray-400',
     },
   ]
 

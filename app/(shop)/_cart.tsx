@@ -16,9 +16,11 @@ type CartCtx = {
   add:    (item: Omit<CartItem, 'qty'>) => void
   remove: (id: string) => void
   setQty: (id: string, qty: number) => void
+  setPrice: (id: string, price: number) => void
   clear:  () => void
   total:  number
   count:  number
+  ready:  boolean
 }
 
 const Ctx = createContext<CartCtx | null>(null)
@@ -56,13 +58,17 @@ export function CartProvider({ children }: { children: ReactNode }) {
     setItems(prev => prev.map(i => i.id === id ? { ...i, qty } : i))
   }, [remove])
 
+  const setPrice = useCallback((id: string, price: number) => {
+    setItems(prev => prev.map(i => i.id === id ? { ...i, price } : i))
+  }, [])
+
   const clear = useCallback(() => setItems([]), [])
 
   const total = items.reduce((s, i) => s + i.price * i.qty, 0)
   const count = items.reduce((s, i) => s + i.qty, 0)
 
   return (
-    <Ctx.Provider value={{ items, add, remove, setQty, clear, total, count }}>
+    <Ctx.Provider value={{ items, add, remove, setQty, setPrice, clear, total, count, ready }}>
       {children}
     </Ctx.Provider>
   )

@@ -1,15 +1,43 @@
 ﻿'use client'
 
 import Link from 'next/link'
-import { useCart, fmtPrice } from '../_cart'
+import { useEffect, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useCart, fmtPrice, CartItem } from '../_cart'
+import { SaveCart } from './_save-cart'
+import { FREE_SHIPPING_THRESHOLD as SHIPPING_THRESHOLD, shippingCost } from '@/lib/shop/shipping'
 
-const SHIPPING_THRESHOLD = 499
-const SHIPPING_COST      = 49
 
 export function CartView() {
-  const { items, remove, setQty, total, count } = useCart()
+  const { items, remove, setQty, total, count, add, clear } = useCart()
+  const searchParams = useSearchParams()
+  const loadedToken  = useRef<string | null>(null)
 
-  const shipping = total >= SHIPPING_THRESHOLD ? 0 : SHIPPING_COST
+  // Gendan gemt kurv fra ?gem=<token>
+  useEffect(() => {
+    const token = searchParams.get('gem')
+    if (!token || loadedToken.current === token) return
+    loadedToken.current = token
+
+    fetch(`/api/shop/load-cart/${encodeURIComponent(token)}`)
+      .then(r => r.json())
+      .then(json => {
+        if (!json.cart) return
+        // Flet gemte varer ind (eksisterende beholder deres antal)
+        const existing = new Set(items.map((i: CartItem) => i.id))
+        for (const item of json.cart as CartItem[]) {
+          if (!existing.has(item.id)) add(item)
+        }
+        // Fjern ?gem= fra URL uden reload
+        const url = new URL(window.location.href)
+        url.searchParams.delete('gem')
+        window.history.replaceState({}, '', url.toString())
+      })
+      .catch(() => {/* stille fejl */})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
+
+  const shipping   = shippingCost(total, 'delivery')
   const orderTotal = total + shipping
 
   if (count === 0) {
@@ -65,6 +93,11 @@ export function CartView() {
               </div>
             </div>
           ))}
+
+          {/* Gem kurv */}
+          <div style={{ marginTop: 8 }}>
+            <SaveCart items={items} />
+          </div>
         </div>
 
         {/* Summary */}
@@ -103,9 +136,9 @@ export function CartView() {
             <span>{fmtPrice(orderTotal)}</span>
           </div>
 
-          <button className="ls-checkout-btn" onClick={() => alert('Betalingsgateway — kommer snart')}>
-            Gå til betaling →
-          </button>
+          <Link href="/checkout" className="ls-checkout-btn" style={{ display: 'block', textAlign: 'center', textDecoration: 'none' }}>
+            Gå til kassen →
+          </Link>
 
           <div style={{ marginTop: 12, textAlign: 'center' }}>
             <Link href="/" style={{ fontSize: 12, color: 'var(--ink-3)' }}>← Fortsæt med at handle</Link>

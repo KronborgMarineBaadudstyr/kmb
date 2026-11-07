@@ -14,7 +14,7 @@ export async function GET(
 
   const { data, error } = await supabase
     .from('product_variants')
-    .select('id, internal_variant_sku, attributes, ean, sales_price, sale_price, own_stock_quantity, own_stock_reserved, status, woo_variation_id')
+    .select('id, internal_variant_sku, attributes, ean, sales_price, sale_price, own_stock_quantity, own_stock_reserved, status')
     .eq('product_id', id)
     .order('internal_variant_sku')
 

@@ -297,7 +297,7 @@ export default function ChangesPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         {row.product_id && (
-                          <Link href={`/products/${row.product_id}`}
+                          <Link href={`/admin/products/${row.product_id}`}
                             className="text-xs text-blue-500 hover:underline" title="Se produkt">
                             Produkt ↗
                           </Link>

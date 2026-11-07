@@ -49,6 +49,15 @@ export function MinBaadView() {
         </div>
       </div>
 
+      <Link href="/konto" className="ls-account-promo">
+        <span>⏳</span>
+        <span>
+          <strong>Min konto</strong>
+          <small>Se dine ordrer og hvornår dit udstyr bør efterses eller udskiftes</small>
+        </span>
+        <span aria-hidden>→</span>
+      </Link>
+
       {/* Redigér */}
       <div style={{ background: 'var(--card)', borderRadius: 'var(--r-xl)', border: '1px solid var(--line)', padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Om din båd</h3>

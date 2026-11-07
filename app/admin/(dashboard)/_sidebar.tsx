@@ -23,6 +23,9 @@ const navEntries: NavEntry[] = [
   ]},
 
   { href: '/admin/changes',          label: 'Import-ændringer',    icon: '📋' },
+  { href: '/admin/orders',           label: 'Ordrer',              icon: '🧾' },
+  { href: '/admin/customers',        label: 'Kunder',              icon: '👤' },
+  { href: '/admin/lifecycle',        label: 'Udskiftninger',       icon: '⏳' },
   { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
   { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
   { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },
@@ -32,10 +35,9 @@ const navEntries: NavEntry[] = [
   { href: '/admin/navigation',       label: 'Båd-navigation',      icon: '⚓' },
   { href: '/admin/category-filters', label: 'Kategori-søgefiltre', icon: '🔍' },
   { href: '/admin/product-types',    label: 'Produkttyper',        icon: '🏷' },
-  { href: '/admin/sync',             label: 'Sync & Logs',         icon: '🔄' },
 ]
 
-export default function SidebarClient() {
+export default function SidebarClient({ admin }: { admin: { email: string; role: 'owner' | 'admin' } }) {
   const pathname = usePathname()
   const router   = useRouter()
 
@@ -59,7 +61,7 @@ export default function SidebarClient() {
         <p className="text-xs text-gray-400 mt-0.5">Bådudstyr — Middleware</p>
       </div>
       <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-        {navEntries.map(entry => {
+        {[...navEntries, ...(admin.role === 'owner' ? [{ href: '/admin/admins', label: 'Administratorer', icon: '🔑' }] : [])].map(entry => {
           if (!isGroup(entry)) {
             const active = isActive(entry.href)
             return (
@@ -117,6 +119,7 @@ export default function SidebarClient() {
       </nav>
       <div className="px-4 py-3 border-t border-gray-700 space-y-2">
         <a href="/" className="text-xs text-gray-500 hover:text-gray-300 block">← Se butik</a>
+        <p className="text-xs text-gray-400 truncate" title={admin.email}>{admin.email}</p>
         <button
           onClick={handleLogout}
           className="w-full text-left px-3 py-2 text-xs text-gray-500 hover:text-gray-300 transition-colors rounded-md hover:bg-gray-700"

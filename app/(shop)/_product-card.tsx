@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useCart, fmtPrice } from './_cart'
+import { useCart } from './_cart'
 import { useState } from 'react'
 
 type Product = {
@@ -9,8 +9,11 @@ type Product = {
   name: string
   brand?: string | null
   sales_price?: number | null
+  min_variant_price?: number | null
+  variant_count?: number
   categories?: string[]
   product_images?: { url: string; is_primary: boolean }[]
+  primary_image_url?: string | null
 }
 
 function PriceDisplay({ price }: { price: number }) {
@@ -29,13 +32,17 @@ export function ProductCard({ product: p }: { product: Product }) {
   const { add } = useCart()
   const [toasted, setToasted] = useState(false)
 
-  const img = p.product_images?.find(i => i.is_primary)?.url
+  const img = p.primary_image_url
+    ?? p.product_images?.find(i => i.is_primary)?.url
     ?? p.product_images?.[0]?.url
 
+  const hasVariants = (p.variant_count ?? 0) > 0
+  const displayPrice = hasVariants ? (p.min_variant_price ?? p.sales_price) : p.sales_price
   const firstCat = p.categories?.[0]
 
   function handleAdd(e: React.MouseEvent) {
     e.preventDefault()
+    if (hasVariants) return // varianter vælges på detaljesiden
     add({
       id:    p.id,
       name:  p.name,
@@ -64,15 +71,18 @@ export function ProductCard({ product: p }: { product: Product }) {
         </div>
         <div className="ls-prodcard-name">{p.name}</div>
         <div className="ls-prodcard-price">
-          {p.sales_price
-            ? <PriceDisplay price={p.sales_price} />
+          {displayPrice
+            ? <>
+                {hasVariants && <span className="ls-prodcard-price-from">fra </span>}
+                <PriceDisplay price={displayPrice} />
+              </>
             : <span className="ls-prodcard-price-unknown">Pris ukendt</span>}
         </div>
         <button
           onClick={handleAdd}
           className={`ls-prodcard-btn${toasted ? ' toasted' : ''}`}
         >
-          {toasted ? '✓ Lagt i kurv' : 'Læg i kurv'}
+          {toasted ? '✓ Lagt i kurv' : hasVariants ? 'Vælg variant →' : 'Læg i kurv'}
         </button>
       </div>
     </Link>
