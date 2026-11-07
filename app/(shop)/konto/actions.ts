@@ -3,7 +3,8 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getShopUser, startSession, endSession, hashToken, safeNext } from '@/lib/shop/auth'
+import { getShopUser, startSession, endSession } from '@/lib/shop/auth'
+import { hashToken, safeNext } from '@/lib/tokens'
 
 // Linket i mailen åbner en side med en knap, der kalder denne. Så kan mail-scannere,
 // der "klikker" på links for at tjekke dem, ikke bruge engangs-tokenet op.

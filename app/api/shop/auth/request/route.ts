@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { parseIdentifier, newToken, hashToken, safeNext, LOGIN_TOKEN_MINUTES } from '@/lib/shop/auth'
+import { parseIdentifier, LOGIN_TOKEN_MINUTES } from '@/lib/shop/auth'
+import { newToken, hashToken, safeNext } from '@/lib/tokens'
 import { sendEmail, emailConfigured, siteUrl } from '@/lib/shop/email'
 import { sendSms } from '@/lib/shop/sms'
 

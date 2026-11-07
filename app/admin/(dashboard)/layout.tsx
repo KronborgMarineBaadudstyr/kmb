@@ -1,18 +1,14 @@
-import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import SidebarClient from './_sidebar'
-import { ADMIN_COOKIE, isAdminCookie } from '@/lib/admin-session'
+import { getCurrentAdmin } from '@/lib/admin-auth'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  // Server-side auth — kører i Node.js runtime, ingen Edge-problemer
-  const jar   = await cookies()
-  if (!isAdminCookie(jar.get(ADMIN_COOKIE)?.value)) {
-    redirect('/login')
-  }
+  const admin = await getCurrentAdmin()
+  if (!admin) redirect('/login')
 
   return (
     <div className="flex h-full">
-      <SidebarClient />
+      <SidebarClient admin={{ email: admin.email, role: admin.role }} />
       <main className="flex-1 overflow-auto">
         {children}
       </main>

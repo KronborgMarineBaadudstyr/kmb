@@ -8,7 +8,6 @@ export async function GET() {
       supabase_url:  !!process.env.NEXT_PUBLIC_SUPABASE_URL,
       service_key:   !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       anon_key:      !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-      dashboard_pw:  !!process.env.DASHBOARD_PASSWORD,
     }
   })
 }

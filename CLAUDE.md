@@ -90,6 +90,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `053_rls_lockdown.sql` — RLS på alle tabeller + fjerner anon/authenticated-rettigheder (appen bruger kun service role) ✅ kørt
 - `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ✅ kørt
 - `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ✅ kørt
+- `056_admin_users.sql` — admin-konti med e-mail + magic link (`admin_users`, `admin_login_tokens`, `admin_sessions`), første ejer ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -131,7 +132,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
 RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv" — afsender no-reply@lovesailing.dk (domænet skal være verificeret i Resend)
-DASHBOARD_PASSWORD=   # Admin-login — falder tilbage til KMB3000 hvis ikke sat
 ```
 
 ## TODO — Udestående opgaver
@@ -165,7 +165,8 @@ DASHBOARD_PASSWORD=   # Admin-login — falder tilbage til KMB3000 hvis ikke sat
 - Butikkens adresse/åbningstider til mails: `lib/shop/store.ts`
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
 - E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
-- **`middleware.ts` kræver admin-login på alt under `/api`**, undtagen `/api/shop/*`, `/api/cron/*` (egen Bearer), `/api/auth/login`, `/api/health` og `GET /api/products?shop=1`. Nye offentlige ruter skal lægges under `/api/shop/`
+- **Admin-login:** `/login` → e-mail → magic link `/login/bekraeft?token=` → knap → cookie `kmb_admin` (session i `admin_sessions`, 14 dage). Ejere opretter/deaktiverer admins på `/admin/admins`. Kan mailen ikke sendes, logges linket i serverloggen (Vercel) som nødadgang
+- **`middleware.ts` (Node.js-runtime) kræver admin-session på alt under `/api`**, undtagen `/api/shop/*`, `/api/cron/*` (egen Bearer), `/api/auth/login`, `/api/health` og `GET /api/products?shop=1`. Nye offentlige ruter skal lægges under `/api/shop/`
 - Server actions går ikke gennem middleware — kald selv `isAdmin()` (`lib/admin-auth.ts`)
 
 ## Kundekonto & levetid

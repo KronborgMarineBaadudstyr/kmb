@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { verifyLogin } from '../actions'
-import { safeNext } from '@/lib/shop/auth'
+import { safeNext } from '@/lib/tokens'
 
 export const metadata: Metadata = { title: 'Log ind', robots: { index: false } }
 
