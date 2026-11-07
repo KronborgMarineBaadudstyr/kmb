@@ -45,7 +45,7 @@ async function sendReminders(formData: FormData) {
     .select('id, unsubscribe_token').in('id', [...byUser.keys()])
   const unsub = new Map((users ?? []).map(u => [u.id, u.unsubscribe_token as string]))
 
-  const site   = siteUrl()
+  const site   = await siteUrl()
   const emails: (Email & { userId: string })[] = [...byUser.entries()].map(([userId, items]) => {
     const unsubUrl = `${site}/afmeld?t=${unsub.get(userId) ?? ''}`
     return {

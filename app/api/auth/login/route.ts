@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   if (ins.error) return NextResponse.json({ error: 'Login er ikke tilgængeligt lige nu' }, { status: 503 })
 
   const next = safeNext(body.next)
-  const link = `${siteUrl()}/login/bekraeft?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`
+  const link = `${await siteUrl()}/login/bekraeft?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`
   const sent = await sendEmail(admin.email, 'Login til Kronborg Marine admin', `
     <div style="font-family:sans-serif;max-width:480px;margin:auto;color:#111">
       <h2>Log ind på admin</h2>

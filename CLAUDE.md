@@ -131,7 +131,9 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
-RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv" — afsender no-reply@lovesailing.dk (domænet skal være verificeret i Resend)
+RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
+EMAIL_FROM=           # Afsender, fx "LoveSailing <no-reply@lovesailing.dk>" (standard) — domænet skal være verificeret i Resend
+NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brugeren står på (fx kmb-nine.vercel.app)
 ```
 
 ## TODO — Udestående opgaver

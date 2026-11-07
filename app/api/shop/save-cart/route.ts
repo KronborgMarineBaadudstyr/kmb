@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Kunne ikke gemme kurv' }, { status: 500 })
   }
 
-  const cartLink = `${siteUrl()}/kurv?gem=${saved.token}`
+  const cartLink = `${await siteUrl()}/kurv?gem=${saved.token}`
 
   await sendEmail(email, 'Din gemte kurv hos LoveSailing', `
     <div style="font-family:sans-serif;max-width:480px;margin:auto">

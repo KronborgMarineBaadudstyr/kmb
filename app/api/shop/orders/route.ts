@@ -187,7 +187,7 @@ export async function POST(request: Request) {
     customer.email,
     `Ordrebekræftelse ${order.order_number} — LoveSailing`,
     orderEmailHtml(order.order_number, lines, subtotal, shipping, total, method, payment,
-      `${siteUrl()}${confirmationPath(order)}`),
+      `${await siteUrl()}${confirmationPath(order)}`),
   ).catch(() => false)
 
   const { redirectUrl } = payment === 'pickup'

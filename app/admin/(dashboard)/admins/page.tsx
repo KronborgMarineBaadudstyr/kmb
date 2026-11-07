@@ -31,12 +31,13 @@ async function addAdmin(formData: FormData) {
     .insert({ email, name, role, created_by: me.id })
   if (error) redirect(`/admin/admins?err=${error.code === '23505' ? 'findes' : 'db'}`)
 
+  const site = await siteUrl()
   const sent = await sendEmail(email, 'Du er oprettet som administrator — Kronborg Marine', `
     <div style="font-family:sans-serif;max-width:480px;margin:auto;color:#111">
       <h2>Velkommen${name ? ` ${escapeHtml(name.split(' ')[0])}` : ''}</h2>
       <p>${escapeHtml(me.email)} har oprettet dig som ${ROLES[role].toLowerCase()} i Kronborg Marines admin.</p>
       <p>Log ind med denne e-mail — du får et login-link tilsendt, ingen adgangskode.</p>
-      <a href="${siteUrl()}/login" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#111827;color:#fff;
+      <a href="${site}/login" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#111827;color:#fff;
          border-radius:6px;text-decoration:none;font-weight:600">Gå til login →</a>
     </div>`).catch(() => false)
   revalidatePath('/admin/admins')

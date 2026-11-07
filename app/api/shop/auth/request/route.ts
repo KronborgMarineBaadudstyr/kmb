@@ -45,7 +45,7 @@ export async function POST(request: Request) {
 
   const token = newToken()
   const next  = safeNext(body.next)
-  const link  = `${siteUrl()}/konto/login?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`
+  const link  = `${await siteUrl()}/konto/login?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`
   const sms   = id.kind === 'phone' && await sendSms(id.value, `Log ind på LoveSailing: ${link}`)
   const channel: 'email' | 'sms' = sms ? 'sms' : 'email'
   if (!sms && !user.email) return NextResponse.json({ ok: true, message: PHONE_MSG })

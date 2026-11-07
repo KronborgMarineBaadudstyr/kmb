@@ -1,6 +1,8 @@
-// E-mail via Resend. Uden RESEND_API_KEY sendes intet (returnerer false), så flows virker lokalt.
+import { headers } from 'next/headers'
 
-const FROM = 'LoveSailing <no-reply@lovesailing.dk>'
+// E-mail via Resend. Uden RESEND_API_KEY sendes intet (returnerer false), så flows virker lokalt.
+// Afsenderens domæne skal være verificeret i Resend.
+const FROM = process.env.EMAIL_FROM || 'LoveSailing <no-reply@lovesailing.dk>'
 
 export type Email = { to: string; subject: string; html: string; headers?: Record<string, string> }
 
@@ -40,11 +42,33 @@ export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }
 
-export function siteUrl(): string {
+// Links i mails peger på det domæne, brugeren står på (fx kmb-nine.vercel.app eller en preview),
+// så længe det er et af vores. Ellers den konfigurerede adresse.
+export async function siteUrl(): Promise<string> {
+  try {
+    const h    = await headers()
+    const host = (h.get('x-forwarded-host') ?? h.get('host') ?? '').split(',')[0].trim().toLowerCase()
+    if (host && trustedHost(host)) {
+      const name = host.replace(/:\d+$/, '')
+      return `${name === 'localhost' || name === '127.0.0.1' ? 'http' : 'https'}://${host}`
+    }
+  } catch { /* ingen request */ }
+  return configuredSiteUrl()
+}
+
+function configuredSiteUrl(): string {
   if (process.env.NEXT_PUBLIC_SITE_URL) return process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, '')
   if (process.env.VERCEL_PROJECT_PRODUCTION_URL) return `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
   if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`
   return 'http://localhost:3000'
+}
+
+function trustedHost(host: string): boolean {
+  const name = host.replace(/:\d+$/, '')
+  if (name === 'localhost' || name === '127.0.0.1' || name.endsWith('.vercel.app')) return true
+  return [process.env.NEXT_PUBLIC_SITE_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL]
+    .filter((u): u is string => !!u)
+    .some(u => { try { return new URL(u.includes('://') ? u : `https://${u}`).hostname === name } catch { return false } })
 }
 
 export function fmtKr(n: number): string {

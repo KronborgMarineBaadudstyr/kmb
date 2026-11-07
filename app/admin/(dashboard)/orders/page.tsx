@@ -54,7 +54,7 @@ async function markReady(formData: FormData) {
     await supabase.from('orders').update({ status: 'ready', updated_at: new Date().toISOString() }).eq('id', id)
   } else {
     const to = o.email ?? (o.customer_info as Customer)?.email
-    if (to) await sendEmail(to, `Din ordre ${o.order_number} er klar til afhentning`, readyEmailHtml(o)).catch(() => false)
+    if (to) await sendEmail(to, `Din ordre ${o.order_number} er klar til afhentning`, readyEmailHtml(o, await siteUrl())).catch(() => false)
   }
   revalidatePath('/admin/orders')
 }
@@ -73,11 +73,11 @@ async function markPickedUpPaid(formData: FormData) {
 function readyEmailHtml(o: {
   id: string; order_number: string; customer_info: unknown; line_items: unknown; order_total: number
   payment_method: string | null; payment_status: string; access_token: string | null
-}) {
+}, site: string) {
   const c     = (o.customer_info ?? {}) as Customer
   const lines = (Array.isArray(o.line_items) ? o.line_items : []) as Line[]
   const pay   = o.payment_method === 'pickup' && o.payment_status !== 'paid'
-  const link  = o.access_token ? `${siteUrl()}${confirmationPath({ id: o.id, access_token: o.access_token })}` : null
+  const link  = o.access_token ? `${site}${confirmationPath({ id: o.id, access_token: o.access_token })}` : null
   return `
     <div style="font-family:sans-serif;max-width:520px;margin:auto;color:#1a2543">
       <h2>${c.name ? `Hej ${escapeHtml(c.name.split(' ')[0])}` : 'Hej'} — dine varer er klar</h2>
