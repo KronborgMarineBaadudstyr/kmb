@@ -89,7 +89,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `052_shop_orders.sql` — `orders` udvidet til webshop-ordrer (ordrenr. LS-10001+, betalingsstatus, access_token) ✅ kørt
 - `053_rls_lockdown.sql` — RLS på alle tabeller + fjerner anon/authenticated-rettigheder (appen bruger kun service role) ✅ kørt
 - `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ✅ kørt
-- `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ⏳ skal køres
+- `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
