@@ -153,8 +153,8 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
 - [ ] **Lagertræk ved salg** — webshop-ordre og POS trækker fra eget lager i Supabase
-- [ ] **Eget lager justering** — manuel lageroptælling UI + POS webhook
-- [ ] **Staging batch-behandling** — godkend/afvis mange ad gangen
+- [x] **Eget lager justering** — lageroptælling med årsagskode og log (`/admin/inventory`). POS-webhook afventer admind
+- [x] **Staging batch-behandling** — opret/afvis mange ad gangen (`/admin/staging`)
 - [ ] **admind POS integration** — venter på API docs
 - [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
 
