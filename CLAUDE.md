@@ -95,6 +95,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `058_price_history.sql` — `price_history` + triggere der logger hver ændring af salgs-/tilbudspris (produkter og varianter) ✅ kørt
 - `059_sales_analytics.sql` — view `sales_lines` + `analytics_*()` (dækning, kategorier, topsælgere, måned, sæson, sæsontoppe, købes sammen, kategori-affinitet, prisændringer, kampagner, stk. pr. ordre) + `ai_conversations`/`ai_messages` ✅ kørt
 - `060_ai_knowledge.sql` — `ai_knowledge` (butikkens egen viden til AI-assistenten) ✅ kørt
+- `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle)
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -137,6 +138,7 @@ SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
 RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
 EMAIL_FROM=           # Afsender — standard midlertidigt "LoveSailing <onboarding@resend.dev>" (leverer KUN til Resend-kontoens egen e-mail)
+SETTINGS_ENCRYPTION_KEY= # Valgfri. Krypterer app_settings (ellers afledt af SUPABASE_SERVICE_ROLE_KEY — skift = gemte nøgler skal indtastes igen)
 NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brugeren står på (fx kmb-nine.vercel.app)
 ```
 
@@ -155,7 +157,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
 - [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
 - [x] **Salgsindsigt + AI-assistent** — `/admin/insights` og `/admin/ai` (se afsnit nedenfor)
-- [ ] **Egen AI-nøgle til butikken** — indtast Anthropic-nøgle i admin (krypteret i DB) i stedet for `ANTHROPIC_API_KEY`
+- [x] **Egen AI-nøgle til butikken** — `/admin/ai-noegle` (kun ejere); krypteret i `app_settings`, fallback til `ANTHROPIC_API_KEY`
 - [ ] **Anthropic SDK 0.94 → 1.x** — giver server-side fallback ved afvisning (`fallbacks: "default"`); berører også `app/api/product-types/suggest*`
 - [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
@@ -197,7 +199,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - `lib/ai/analytics.ts`: wrappers om `analytics_*()` + simuleringer (`simulatePriceChange`, `simulateBundle` → ren `bundleScenarios`). Elasticitet estimeres med log-log-regression og bruges kun hvis pålidelig (≥4 mdr., ≥5 % prisvariation), ellers antagelse -1,2 — antagelserne returneres altid
 - `lib/ai/tools.ts`: værktøjer til modellen (kun læsning/beregning) med egen inputvalidering (input streames og valideres ikke af API'et)
 - `POST /api/ai/chat`: manuel værktøjsløkke med streaming (SSE), model `claude-opus-5-5`, effort `high`, cache på systemprompt og historik. Samtaler gemmes i `ai_messages` som rå content-blokke (append-only — thinking-blokke skal sendes uændret tilbage). Dato sendes i brugerens tur, ikke i systemprompten (cache)
-- Nøgle: `ANTHROPIC_API_KEY` (samme som produkttype-forslag)
+- Nøgle: `anthropicClient()` (`lib/ai/key.ts`) — butikkens egen nøgle fra `/admin/ai-noegle` (AES-256-GCM via `lib/secrets.ts`, testes mod Anthropic før den gemmes), ellers `ANTHROPIC_API_KEY`. Bruges af AI-chat og produkttype-/kategoriforslag
 - Viden: systemprompt = grundinstruks + branchekendskab (`lib/ai/knowledge.ts`, i koden) + butikkens egen viden (`ai_knowledge.id='shop'`, redigeres på `/admin/ai-viden`). Cache-breakpoint på sidste blok — cachen brydes kun når butikkens viden ændres
 
 ## Vigtige kodningsmønstre

@@ -1,6 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
+import { anthropicClient } from '@/lib/ai/key'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -28,10 +28,10 @@ function matchesAnyType(name: string, keywordSets: string[][]): boolean {
 // Samples product names NOT yet covered by an existing product type,
 // calls Claude, returns product type suggestions.
 export async function POST() {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey || apiKey.trim() === '') {
+  const client = await anthropicClient()
+  if (!client) {
     return NextResponse.json(
-      { error: 'ANTHROPIC_API_KEY er ikke sat i .env.local / Vercel environment variables.' },
+      { error: 'Ingen Anthropic-nøgle — en ejer kan indtaste den under Indstillinger → AI-nøgle.' },
       { status: 503 }
     )
   }
@@ -107,8 +107,6 @@ export async function POST() {
       }
     )
   }
-
-  const client = new Anthropic({ apiKey })
 
   const prompt = `Du er ekspert i marine bådudstyr og produktkatalogisering.
 

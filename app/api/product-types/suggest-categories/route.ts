@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import Anthropic from '@anthropic-ai/sdk'
+import { anthropicClient } from '@/lib/ai/key'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -8,14 +8,12 @@ export const maxDuration = 60
 // Takes full category structure (cat > sub > product type names) and
 // asks Claude Sonnet to suggest category merges with full context.
 export async function POST(request: Request) {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey?.trim()) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY mangler' }, { status: 503 })
+  const client = await anthropicClient()
+  if (!client) {
+    return NextResponse.json({ error: 'Ingen Anthropic-nøgle — en ejer kan indtaste den under Indstillinger → AI-nøgle.' }, { status: 503 })
   }
 
   const { structure } = await request.json() as { structure: string }
-
-  const client = new Anthropic({ apiKey })
 
   const prompt = `Du er ekspert i produktkatalogisering for en dansk båd- og marinawebshop.
 

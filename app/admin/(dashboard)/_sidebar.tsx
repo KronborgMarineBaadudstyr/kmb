@@ -50,7 +50,11 @@ const navEntries: NavEntry[] = [
   ]},
 ]
 
-const ADMINS_ITEM: NavItem = { href: '/admin/admins', label: 'Administratorer', icon: '🔑' }
+// Kun for ejere
+const OWNER_ITEMS: NavItem[] = [
+  { href: '/admin/ai-noegle', label: 'AI-nøgle',        icon: '🗝' },
+  { href: '/admin/admins',    label: 'Administratorer', icon: '🔑' },
+]
 
 function Chevron({ open }: { open: boolean }) {
   return (
@@ -65,9 +69,9 @@ export default function SidebarClient({ admin }: { admin: { email: string; role:
   const pathname = usePathname()
   const router   = useRouter()
 
-  // Administratorer ligger under Indstillinger og ses kun af ejere
+  // AI-nøgle og Administratorer ligger under Indstillinger og ses kun af ejere
   const entries = navEntries.map(e =>
-    isGroup(e) && e.group === 'Indstillinger' && admin.role === 'owner' ? { ...e, items: [...e.items, ADMINS_ITEM] } : e)
+    isGroup(e) && e.group === 'Indstillinger' && admin.role === 'owner' ? { ...e, items: [...e.items, ...OWNER_ITEMS] } : e)
 
   // Grupper kan foldes ud/ind; den gruppe man står i er foldet ud fra start
   const [toggled, setToggled] = useState<Record<string, boolean>>({})
