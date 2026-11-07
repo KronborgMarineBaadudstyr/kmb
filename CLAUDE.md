@@ -93,7 +93,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `056_admin_users.sql` — admin-konti med e-mail + magic link (`admin_users`, `admin_login_tokens`, `admin_sessions`), første ejer ✅ kørt
 - `057_order_stock.sql` — `orders.stock_state` + `order_stock_apply()` (reservér/træk/frigiv eget lager pr. ordre, logges i `stock_adjustments`) ✅ kørt
 - `058_price_history.sql` — `price_history` + triggere der logger hver ændring af salgs-/tilbudspris (produkter og varianter) ⏳ skal køres
-- `059_sales_analytics.sql` — view `sales_lines` + `analytics_*()` funktioner (dækning, topsælgere, måned, sæson, købes sammen, kategori-affinitet, prisændringer, kampagner, stk. pr. ordre) + `ai_conversations`/`ai_messages` ⏳ skal køres
+- `059_sales_analytics.sql` — view `sales_lines` + `analytics_*()` (dækning, kategorier, topsælgere, måned, sæson, sæsontoppe, købes sammen, kategori-affinitet, prisændringer, kampagner, stk. pr. ordre) + `ai_conversations`/`ai_messages` ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -153,6 +153,9 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
 - [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
 - [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
+- [x] **Salgsindsigt + AI-assistent** — `/admin/insights` og `/admin/ai` (se afsnit nedenfor)
+- [ ] **Egen AI-nøgle til butikken** — indtast Anthropic-nøgle i admin (krypteret i DB) i stedet for `ANTHROPIC_API_KEY`
+- [ ] **Anthropic SDK 0.94 → 1.x** — giver server-side fallback ved afvisning (`fallbacks: "default"`); berører også `app/api/product-types/suggest*`
 - [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
 - [x] **Lagertræk ved salg (webshop)** — reservation ved ordre, træk ved afhentning, frigivelse ved annullering (`order_stock_apply`, migration 057). POS afventer admind
@@ -186,6 +189,14 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - Importerede ordrer: sæt `ordered_at` (købsdato), `email` og/eller `customer_info.phone`, `line_items[].product_id` = vores produkt-UUID
 - Levetid: `products.expected_lifespan_months` (+ `lifespan_note`). Forfald = `ordered_at` + levetid (view `customer_product_lifecycle`)
 - `/admin/lifecycle` sender påmindelser (kun samtykke + e-mail, én gang pr. kunde/ordre/produkt). Afmelding via `/afmeld?t=`
+
+## Salgsanalyse & AI-assistent
+- Prishistorik logges automatisk af triggere (`price_history`, migration 058) — grundlag for prisfølsomhed
+- `sales_lines` (view) folder alle ordrelinjer ud; annullerede/refunderede udelades; varianter under et overprodukt tælles som overproduktet (`family_id`)
+- `lib/ai/analytics.ts`: wrappers om `analytics_*()` + simuleringer (`simulatePriceChange`, `simulateBundle` → ren `bundleScenarios`). Elasticitet estimeres med log-log-regression og bruges kun hvis pålidelig (≥4 mdr., ≥5 % prisvariation), ellers antagelse -1,2 — antagelserne returneres altid
+- `lib/ai/tools.ts`: værktøjer til modellen (kun læsning/beregning) med egen inputvalidering (input streames og valideres ikke af API'et)
+- `POST /api/ai/chat`: manuel værktøjsløkke med streaming (SSE), model `claude-opus-5-5`, effort `high`, cache på systemprompt og historik. Samtaler gemmes i `ai_messages` som rå content-blokke (append-only — thinking-blokke skal sendes uændret tilbage). Dato sendes i brugerens tur, ikke i systemprompten (cache)
+- Nøgle: `ANTHROPIC_API_KEY` (samme som produkttype-forslag)
 
 ## Vigtige kodningsmønstre
 

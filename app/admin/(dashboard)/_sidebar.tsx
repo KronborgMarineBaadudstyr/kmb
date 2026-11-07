@@ -21,6 +21,11 @@ const navEntries: NavEntry[] = [
     { href: '/admin/lifecycle',      label: 'Vedligehold',         icon: '⏳' },
   ]},
 
+  { group: 'Salg & AI', icon: '📈', items: [
+    { href: '/admin/insights',       label: 'Salgsindsigt',        icon: '💡' },
+    { href: '/admin/ai',             label: 'AI-assistent',        icon: '🤖' },
+  ]},
+
   { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
   { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
   { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },

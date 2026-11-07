@@ -68,7 +68,11 @@ const STEPS: Step[] = [
   { label: 'PDF-tilbudsgenerator',                                                                           status: 'todo' },
 
   // ── Business Intelligence ──
-  { group: 'Business Intelligence', label: 'Prisforslag ud fra salgshistorik og prognoser',               status: 'todo' },
+  { group: 'Salg & AI',        label: 'Prishistorik (logges automatisk)',                                    status: 'done' },
+  { label: 'Salgsindsigt: pakkekandidater, sæson, topsælgere, kategorier, kampagner',                   status: 'done' },
+  { label: 'AI-assistent til salg, prissætning og kampagner (Claude)',                                  status: 'done' },
+  { label: 'Pålidelige analyser og prisforslag',                                                         status: 'waiting', note: 'mere salgshistorik — import af gamle ordrer' },
+  { label: 'Egen AI-nøgle til butikken i admin',                                                         status: 'todo' },
 
   // ── POS ──
   { group: 'POS',              label: 'admind POS-integration',                                              status: 'waiting', note: 'API-dokumentation fra admind' },

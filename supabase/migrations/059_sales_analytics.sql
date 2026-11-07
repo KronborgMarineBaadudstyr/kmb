@@ -207,6 +207,32 @@ LANGUAGE sql STABLE AS $$
   ) x GROUP BY q ORDER BY q
 $$;
 
+-- ── Produkter der topper i en given kalendermåned (andel af produktets årssalg) ───
+-- 1/12 ≈ 0,083 er gennemsnittet; højere = sæsonvare for den måned.
+CREATE OR REPLACE FUNCTION analytics_seasonal_peaks(p_month int, p_limit int DEFAULT 10, p_min_qty int DEFAULT 10)
+RETURNS TABLE(product_id uuid, name text, category text, qty_in_month bigint, qty_total bigint, share numeric, years bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT s.family_id, p.name, max(s.category),
+         coalesce(sum(s.qty) FILTER (WHERE extract(month FROM s.ordered_at) = p_month), 0), sum(s.qty),
+         round(coalesce(sum(s.qty) FILTER (WHERE extract(month FROM s.ordered_at) = p_month), 0)::numeric / sum(s.qty), 3),
+         count(DISTINCT extract(year FROM s.ordered_at))
+  FROM sales_lines s JOIN products p ON p.id = s.family_id
+  GROUP BY s.family_id, p.name
+  HAVING sum(s.qty) >= p_min_qty
+  ORDER BY 6 DESC, 5 DESC
+  LIMIT p_limit
+$$;
+
+-- ── Kategorier med antal produkter og solgte stk. ─────────────────────────────────
+CREATE OR REPLACE FUNCTION analytics_categories()
+RETURNS TABLE(category text, products bigint, units_sold bigint)
+LANGUAGE sql STABLE AS $$
+  SELECT c, count(*), coalesce((SELECT sum(s.qty) FROM sales_lines s WHERE s.category = c), 0)
+  FROM products, unnest(categories) AS c
+  WHERE status NOT IN ('archived', 'rejected')
+  GROUP BY c ORDER BY 3 DESC, 2 DESC
+$$;
+
 -- ── AI-samtaler ───────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ai_conversations (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -247,7 +273,9 @@ BEGIN
     'analytics_price_monthly(uuid)',
     'analytics_price_changes(uuid, int)',
     'analytics_campaigns(int)',
-    'analytics_order_qty(uuid, int)'
+    'analytics_order_qty(uuid, int)',
+    'analytics_seasonal_peaks(int, int, int)',
+    'analytics_categories()'
   ] LOOP
     EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC, anon, authenticated', f);
     EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', f);
