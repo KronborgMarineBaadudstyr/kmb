@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { normalizeForMatching, matchingNumbers, numbersCompatible } from '@/lib/matching-normalize'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -10,18 +11,9 @@ const STOP_WORDS = new Set([
   'the', 'and', 'for', 'with', 'from',
 ])
 
-// Strip colour words and normalise — mirrors normalize_for_matching() SQL function
-function normalizeName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/\b(rød|blå|grøn|sort|hvid|gul|grå|brun|orange|lilla|pink|red|blue|green|black|white|yellow|grey|gray|brown|purple|venstre|højre|left|right|øverste|nederste|top|bottom|lille|stor|mellem|mini|maxi|ekstra|super|ny|new)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 // Return meaningful words (≥3 chars, not a stop word, not pure digits)
 function meaningfulWords(name: string): Set<string> {
-  const words = normalizeName(name).split(/\s+/)
+  const words = normalizeForMatching(name).split(/\s+/)
   const result = new Set<string>()
   for (const w of words) {
     const clean = w.replace(/[^a-zæøå0-9]/gi, '')
@@ -94,9 +86,16 @@ export async function POST() {
     let allPairsMatch = true
     let worstOverlap  = Infinity
     let worstPair: [string, string] = ['', '']
+    let conflict: [string, string] | null = null
 
     outer: for (let i = 0; i < names.length; i++) {
       for (let j = i + 1; j < names.length; j++) {
+        // Samme EAN men modstridende tal (fx 10mm vs 12mm) → sandsynligvis forkert EAN hos en leverandør
+        if (!numbersCompatible(matchingNumbers(normalizeForMatching(names[i])), matchingNumbers(normalizeForMatching(names[j])))) {
+          conflict      = [names[i], names[j]]
+          allPairsMatch = false
+          break outer
+        }
         const overlap = wordOverlap(names[i], names[j])
         if (overlap < worstOverlap) {
           worstOverlap = overlap
@@ -113,7 +112,10 @@ export async function POST() {
       toConfirm.push(group.id)
     } else {
       const short = (s: string) => s.length > 40 ? s.slice(0, 38) + '…' : s
-      toReview.push({
+      toReview.push(conflict ? {
+        id:     group.id,
+        reason: `Samme EAN, men tallene i navnene passer ikke — "${short(conflict[0])}" vs "${short(conflict[1])}"`,
+      } : {
         id:     group.id,
         reason: `Navnene deler kun ${worstOverlap} meningsfuldt ord — "${short(worstPair[0])}" vs "${short(worstPair[1])}"`,
       })

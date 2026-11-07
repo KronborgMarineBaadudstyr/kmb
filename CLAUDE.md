@@ -96,6 +96,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `059_sales_analytics.sql` — view `sales_lines` + `analytics_*()` (dækning, kategorier, topsælgere, måned, sæson, sæsontoppe, købes sammen, kategori-affinitet, prisændringer, kampagner, stk. pr. ordre) + `ai_conversations`/`ai_messages` ✅ kørt
 - `060_ai_knowledge.sql` — `ai_knowledge` (butikkens egen viden til AI-assistenten) ✅ kørt
 - `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle)
+- `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()`
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -127,8 +128,11 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 3. `createProductFromGroup()` opretter `products` (status: draft) + `product_suppliers` med priority
 4. Staging-rækker sættes til `matched`
 
-### normalize_for_matching()
-SQL-funktion der stripper farver (rød/blå/sort/etc.) og retningsord inden fuzzy-sammenligning, så `"Rød ankerkæde 10mm"` og `"Sort ankerkæde 10mm"` matches korrekt, mens `"10mm"` vs `"12mm"` ikke giver falsk match.
+### normalize_for_matching() (v2, migration 062)
+SQL-funktion der renser navne inden fuzzy-sammenligning. Samme regler i `lib/matching-normalize.ts` (bruges af `/api/matching/auto-confirm`) — ret begge steder:
+- Fjerner farver (inkl. bøjninger og mørke-/lyse-), retning/side (venstre/højre/bagbord/styrbord), størrelsesord (lille/stor/S–XXL), ny/original, emballage (stk/pk/pakke) og fyldord (og/med/til/for …)
+- Ens tal: `2,5` → `2.5`, `10 mm` → `10mm`, `10 x 20` → `10x20`, `Ø10` → `10`; tegnsætning fjernes
+- **Talværn** (`matching_numbers()` + `numbers_compatible()`): to navne kan kun matche, hvis tallene i det ene er en delmængde af tallene i det andet. `"Ankerkæde 10mm"` vs `"Ankerkæde 12mm"` matcher ikke (gav 0,74 i lighed før), `"Fender 15x58"` vs `"Lalizas 70123 Fender 15x58"` gør. I auto-confirm sendes EAN-grupper med modstridende tal til manuel gennemgang
 
 ## Env Variables (.env.local)
 ```
@@ -167,7 +171,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **admind POS integration** — venter på API docs
 - [x] **Indkøbsliste pr. leverandør** — `/admin/purchasing` (+ CSV pr. leverandør via `/api/purchasing/export`). Logik i `lib/purchasing.ts`: foretrukken (priority 1) → ellers billigst for det der skal bestilles (pris × max(antal, minimumsordre)); udgåede springes over; varianter i variantfamilier finder leverandør via det oprindelige produkt med samme EAN. "Markér som bestilt" pr. leverandør skriver `line_items[].ordered` (ref, antal, leverandør, tid, admin) på ordrelinjerne — trækkes fra det manglende antal; kan fortrydes. Opdateringer sker kun hvis ordren ikke er ændret siden læsning (optimistisk lås på `orders.updated_at`)
 - [ ] **Automatiske bestillinger pr. leverandør** — opsætning pr. leverandør (fx hver aften) der samler indkøbslisten og sender den. **Afklares først:** hvordan hver leverandør modtager bestillinger (e-mail, CSV/Excel, portal, EDI/API), tidsfrist, minimumsordre/fragtfri grænse, og om varer bestilt markeres så de ikke bestilles igen
-- [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
+- [x] **Fuzzy match udvidelse** — flere fyldord/farver/størrelser, ens talformat og talværn (migration 062, `lib/matching-normalize.ts`)
 
 ## Checkout-flow
 - Kurv ligger i `localStorage` (`ls_cart`); linje-id er `produktId` eller `produktId__variantId`
