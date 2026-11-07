@@ -157,7 +157,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [x] **Eget lager justering** — lageroptælling med årsagskode og log (`/admin/inventory`). POS-webhook afventer admind
 - [x] **Staging batch-behandling** — opret/afvis mange ad gangen (`/admin/staging`)
 - [ ] **admind POS integration** — venter på API docs
-- [ ] **Indkøbsliste "skal bestilles" pr. leverandør** — admin-side der samler alle ordrelinjer hvor `qty > reserved_qty` (åbne ordrer, `stock_state = 'reserved'`), grupperet pr. leverandør. Leverandørvalg pr. vare: 1) foretrukket leverandør (`product_suppliers.priority = 1`, aktiv), 2) ellers laveste `purchase_price`. Variant-linjer bruger `product_suppliers.variant_id`. Overvej at springe leverandører uden lager over (`supplier_stock_quantity`)
+- [x] **Indkøbsliste pr. leverandør** — `/admin/purchasing` (+ CSV pr. leverandør via `/api/purchasing/export`). Logik i `lib/purchasing.ts`: foretrukken (priority 1) → ellers billigst for det der skal bestilles (pris × max(antal, minimumsordre)); udgåede springes over; varianter i variantfamilier finder leverandør via det oprindelige produkt med samme EAN. Varer markeres endnu ikke som bestilt
 - [ ] **Automatiske bestillinger pr. leverandør** — opsætning pr. leverandør (fx hver aften) der samler indkøbslisten og sender den. **Afklares først:** hvordan hver leverandør modtager bestillinger (e-mail, CSV/Excel, portal, EDI/API), tidsfrist, minimumsordre/fragtfri grænse, og om varer bestilt markeres så de ikke bestilles igen
 - [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
 

@@ -119,7 +119,7 @@ export default async function LifecyclePage({
     <div className="p-8 max-w-6xl">
       <div className="flex items-end justify-between gap-4 flex-wrap mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">Udskiftninger</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-1">Vedligehold</h2>
           <p className="text-sm text-gray-500">
             Købte produkter der når forventet levetid — forfaldne de sidste {OVERDUE_DAYS} dage og de næste {days} dage.
             Levetid sættes på produktet (Produkter → Levetid &amp; service).
