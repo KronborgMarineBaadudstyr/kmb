@@ -15,36 +15,56 @@ function isGroup(e: NavEntry): e is NavGroup {
 const navEntries: NavEntry[] = [
   { href: '/admin',                  label: 'Dashboard',           icon: '⊞' },
 
+  { group: 'Kunder', icon: '👥', items: [
+    { href: '/admin/orders',         label: 'Ordrer',              icon: '🧾' },
+    { href: '/admin/customers',      label: 'Kundeliste',          icon: '👤' },
+    { href: '/admin/lifecycle',      label: 'Vedligehold',         icon: '⏳' },
+  ]},
+
+  { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
+  { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
+  { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },
+  { href: '/admin/purchasing',       label: 'Indkøb',              icon: '🚚' },
+  { href: '/admin/bundles',          label: 'Bundler & Kampagner', icon: '🏷️' },
+  { href: '/admin/navigation',       label: 'Båd-navigation',      icon: '⚓' },
+
   { group: 'Import', icon: '📥', items: [
     { href: '/admin/suppliers',      label: 'Leverandører',        icon: '🏭' },
     { href: '/admin/matching',       label: 'Produkt match',       icon: '🔗' },
     { href: '/admin/staging',        label: 'Opret produkter',     icon: '✚' },
+    { href: '/admin/changes',        label: 'Import-ændringer',    icon: '📋' },
     { href: '/admin/auto-log',       label: 'Auto-handling log',   icon: '🤖' },
   ]},
 
-  { href: '/admin/changes',          label: 'Import-ændringer',    icon: '📋' },
-  { href: '/admin/orders',           label: 'Ordrer',              icon: '🧾' },
-  { href: '/admin/purchasing',       label: 'Indkøb',              icon: '🚚' },
-  { href: '/admin/customers',        label: 'Kunder',              icon: '👤' },
-  { href: '/admin/lifecycle',        label: 'Udskiftninger',       icon: '⏳' },
-  { href: '/admin/products',         label: 'Produkter',           icon: '📦' },
-  { href: '/admin/pricing',          label: 'Prissætning',         icon: '💰' },
-  { href: '/admin/inventory',        label: 'Lagerbeholdning',     icon: '📊' },
-  { href: '/admin/bundles',          label: 'Bundler & Kampagner', icon: '🏷️' },
-  { href: '/admin/brands',           label: 'Brands',              icon: '🔖' },
-  { href: '/admin/categories',       label: 'Kategorier',          icon: '📂' },
-  { href: '/admin/navigation',       label: 'Båd-navigation',      icon: '⚓' },
-  { href: '/admin/category-filters', label: 'Kategori-søgefiltre', icon: '🔍' },
-  { href: '/admin/product-types',    label: 'Produkttyper',        icon: '🏷' },
+  { group: 'Indstillinger', icon: '⚙️', items: [
+    { href: '/admin/categories',       label: 'Kategorier',          icon: '📂' },
+    { href: '/admin/brands',           label: 'Brands',              icon: '🔖' },
+    { href: '/admin/category-filters', label: 'Kategori-søgefiltre', icon: '🔍' },
+    { href: '/admin/product-types',    label: 'Produkttyper',        icon: '🏷' },
+  ]},
 ]
+
+const ADMINS_ITEM: NavItem = { href: '/admin/admins', label: 'Administratorer', icon: '🔑' }
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
+      viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+      <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.17 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
+    </svg>
+  )
+}
 
 export default function SidebarClient({ admin }: { admin: { email: string; role: 'owner' | 'admin' } }) {
   const pathname = usePathname()
   const router   = useRouter()
 
-  const importPaths = ['/admin/suppliers', '/admin/matching', '/admin/staging', '/admin/auto-log']
-  const importActive = importPaths.some(p => pathname.startsWith(p))
-  const [importOpen, setImportOpen] = useState(importActive)
+  // Administratorer ligger under Indstillinger og ses kun af ejere
+  const entries = navEntries.map(e =>
+    isGroup(e) && e.group === 'Indstillinger' && admin.role === 'owner' ? { ...e, items: [...e.items, ADMINS_ITEM] } : e)
+
+  // Grupper kan foldes ud/ind; den gruppe man står i er foldet ud fra start
+  const [toggled, setToggled] = useState<Record<string, boolean>>({})
 
   async function handleLogout() {
     await fetch('/api/auth/login', { method: 'DELETE' })
@@ -55,6 +75,10 @@ export default function SidebarClient({ admin }: { admin: { email: string; role:
     return href === '/admin' ? pathname === '/admin' : pathname.startsWith(href)
   }
 
+  function isOpen(g: NavGroup) {
+    return toggled[g.group] ?? g.items.some(i => isActive(i.href))
+  }
+
   return (
     <aside className="w-56 bg-gray-900 text-white flex flex-col shrink-0">
       <div className="px-4 py-5 border-b border-gray-700">
@@ -62,7 +86,7 @@ export default function SidebarClient({ admin }: { admin: { email: string; role:
         <p className="text-xs text-gray-400 mt-0.5">Bådudstyr — Middleware</p>
       </div>
       <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
-        {[...navEntries, ...(admin.role === 'owner' ? [{ href: '/admin/admins', label: 'Administratorer', icon: '🔑' }] : [])].map(entry => {
+        {entries.map(entry => {
           if (!isGroup(entry)) {
             const active = isActive(entry.href)
             return (
@@ -81,19 +105,20 @@ export default function SidebarClient({ admin }: { admin: { email: string; role:
 
           // Group
           const groupActive = entry.items.some(i => isActive(i.href))
-          const open = entry.group === 'Import' ? importOpen : groupActive
+          const open = isOpen(entry)
 
           return (
             <div key={entry.group}>
               <button
-                onClick={() => entry.group === 'Import' && setImportOpen(v => !v)}
+                onClick={() => setToggled(t => ({ ...t, [entry.group]: !open }))}
+                aria-expanded={open}
                 className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
                   groupActive ? 'text-white' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
                 }`}
               >
                 <span className="text-base">{entry.icon}</span>
                 <span className="flex-1 text-left">{entry.group}</span>
-                <span className="text-xs text-gray-500">{open ? '▾' : '▸'}</span>
+                <Chevron open={open} />
               </button>
               {open && (
                 <div className="ml-3 mt-0.5 space-y-0.5 border-l border-gray-700 pl-2">
