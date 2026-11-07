@@ -1,8 +1,7 @@
 import { cookies } from 'next/headers'
+import { ADMIN_COOKIE, isAdminCookie } from './admin-session'
 
-// Samme tjek som app/admin/(dashboard)/layout.tsx. Server actions og API-ruter går ikke
-// gennem layoutet, så de skal selv kalde denne.
+// Til Server Actions. API-ruter beskyttes centralt i middleware.ts.
 export async function isAdmin(): Promise<boolean> {
-  const jar = await cookies()
-  return jar.get('kmb-session')?.value === (process.env.DASHBOARD_PASSWORD ?? 'KMB3000')
+  return isAdminCookie((await cookies()).get(ADMIN_COOKIE)?.value)
 }

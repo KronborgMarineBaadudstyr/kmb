@@ -164,7 +164,8 @@ RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises 
 - Butikkens adresse/åbningstider til mails: `lib/shop/store.ts`
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
 - E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
-- Server actions/API-ruter med admin-data skal selv kalde `isAdmin()` (`lib/admin-auth.ts`) — layout-tjekket dækker kun sider
+- **`middleware.ts` kræver admin-login på alt under `/api`**, undtagen `/api/shop/*`, `/api/cron/*` (egen Bearer), `/api/auth/login`, `/api/health` og `GET /api/products?shop=1`. Nye offentlige ruter skal lægges under `/api/shop/`
+- Server actions går ikke gennem middleware — kald selv `isAdmin()` (`lib/admin-auth.ts`)
 
 ## Kundekonto & levetid
 - Login uden adgangskode: `/konto` → `POST /api/shop/auth/request` (e-mail eller telefon) → mail med `/konto/login?token=` → knap → server action `verifyLogin` → cookie `ls_session`

@@ -1,16 +1,12 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import SidebarClient from './_sidebar'
-
-const PASSWORD = process.env.DASHBOARD_PASSWORD ?? 'KMB3000'
-const COOKIE   = 'kmb-session'
+import { ADMIN_COOKIE, isAdminCookie } from '@/lib/admin-session'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   // Server-side auth — kører i Node.js runtime, ingen Edge-problemer
   const jar   = await cookies()
-  const token = jar.get(COOKIE)?.value
-
-  if (token !== PASSWORD) {
+  if (!isAdminCookie(jar.get(ADMIN_COOKIE)?.value)) {
     redirect('/login')
   }
 

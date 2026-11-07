@@ -1,17 +1,15 @@
 import { NextResponse } from 'next/server'
-
-const COOKIE   = 'kmb-session'
-const PASSWORD = process.env.DASHBOARD_PASSWORD ?? 'KMB3000'
+import { ADMIN_COOKIE, adminPassword } from '@/lib/admin-session'
 
 export async function POST(request: Request) {
   const { password } = await request.json()
 
-  if (password !== PASSWORD) {
+  if (password !== adminPassword()) {
     return NextResponse.json({ error: 'Forkert adgangskode' }, { status: 401 })
   }
 
   const res = NextResponse.json({ ok: true })
-  res.cookies.set(COOKIE, PASSWORD, {
+  res.cookies.set(ADMIN_COOKIE, adminPassword(), {
     httpOnly: true,
     secure:   process.env.NODE_ENV === 'production',
     sameSite: 'lax',
@@ -24,6 +22,6 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   const res = NextResponse.json({ ok: true })
-  res.cookies.delete(COOKIE)
+  res.cookies.delete(ADMIN_COOKIE)
   return res
 }
