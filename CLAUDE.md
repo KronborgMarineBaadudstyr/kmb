@@ -91,7 +91,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ✅ kørt
 - `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ✅ kørt
 - `056_admin_users.sql` — admin-konti med e-mail + magic link (`admin_users`, `admin_login_tokens`, `admin_sessions`), første ejer ✅ kørt
-- `057_order_stock.sql` — `orders.stock_state` + `order_stock_apply()` (reservér/træk/frigiv eget lager pr. ordre, logges i `stock_adjustments`) ⏳ skal køres
+- `057_order_stock.sql` — `orders.stock_state` + `order_stock_apply()` (reservér/træk/frigiv eget lager pr. ordre, logges i `stock_adjustments`) ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -157,6 +157,8 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [x] **Eget lager justering** — lageroptælling med årsagskode og log (`/admin/inventory`). POS-webhook afventer admind
 - [x] **Staging batch-behandling** — opret/afvis mange ad gangen (`/admin/staging`)
 - [ ] **admind POS integration** — venter på API docs
+- [ ] **Indkøbsliste "skal bestilles" pr. leverandør** — admin-side der samler alle ordrelinjer hvor `qty > reserved_qty` (åbne ordrer, `stock_state = 'reserved'`), grupperet pr. leverandør. Leverandørvalg pr. vare: 1) foretrukket leverandør (`product_suppliers.priority = 1`, aktiv), 2) ellers laveste `purchase_price`. Variant-linjer bruger `product_suppliers.variant_id`. Overvej at springe leverandører uden lager over (`supplier_stock_quantity`)
+- [ ] **Automatiske bestillinger pr. leverandør** — opsætning pr. leverandør (fx hver aften) der samler indkøbslisten og sender den. **Afklares først:** hvordan hver leverandør modtager bestillinger (e-mail, CSV/Excel, portal, EDI/API), tidsfrist, minimumsordre/fragtfri grænse, og om varer bestilt markeres så de ikke bestilles igen
 - [ ] **Fuzzy match udvidelse** — overvej flere ord/adjektiver der skal nedvurderes ud over farver
 
 ## Checkout-flow
