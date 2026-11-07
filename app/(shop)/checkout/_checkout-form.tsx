@@ -4,14 +4,22 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useCart, fmtPrice } from '../_cart'
 import { SHIPPING_METHODS, shippingCost, type ShippingMethod } from '@/lib/shop/shipping'
+import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/shop/payment'
+import type { ContactDefaults } from '@/lib/shop/customers'
 
-type Form = { name: string; email: string; phone: string; address: string; postcode: string; city: string; note: string }
+type Form = ContactDefaults & { note: string }
+type Account = { label: string; defaults: ContactDefaults; payAtPickup: boolean } | null
+
 const EMPTY: Form = { name: '', email: '', phone: '', address: '', postcode: '', city: '', note: '' }
+const LOGIN_HREF = '/konto?next=/checkout'
 
-export function CheckoutForm() {
+export function CheckoutForm({ account, onlineAvailable }: { account: Account; onlineAvailable: boolean }) {
   const { items, total, count, ready, remove, setPrice } = useCart()
-  const [form,      setForm]      = useState<Form>(EMPTY)
-  const [method,    setMethod]    = useState<ShippingMethod>('delivery')
+  const canPickupPay = !!account?.payAtPickup
+  const [form,      setForm]      = useState<Form>({ ...EMPTY, ...account?.defaults })
+  const [payment,   setPayment]   = useState<PaymentMethod | null>(
+    onlineAvailable ? 'online' : canPickupPay ? 'pickup' : null)
+  const [method,    setMethod]    = useState<ShippingMethod>(canPickupPay && !onlineAvailable ? 'pickup' : 'delivery')
   const [marketing, setMarketing] = useState(false)
   const [terms,     setTerms]     = useState(false)
   const [busy,      setBusy]      = useState(false)
@@ -22,8 +30,14 @@ export function CheckoutForm() {
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }))
 
+  function choosePayment(p: PaymentMethod) {
+    setPayment(p)
+    if (p === 'pickup') setMethod('pickup')
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault()
+    if (!payment) return
     setBusy(true); setError('')
     try {
       const res = await fetch('/api/shop/orders', {
@@ -31,7 +45,8 @@ export function CheckoutForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: items.map(i => ({ id: i.id, qty: i.qty, price: i.price })),
-          customer: form, note: form.note, shipping_method: method, marketing, accept_terms: terms,
+          customer: form, note: form.note, shipping_method: method, payment_method: payment,
+          marketing, accept_terms: terms,
         }),
       })
       const json = await res.json()
@@ -59,6 +74,11 @@ export function CheckoutForm() {
   }
 
   const needsAddress = method === 'delivery'
+  const pickupHint = !account
+    ? <>For kunder der har handlet hos os før — <Link href={LOGIN_HREF}>log ind</Link></>
+    : canPickupPay
+      ? PAYMENT_METHODS.pickup.description
+      : 'For kunder der har handlet hos os før'
 
   return (
     <>
@@ -67,10 +87,18 @@ export function CheckoutForm() {
         <Link href="/kurv" className="ls-checkout-back">← Tilbage til kurv</Link>
       </div>
 
+      {!account && (
+        <div className="ls-checkout-login">
+          <span>Har du handlet hos os før? Log ind, så udfylder vi dine oplysninger, og du kan betale ved afhentning.</span>
+          <Link href={LOGIN_HREF} className="ls-checkout-login-btn">Log ind</Link>
+        </div>
+      )}
+
       <form className="ls-cart-layout" onSubmit={submit}>
         <div className="ls-checkout-form">
           <fieldset className="ls-checkout-section">
             <legend>Kontaktoplysninger</legend>
+            {account && <p className="ls-checkout-account">Logget ind som {account.label}</p>}
             <label className="ls-field ls-field--full">
               <span>E-mail</span>
               <input type="email" required autoComplete="email" value={form.email} onChange={set('email')} />
@@ -86,19 +114,42 @@ export function CheckoutForm() {
           </fieldset>
 
           <fieldset className="ls-checkout-section">
+            <legend>Betaling</legend>
+            {(['online', 'pickup'] as PaymentMethod[]).map(p => {
+              const enabled = p === 'online' ? onlineAvailable : canPickupPay
+              return (
+                <label key={p} className={`ls-ship-option${payment === p ? ' active' : ''}${enabled ? '' : ' disabled'}`}>
+                  <input type="radio" name="payment" checked={payment === p} disabled={!enabled}
+                    onChange={() => choosePayment(p)} />
+                  <span className="ls-ship-option-text">
+                    <strong>{PAYMENT_METHODS[p].label}</strong>
+                    <small>{p === 'online'
+                      ? (onlineAvailable ? PAYMENT_METHODS.online.description : 'Kommer snart')
+                      : pickupHint}</small>
+                  </span>
+                </label>
+              )
+            })}
+          </fieldset>
+
+          <fieldset className="ls-checkout-section">
             <legend>Levering</legend>
-            {(Object.keys(SHIPPING_METHODS) as ShippingMethod[]).map(m => (
-              <label key={m} className={`ls-ship-option${method === m ? ' active' : ''}`}>
-                <input type="radio" name="shipping" checked={method === m} onChange={() => setMethod(m)} />
-                <span className="ls-ship-option-text">
-                  <strong>{SHIPPING_METHODS[m].label}</strong>
-                  <small>{SHIPPING_METHODS[m].description}</small>
-                </span>
-                <span className="ls-ship-option-price">
-                  {shippingCost(total, m) === 0 ? 'Gratis' : fmtPrice(shippingCost(total, m))}
-                </span>
-              </label>
-            ))}
+            {(Object.keys(SHIPPING_METHODS) as ShippingMethod[]).map(m => {
+              const locked = payment === 'pickup' && m === 'delivery'
+              return (
+                <label key={m} className={`ls-ship-option${method === m ? ' active' : ''}${locked ? ' disabled' : ''}`}>
+                  <input type="radio" name="shipping" checked={method === m} disabled={locked}
+                    onChange={() => setMethod(m)} />
+                  <span className="ls-ship-option-text">
+                    <strong>{SHIPPING_METHODS[m].label}</strong>
+                    <small>{locked ? 'Ikke muligt ved betaling ved afhentning' : SHIPPING_METHODS[m].description}</small>
+                  </span>
+                  <span className="ls-ship-option-price">
+                    {shippingCost(total, m) === 0 ? 'Gratis' : fmtPrice(shippingCost(total, m))}
+                  </span>
+                </label>
+              )
+            })}
 
             {needsAddress && (
               <div className="ls-checkout-address">
@@ -165,12 +216,23 @@ export function CheckoutForm() {
 
           {error && <p className="ls-checkout-error" role="alert">{error}</p>}
 
-          <button type="submit" className="ls-checkout-btn" disabled={busy}>
-            {busy ? 'Opretter ordre…' : 'Afgiv ordre →'}
+          <button type="submit" className="ls-checkout-btn" disabled={busy || !payment}>
+            {busy ? 'Opretter ordre…'
+              : payment === 'pickup' ? 'Bestil til afhentning →'
+              : payment === 'online' ? 'Gå til betaling →'
+              : 'Vælg betaling'}
           </button>
-          <p className="ls-checkout-paynote">
-            Online betaling tilføjes snart. Din ordre registreres, og du får en ordrebekræftelse.
-          </p>
+          {!payment && (
+            <p className="ls-checkout-paynote">
+              Online betaling åbner snart.{' '}
+              {!account
+                ? <>Har du handlet hos os før, kan du <Link href={LOGIN_HREF}>logge ind</Link> og betale ved afhentning.</>
+                : 'Kontakt butikken, hvis du vil bestille nu.'}
+            </p>
+          )}
+          {payment === 'pickup' && (
+            <p className="ls-checkout-paynote">Du betaler i butikken, når du henter varerne. Vi sender en mail, når de er klar.</p>
+          )}
         </aside>
       </form>
 

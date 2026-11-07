@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SHIPPING_METHODS, isShippingMethod } from '@/lib/shop/shipping'
 import { fmtKr } from '@/lib/shop/email'
+import { STORE } from '@/lib/shop/store'
 import { ClearCart } from './_clear-cart'
 
 export const dynamic = 'force-dynamic'
@@ -25,7 +26,7 @@ export default async function ConfirmationPage({
   const supabase = createServiceClient()
   const { data: order } = await supabase
     .from('orders')
-    .select('id, order_number, created_at, customer_info, line_items, shipping_method, shipping_total, subtotal, order_total, payment_status, customer_note')
+    .select('id, order_number, created_at, customer_info, line_items, shipping_method, shipping_total, subtotal, order_total, payment_status, payment_method, status, customer_note')
     .eq('id', id)
     .eq('access_token', t)
     .maybeSingle()
@@ -45,10 +46,18 @@ export default async function ConfirmationPage({
         <p>Ordrenummer <strong>{order.order_number}</strong> · bekræftelse sendt til {customer.email}</p>
       </div>
 
-      {order.payment_status !== 'paid' && (
+      {order.payment_method === 'pickup' && order.payment_status !== 'paid' ? (
         <p className="ls-confirm-note">
-          Vi har registreret din ordre. Online betaling er ikke åbnet endnu — vi kontakter dig om betaling
-          {method === 'pickup' ? ' og afhentning' : ' og levering'}.
+          {order.status === 'ready'
+            ? <>Dine varer er <strong>klar til afhentning</strong>. </>
+            : <>Vi sender en mail, når dine varer er klar til afhentning. </>}
+          Du betaler {fmtKr(Number(order.order_total))} i butikken, når du henter dem.
+          {STORE.address && <><br />{STORE.name}, {STORE.address}</>}
+          {STORE.openingHours && <><br />Åbent: {STORE.openingHours}</>}
+        </p>
+      ) : order.payment_status !== 'paid' && (
+        <p className="ls-confirm-note">
+          Vi har registreret din ordre og kontakter dig om betaling{method === 'pickup' ? ' og afhentning' : ' og levering'}.
         </p>
       )}
 

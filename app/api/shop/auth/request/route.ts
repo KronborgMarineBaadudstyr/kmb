@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { parseIdentifier, newToken, hashToken, LOGIN_TOKEN_MINUTES } from '@/lib/shop/auth'
+import { parseIdentifier, newToken, hashToken, safeNext, LOGIN_TOKEN_MINUTES } from '@/lib/shop/auth'
 import { sendEmail, emailConfigured, siteUrl } from '@/lib/shop/email'
 import { sendSms } from '@/lib/shop/sms'
 
@@ -13,7 +13,7 @@ const PHONE_MSG = 'Hvis nummeret er registreret hos os, har vi sendt et login-li
 
 // POST /api/shop/auth/request  { identifier: "mail@eksempel.dk" | "12345678" }
 export async function POST(request: Request) {
-  let body: { identifier?: unknown }
+  let body: { identifier?: unknown; next?: unknown }
   try { body = await request.json() } catch { return NextResponse.json({ error: 'Ugyldig forespørgsel' }, { status: 400 }) }
 
   const id = parseIdentifier(typeof body.identifier === 'string' ? body.identifier : '')
@@ -43,7 +43,8 @@ export async function POST(request: Request) {
   }
 
   const token = newToken()
-  const link  = `${siteUrl()}/konto/login?token=${token}`
+  const next  = safeNext(body.next)
+  const link  = `${siteUrl()}/konto/login?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`
   const sms   = id.kind === 'phone' && await sendSms(id.value, `Log ind på LoveSailing: ${link}`)
   const channel: 'email' | 'sms' = sms ? 'sms' : 'email'
   if (!sms && !user.email) return NextResponse.json({ ok: true, message: PHONE_MSG })

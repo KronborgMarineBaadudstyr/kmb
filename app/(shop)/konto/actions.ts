@@ -3,7 +3,7 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getShopUser, startSession, endSession, hashToken } from '@/lib/shop/auth'
+import { getShopUser, startSession, endSession, hashToken, safeNext } from '@/lib/shop/auth'
 
 // Linket i mailen åbner en side med en knap, der kalder denne. Så kan mail-scannere,
 // der "klikker" på links for at tjekke dem, ikke bruge engangs-tokenet op.
@@ -27,7 +27,7 @@ export async function verifyLogin(formData: FormData) {
     supabase.rpc('link_orders_to_shop_user', { p_user: row.shop_user_id, p_channel: row.channel }),
     supabase.from('shop_users').update({ last_login_at: new Date().toISOString() }).eq('id', row.shop_user_id),
   ])
-  redirect('/konto')
+  redirect(safeNext(formData.get('next')) ?? '/konto')
 }
 
 export async function logout() {

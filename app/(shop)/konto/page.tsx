@@ -1,7 +1,8 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/server'
-import { getShopUser } from '@/lib/shop/auth'
+import { redirect } from 'next/navigation'
+import { getShopUser, safeNext } from '@/lib/shop/auth'
 import { LIFECYCLE_COLUMNS, type LifecycleRow, fmtDate, addDays } from '@/lib/shop/lifecycle'
 import { fmtKr } from '@/lib/shop/email'
 import { LoginForm } from './_login-form'
@@ -17,7 +18,7 @@ const LOGIN_NOTICES: Record<string, string> = {
 }
 
 const ORDER_STATUS: Record<string, string> = {
-  pending: 'Modtaget', processing: 'Under behandling', completed: 'Afsluttet', cancelled: 'Annulleret',
+  pending: 'Modtaget', processing: 'Under behandling', ready: 'Klar til afhentning', completed: 'Afsluttet', cancelled: 'Annulleret',
 }
 
 type OrderRow = {
@@ -25,12 +26,12 @@ type OrderRow = {
   status: string; access_token: string | null; line_items: { qty?: number }[] | null
 }
 
-export default async function AccountPage({ searchParams }: { searchParams: Promise<{ login?: string }> }) {
+export default async function AccountPage({ searchParams }: { searchParams: Promise<{ login?: string; next?: string }> }) {
   const user = await getShopUser()
-  if (!user) {
-    const { login } = await searchParams
-    return <LoginForm notice={login ? LOGIN_NOTICES[login] : undefined} />
-  }
+  const { login, next } = await searchParams
+  const safe = safeNext(next)
+  if (!user) return <LoginForm notice={login ? LOGIN_NOTICES[login] : undefined} next={safe ?? undefined} />
+  if (safe) redirect(safe)
 
   const supabase = createServiceClient()
   const [{ data: lifecycle }, { data: orders }] = await Promise.all([

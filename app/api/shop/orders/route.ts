@@ -2,7 +2,10 @@ import { randomBytes } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { isShippingMethod, shippingCost, SHIPPING_METHODS } from '@/lib/shop/shipping'
-import { startPayment, confirmationPath } from '@/lib/shop/payment'
+import { startPayment, confirmationPath, isPaymentMethod, onlinePaymentAvailable, type PaymentMethod } from '@/lib/shop/payment'
+import { getShopUser } from '@/lib/shop/auth'
+import { payAtPickupEligible } from '@/lib/shop/customers'
+import { STORE } from '@/lib/shop/store'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 
 export const dynamic = 'force-dynamic'
@@ -38,6 +41,21 @@ export async function POST(request: Request) {
 
   if (!isShippingMethod(method))
     return NextResponse.json({ error: 'Vælg en leveringsmetode' }, { status: 400 })
+  const payment = body.payment_method
+  if (!isPaymentMethod(payment))
+    return NextResponse.json({ error: 'Vælg en betalingsmetode' }, { status: 400 })
+  if (payment === 'online' && !onlinePaymentAvailable())
+    return NextResponse.json({ error: 'Online betaling er ikke åbnet endnu' }, { status: 400 })
+
+  const sessionUser = await getShopUser()
+  if (payment === 'pickup') {
+    if (!sessionUser)
+      return NextResponse.json({ error: 'Log ind for at betale ved afhentning' }, { status: 401 })
+    if (method !== 'pickup')
+      return NextResponse.json({ error: 'Betal ved afhentning kræver, at du henter varerne i butikken' }, { status: 400 })
+    if (!(await payAtPickupEligible(sessionUser.id)))
+      return NextResponse.json({ error: 'Betal ved afhentning er for kunder, der har handlet hos os før' }, { status: 403 })
+  }
   if (!body.accept_terms)
     return NextResponse.json({ error: 'Du skal acceptere handelsbetingelserne' }, { status: 400 })
   if (!customer.name || !customer.phone || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customer.email))
@@ -123,12 +141,15 @@ export async function POST(request: Request) {
   const shipping = shippingCost(subtotal, method)
   const total    = Math.round((subtotal + shipping) * 100) / 100
 
-  // Kunde: opret/find på e-mail. Marketing-samtykke kan kun gives her, aldrig trækkes tilbage.
-  const { data: user } = await supabase
-    .from('shop_users')
-    .upsert({ email: customer.email, updated_at: new Date().toISOString() }, { onConflict: 'email' })
-    .select('id')
-    .single()
+  // Indlogget kunde ejer ordren; ellers opret/find kunden på e-mail.
+  // Marketing-samtykke kan kun gives her, aldrig trækkes tilbage.
+  const user = sessionUser
+    ? { id: sessionUser.id }
+    : (await supabase
+        .from('shop_users')
+        .upsert({ email: customer.email, updated_at: new Date().toISOString() }, { onConflict: 'email' })
+        .select('id')
+        .single()).data
   if (user && body.marketing) {
     await supabase.from('shop_users')
       .update({ marketing_opt_in: true, marketing_opt_in_at: new Date().toISOString() })
@@ -142,6 +163,8 @@ export async function POST(request: Request) {
       source:          'webshop',
       status:          'pending',
       payment_status:  'unpaid',
+      payment_method:  payment,
+      payment_provider: payment === 'pickup' ? 'pay_at_pickup' : null,
       shop_user_id:    user?.id ?? null,
       email:           customer.email,
       customer_info:   customer,
@@ -163,17 +186,19 @@ export async function POST(request: Request) {
   await sendEmail(
     customer.email,
     `Ordrebekræftelse ${order.order_number} — LoveSailing`,
-    orderEmailHtml(order.order_number, lines, subtotal, shipping, total, method,
+    orderEmailHtml(order.order_number, lines, subtotal, shipping, total, method, payment,
       `${siteUrl()}${confirmationPath(order)}`),
   ).catch(() => false)
 
-  const { redirectUrl } = await startPayment({ ...order, order_total: total, email: customer.email })
+  const { redirectUrl } = payment === 'pickup'
+    ? { redirectUrl: confirmationPath(order) }
+    : await startPayment({ ...order, order_total: total, email: customer.email })
   return NextResponse.json({ ok: true, order_number: order.order_number, redirect: redirectUrl })
 }
 
 function orderEmailHtml(
   orderNumber: string, lines: Line[], subtotal: number, shipping: number, total: number,
-  method: 'delivery' | 'pickup', link: string,
+  method: 'delivery' | 'pickup', payment: PaymentMethod, link: string,
 ) {
   const rows = lines.map(l => `
     <tr>
@@ -192,6 +217,9 @@ function orderEmailHtml(
         <tr><td style="font-weight:700;padding-top:6px">I alt</td>
             <td style="font-weight:700;padding-top:6px;text-align:right">${fmtKr(total)}</td></tr>
       </table>
+      ${payment === 'pickup'
+        ? `<p>Du betaler ved afhentning hos ${escapeHtml(STORE.name)}. Vi sender en mail, når varerne er klar til afhentning.</p>`
+        : ''}
       <p><a href="${link}" style="color:#FF8500">Se din ordre</a></p>
       <p style="font-size:11px;color:#888">LoveSailing.dk</p>
     </div>`

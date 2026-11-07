@@ -88,6 +88,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `051_shop_users_saved_carts.sql` — `shop_users` (kunder, ikke admin) + `saved_carts` ✅ kørt
 - `052_shop_orders.sql` — `orders` udvidet til webshop-ordrer (ordrenr. LS-10001+, betalingsstatus, access_token) ⏳ skal køres
 - `053_rls_lockdown.sql` — RLS på alle tabeller + fjerner anon/authenticated-rettigheder (appen bruger kun service role) ⏳ skal køres
+- `055_pay_at_pickup.sql` — `shop_users.pay_at_pickup_allowed`, `orders.payment_method/ready_at/paid_at` ⏳ skal køres
 - `054_customer_accounts_lifecycle.sql` — kundelogin (tokens/sessioner), `shop_users.phone`, `orders.ordered_at`, `products.expected_lifespan_months`, `customer_product_lifecycle` view, `lifecycle_reminders` ⏳ skal køres
 
 ## Cron Jobs (vercel.json)
@@ -156,7 +157,11 @@ RESEND_API_KEY=       # E-mail til "Gem kurv"-links (valgfri — uden den vises 
 ## Checkout-flow
 - Kurv ligger i `localStorage` (`ls_cart`); linje-id er `produktId` eller `produktId__variantId`
 - `POST /api/shop/orders` genberegner pris (variant `sales_price` ?? produkt `sales_price`) og fragt (`lib/shop/shipping.ts`) — stol aldrig på klientens pris. 409 = priser ændret / vare utilgængelig (klienten retter kurven), 503 = databasefejl
-- Ordren gemmes med `payment_status = 'unpaid'`; `startPayment()` i `lib/shop/payment.ts` er stedet betalingsudbyderen kobles på
+- Betaling: `online` (slås til i `onlinePaymentAvailable()` når udbyder er koblet på `startPayment()`) eller `pickup` = betal ved afhentning
+- Betal ved afhentning kræver login + kendt kunde (`payAtPickupEligible`: afsluttet eller gammel/importeret ordre, eller admin-overstyring i `/admin/customers`) + afhentning i butik — tjekkes på serveren
+- Uden online betaling kan ukendte kunder ikke bestille (knappen er låst)
+- Afhentningsflow i `/admin/orders`: Ny → Klar til afhentning (mail til kunden, én gang) → Afhentet og betalt
+- Butikkens adresse/åbningstider til mails: `lib/shop/store.ts`
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
 - E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
 - Server actions/API-ruter med admin-data skal selv kalde `isAdmin()` (`lib/admin-auth.ts`) — layout-tjekket dækker kun sider

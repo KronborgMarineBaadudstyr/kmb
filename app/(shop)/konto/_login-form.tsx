@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-export function LoginForm({ notice }: { notice?: string }) {
+export function LoginForm({ notice, next }: { notice?: string; next?: string }) {
   const [identifier, setIdentifier] = useState('')
   const [busy,       setBusy]       = useState(false)
   const [message,    setMessage]    = useState('')
@@ -15,7 +15,7 @@ export function LoginForm({ notice }: { notice?: string }) {
     try {
       const res  = await fetch('/api/shop/auth/request', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identifier }),
+        body: JSON.stringify({ identifier, next }),
       })
       const json = await res.json()
       if (!res.ok) setError(json.error ?? 'Noget gik galt')

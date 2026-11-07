@@ -955,6 +955,23 @@
   transition: border-color .15s, background .15s;
 }
 .ls-ship-option.active { border-color: var(--navy); background: var(--paper); }
+.ls-ship-option.disabled { cursor: not-allowed; opacity: .55; }
+.ls-ship-option.disabled small a { pointer-events: auto; }
+.ls-ship-option small a { color: var(--navy); font-weight: 600; }
+.ls-checkout-account { grid-column: 1 / -1; font-size: 13px; color: var(--ink-3); margin: 0; }
+.ls-checkout-login {
+  display: flex; align-items: center; gap: 16px; justify-content: space-between; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--red);
+  border-radius: var(--r-md); padding: 12px 16px; margin-top: 8px;
+  font-size: 14px; color: var(--ink-2);
+}
+.ls-checkout-login span { flex: 1 1 280px; }
+.ls-checkout-login-btn {
+  background: var(--navy); color: #fff; text-decoration: none; font-weight: 700; font-size: 14px;
+  padding: 8px 18px; border-radius: var(--r-sm); white-space: nowrap;
+}
+.ls-checkout-login-btn:hover { background: var(--navy-soft); }
+.ls-checkout-paynote a { color: var(--navy); font-weight: 600; }
 .ls-ship-option input { accent-color: var(--navy); margin: 0; }
 .ls-ship-option-text { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .ls-ship-option-text strong { font-size: 14px; color: var(--ink); }
