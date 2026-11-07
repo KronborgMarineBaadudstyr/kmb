@@ -8,6 +8,18 @@ import { anthropicClient } from '@/lib/ai/key'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
 
+// Afviser Opus et spørgsmål (sikkerhedsfilter), kører API'et det selv igen på den model Anthropic anbefaler
+const FALLBACK_BETA = 'server-side-fallback-2026-07-01'
+
+// Efter en fallback midt i svaret: før den sidste fallback-blok sendes kun tekst tilbage
+// (tænkning og værktøjskald fra den afviste model er ufærdige); fallback-blokken selv droppes
+function echoContent(content: Anthropic.Beta.BetaContentBlock[]): Anthropic.Beta.BetaContentBlock[] {
+  let last = -1
+  content.forEach((b, i) => { if (b.type === 'fallback') last = i })
+  if (last < 0) return content
+  return [...content.slice(0, last).filter(b => b.type === 'text'), ...content.slice(last + 1)]
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 // POST /api/ai/chat  { conversation_id?, message } → SSE: text | tool | done | error
@@ -42,7 +54,7 @@ export async function POST(request: Request) {
 
   const { data: rows } = await supabase.from('ai_messages').select('role, content')
     .eq('conversation_id', conversationId).order('id')
-  const messages: Anthropic.MessageParam[] = (rows ?? []).map(r => ({ role: r.role, content: r.content }))
+  const messages: Anthropic.Beta.BetaMessageParam[] = (rows ?? []).map(r => ({ role: r.role, content: r.content }))
 
   const save = async (role: 'user' | 'assistant', content: unknown) => {
     await supabase.from('ai_messages').insert({ conversation_id: conversationId, role, content })
@@ -50,7 +62,7 @@ export async function POST(request: Request) {
 
   // Datoen står i brugerens tur (ikke i systemprompten), så den cachede prompt ikke ændrer sig dagligt
   const today = new Date().toLocaleDateString('da-DK', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  const userContent: Anthropic.TextBlockParam[] = [
+  const userContent: Anthropic.Beta.BetaTextBlockParam[] = [
     { type: 'text', text: `(I dag er ${today}.)` },
     { type: 'text', text },
   ]
@@ -66,8 +78,10 @@ export async function POST(request: Request) {
       try {
         let jsonRetries = 0
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-          const s = client.messages.stream({
+          const s = client.beta.messages.stream({
             model: AI_MODEL,
+            betas: [FALLBACK_BETA],
+            fallbacks: 'default',
             max_tokens: 64000,
             output_config: { effort: AI_EFFORT },
             system,
@@ -77,7 +91,7 @@ export async function POST(request: Request) {
           })
           s.on('text', delta => send({ type: 'text', delta }))
 
-          let message: Anthropic.Message
+          let message: Anthropic.Beta.BetaMessage
           try {
             message = await s.finalMessage()
             jsonRetries = 0
@@ -87,11 +101,13 @@ export async function POST(request: Request) {
             continue
           }
 
-          const toolUses = message.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use')
+          if (message.content.some(b => b.type === 'fallback')) console.info('[ai-chat] fallback til', message.model)
+          const content  = echoContent(message.content)
+          const toolUses = content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
 
           if (message.stop_reason === 'refusal') {
             // Et afvist svar kan have et afbrudt værktøjskald — gem det ikke, så samtalen kan fortsætte
-            if (toolUses.length === 0) { messages.push({ role: 'assistant', content: message.content }); await save('assistant', message.content) }
+            if (toolUses.length === 0) { messages.push({ role: 'assistant', content }); await save('assistant', content) }
             send({ type: 'error', message: 'AI-modellen afviste at svare på dette. Prøv at omformulere spørgsmålet.' })
             break
           }
@@ -100,8 +116,8 @@ export async function POST(request: Request) {
             break
           }
 
-          messages.push({ role: 'assistant', content: message.content })
-          await save('assistant', message.content)
+          messages.push({ role: 'assistant', content })
+          await save('assistant', content)
 
           if (message.stop_reason === 'pause_turn') continue
           if (toolUses.length === 0) break
@@ -109,7 +125,7 @@ export async function POST(request: Request) {
           for (const t of toolUses) send({ type: 'tool', name: t.name, label: TOOL_LABELS[t.name] ?? t.name })
           const results = await Promise.all(toolUses.map(async t => {
             const r = await runTool(t.name, t.input)
-            return { type: 'tool_result', tool_use_id: t.id, content: r.content, is_error: r.isError } satisfies Anthropic.ToolResultBlockParam
+            return { type: 'tool_result', tool_use_id: t.id, content: r.content, is_error: r.isError } satisfies Anthropic.Beta.BetaToolResultBlockParam
           }))
           messages.push({ role: 'user', content: results })
           await save('user', results)

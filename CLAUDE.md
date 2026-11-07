@@ -158,7 +158,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
 - [x] **Salgsindsigt + AI-assistent** — `/admin/insights` og `/admin/ai` (se afsnit nedenfor)
 - [x] **Egen AI-nøgle til butikken** — `/admin/ai-noegle` (kun ejere); krypteret i `app_settings`, fallback til `ANTHROPIC_API_KEY`
-- [ ] **Anthropic SDK 0.94 → 1.x** — giver server-side fallback ved afvisning (`fallbacks: "default"`); berører også `app/api/product-types/suggest*`
+- [x] **Anthropic SDK 1.x** — `@anthropic-ai/sdk` 1.6 (API-version 2026-10-21: ingen `temperature`/`top_p`/`top_k`, nøglen sendes som `Authorization: Bearer`). AI-chat har server-side fallback ved afvisning
 - [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
 - [x] **Lagertræk ved salg (webshop)** — reservation ved ordre, træk ved afhentning, frigivelse ved annullering (`order_stock_apply`, migration 057). POS afventer admind
@@ -198,7 +198,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - `sales_lines` (view) folder alle ordrelinjer ud; annullerede/refunderede udelades; varianter under et overprodukt tælles som overproduktet (`family_id`)
 - `lib/ai/analytics.ts`: wrappers om `analytics_*()` + simuleringer (`simulatePriceChange`, `simulateBundle` → ren `bundleScenarios`). Elasticitet estimeres med log-log-regression og bruges kun hvis pålidelig (≥4 mdr., ≥5 % prisvariation), ellers antagelse -1,2 — antagelserne returneres altid
 - `lib/ai/tools.ts`: værktøjer til modellen (kun læsning/beregning) med egen inputvalidering (input streames og valideres ikke af API'et)
-- `POST /api/ai/chat`: manuel værktøjsløkke med streaming (SSE), model `claude-opus-5-5`, effort `high`, cache på systemprompt og historik. Samtaler gemmes i `ai_messages` som rå content-blokke (append-only — thinking-blokke skal sendes uændret tilbage). Dato sendes i brugerens tur, ikke i systemprompten (cache)
+- `POST /api/ai/chat`: manuel værktøjsløkke med streaming (SSE) via `client.beta.messages.stream`, model `claude-opus-5-5`, effort `high`, `fallbacks: 'default'` (beta `server-side-fallback-2026-07-01` — afviser Opus, kører API'et selv svaret på en anden model; før sidste `fallback`-blok gemmes kun tekst, `echoContent()`), cache på systemprompt og historik. Samtaler gemmes i `ai_messages` som rå content-blokke (append-only — thinking-blokke skal sendes uændret tilbage). Dato sendes i brugerens tur, ikke i systemprompten (cache)
 - Nøgle: `anthropicClient()` (`lib/ai/key.ts`) — butikkens egen nøgle fra `/admin/ai-noegle` (AES-256-GCM via `lib/secrets.ts`, testes mod Anthropic før den gemmes), ellers `ANTHROPIC_API_KEY`. Bruges af AI-chat og produkttype-/kategoriforslag
 - Viden: systemprompt = grundinstruks + branchekendskab (`lib/ai/knowledge.ts`, i koden) + butikkens egen viden (`ai_knowledge.id='shop'`, redigeres på `/admin/ai-viden`). Cache-breakpoint på sidste blok — cachen brydes kun når butikkens viden ændres
 
