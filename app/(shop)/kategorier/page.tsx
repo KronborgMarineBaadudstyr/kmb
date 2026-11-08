@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/server'
 import type { Metadata } from 'next'
+import { getCategoryCounts } from '@/lib/shop/categories'
 
 export const metadata: Metadata = { title: 'Kategorier' }
 export const dynamic = 'force-dynamic'
@@ -30,29 +31,18 @@ export default async function CategoriesPage() {
   const supabase = createServiceClient()
 
   // Hent beskrivelser og billeder fra categories-tabellen
-  const { data: catRows } = await supabase
-    .from('categories')
-    .select('name, description, image_url')
+  const [{ data: catRows }, categoryCounts] = await Promise.all([
+    supabase.from('categories').select('name, description, image_url'),
+    getCategoryCounts(),
+  ])
 
   const descMap = new Map<string, { description: string | null; image_url: string | null }>()
   for (const row of catRows ?? []) {
     descMap.set(row.name, { description: row.description, image_url: row.image_url })
   }
 
-  // Tæl produkter per kategori
-  const { data: prodRows } = await supabase
-    .from('products')
-    .select('categories')
-    .not('status', 'eq', 'archived')
-    .not('status', 'eq', 'rejected')
-    .not('categories', 'is', null)
-
-  const counts = new Map<string, number>()
-  for (const row of prodRows ?? []) {
-    for (const cat of (row.categories as string[] ?? [])) {
-      if (cat) counts.set(cat, (counts.get(cat) ?? 0) + 1)
-    }
-  }
+  // Antal produkter pr. kategori (ét kald via product_category_counts())
+  const counts = new Map(categoryCounts.map(c => [c.name, c.product_count]))
 
   const categories = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])

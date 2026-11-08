@@ -1,12 +1,14 @@
 ﻿import { createServiceClient } from '@/lib/supabase/server'
 import Link from 'next/link'
 import type { Metadata } from 'next'
+import { Fragment, Suspense, cache } from 'react'
 import { AddToCartBtn } from './_add-to-cart'
 import { VariantPicker } from './_variant-picker'
 import { WishlistBtn } from './_wishlist-btn'
 import { ProductCard } from '../../_product-card'
 import { AdminEdit } from './_admin-edit'
 import { getCurrentAdmin } from '@/lib/admin-auth'
+import { slugify } from '@/lib/shop/categories'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,24 +20,9 @@ function formatDescription(text: string): string {
     .replace(/\n/g, '<br>')
 }
 
-function slugify(s: string) {
-  return s.toLowerCase()
-    .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-}
-
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const { id } = await params
-  const supabase = createServiceClient()
-  const { data } = await supabase.from('products').select('name').eq('id', id).single()
-  return { title: data?.name ?? 'Produkt' }
-}
-
-export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
-  const supabase = createServiceClient()
-
-  const { data: p } = await supabase
+// cache(): metadata og siden deler ét opslag i stedet for to
+const getProduct = cache(async (id: string) => {
+  const { data } = await createServiceClient()
     .from('products')
     .select(`
       id, name, description, short_description, categories, brand, status,
@@ -48,7 +35,70 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       )
     `)
     .eq('id', id)
-    .single()
+    .maybeSingle()
+  return data
+})
+
+type Variant = {
+  id: string
+  internal_variant_sku: string
+  attributes: { name: string; value: string }[]
+  sales_price: number | null
+  own_stock_quantity: number
+  own_stock_reserved: number
+}
+
+async function getVariants(id: string): Promise<Variant[]> {
+  const { data } = await createServiceClient()
+    .from('product_variants')
+    .select('id, internal_variant_sku, attributes, sales_price, own_stock_quantity, own_stock_reserved')
+    .eq('product_id', id)
+    .eq('status', 'active')
+    .order('internal_variant_sku')
+  return (data ?? []) as Variant[]
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
+  const { id } = await params
+  const p = await getProduct(id)
+  return { title: p?.name ?? 'Produkt' }
+}
+
+// "Flere i …" streames ind efter selve produktet, så siden ikke venter på det
+async function RelatedProducts({ id, category }: { id: string; category: string }) {
+  const { data } = await createServiceClient()
+    .from('products')
+    .select('id, name, categories, sales_price, brand, product_images(url, is_primary)')
+    .contains('categories', [category])
+    .not('status', 'in', '(archived,rejected)')
+    .neq('id', id)
+    .limit(8)
+
+  const related = (data ?? []) as {
+    id: string; name: string; categories: string[];
+    sales_price: number | null; brand: string | null;
+    product_images: { url: string; is_primary: boolean }[]
+  }[]
+  if (related.length === 0) return null
+
+  return (
+    <>
+      <div className="ls-section-header" style={{ marginTop: 48 }}>
+        <h2>Flere i {category}</h2>
+        <Link href={`/kategorier/${slugify(category)}`}>Se alle</Link>
+      </div>
+      <div className="ls-prodgrid ls-prodgrid--related">
+        {related.map(r => <ProductCard key={r.id} product={r as any} />)}
+      </div>
+    </>
+  )
+}
+
+export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+
+  // Produkt, varianter og admin-tjek hentes samtidig
+  const [p, variants, admin] = await Promise.all([getProduct(id), getVariants(id), getCurrentAdmin()])
 
   if (!p) {
     return (
@@ -87,69 +137,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   if (p.width)            specs.push(['Bredde', `${p.width} cm`])
   if (p.height)           specs.push(['Højde', `${p.height} cm`])
 
-  // Fetch variants
-  const { data: variantRows } = await supabase
-    .from('product_variants')
-    .select('id, internal_variant_sku, attributes, sales_price, own_stock_quantity, own_stock_reserved')
-    .eq('product_id', id)
-    .eq('status', 'active')
-    .order('internal_variant_sku')
-
-  const variants = (variantRows ?? []) as {
-    id: string
-    internal_variant_sku: string
-    attributes: { name: string; value: string }[]
-    sales_price: number | null
-    own_stock_quantity: number
-    own_stock_reserved: number
-  }[]
-
-  // Fetch related products from same category (excluding this product)
-  const { data: relatedRows } = firstCat
-    ? await supabase
-        .from('products')
-        .select('id, name, categories, sales_price, brand, product_images(url, is_primary)')
-        .contains('categories', [firstCat])
-        .not('status', 'eq', 'archived')
-        .not('status', 'eq', 'rejected')
-        .neq('id', id)
-        .limit(8)
-    : { data: [] }
-
-  const related = (relatedRows ?? []) as {
-    id: string; name: string; categories: string[];
-    sales_price: number | null; brand: string | null;
-    product_images: { url: string; is_primary: boolean }[]
-  }[]
-
   const hasVariants = variants.length > 0
-
-  // Admin surfer på shoppen → redigeringspanel. Kategoriforslag: kategoritabellen + alle brugte kategorier
-  const admin = await getCurrentAdmin()
-  let categoryOptions: string[] = []
-  if (admin) {
-    // Supabase giver højst 1000 rækker pr. kald — hent brugte kategorier side for side
-    const usedRows: { categories: string[] | null }[] = []
-    const loadUsed = async () => {
-      for (let from = 0; ; from += 1000) {
-        const { data } = await supabase.from('products').select('categories')
-          .not('categories', 'is', null).order('id').range(from, from + 999)
-        usedRows.push(...((data ?? []) as { categories: string[] | null }[]))
-        if (!data || data.length < 1000 || from >= 50000) break
-      }
-    }
-    const [{ data: catRows }] = await Promise.all([
-      supabase.from('categories').select('name, subcategories'),
-      loadUsed(),
-    ])
-    const names = new Set<string>()
-    for (const c of catRows ?? []) {
-      if (c.name) names.add(c.name)
-      for (const sub of (c.subcategories as { name?: string }[] | null) ?? []) if (sub?.name) names.add(sub.name)
-    }
-    for (const r of usedRows) for (const c of (r.categories as string[] | null) ?? []) if (c) names.add(c)
-    categoryOptions = [...names].sort((a, b) => a.localeCompare(b, 'da'))
-  }
 
   return (
     <>
@@ -217,10 +205,10 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             <div className="ls-pdp-meta">
               <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 16px', margin: 0 }}>
                 {specs.map(([k, v]) => (
-                  <>
-                    <dt key={`k-${k}`} style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13, whiteSpace: 'nowrap' }}>{k}</dt>
-                    <dd key={`v-${k}`} style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)' }}>{v}</dd>
-                  </>
+                  <Fragment key={k}>
+                    <dt style={{ fontWeight: 600, color: 'var(--ink)', fontSize: 13, whiteSpace: 'nowrap' }}>{k}</dt>
+                    <dd style={{ margin: 0, fontSize: 13, color: 'var(--ink-2)' }}>{v}</dd>
+                  </Fragment>
                 ))}
               </dl>
             </div>
@@ -237,23 +225,17 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         </div>
       </div>
 
-      {/* Relaterede produkter */}
-      {related.length > 0 && (
-        <>
-          <div className="ls-section-header" style={{ marginTop: 48 }}>
-            <h2>Flere i {firstCat}</h2>
-            <Link href={`/kategorier/${slugify(firstCat!)}`}>Se alle</Link>
-          </div>
-          <div className="ls-prodgrid ls-prodgrid--related">
-            {related.map(r => <ProductCard key={r.id} product={r as any} />)}
-          </div>
-        </>
+      {firstCat && (
+        <Suspense fallback={null}>
+          <RelatedProducts id={p.id} category={firstCat} />
+        </Suspense>
       )}
 
       <div style={{ height: 48 }} />
 
+      {/* Kategoriforslagene hentes først, når admin åbner panelet */}
       {admin && (
-        <AdminEdit categoryOptions={categoryOptions} product={{
+        <AdminEdit product={{
           id: p.id, name: p.name, brand: p.brand ?? null, sales_price: p.sales_price ?? null,
           status: p.status, categories: cats, short_description: p.short_description ?? null, description: p.description ?? null,
         }} />

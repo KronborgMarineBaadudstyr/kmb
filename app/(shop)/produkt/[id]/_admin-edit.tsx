@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 // Vises kun for indloggede admins (siden tjekker sessionen). Gemmer via PATCH /api/products/[id],
@@ -26,9 +26,20 @@ const STATUSES: [string, string][] = [
 const inputCls = 'w-full px-3 py-1.5 text-sm text-gray-900 bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500'
 const labelCls = 'flex flex-col gap-1 text-xs font-medium text-gray-500'
 
-export function AdminEdit({ product, categoryOptions }: { product: EditableProduct; categoryOptions: string[] }) {
+export function AdminEdit({ product }: { product: EditableProduct }) {
   const router = useRouter()
   const [open, setOpen]     = useState(false)
+  // Kategoriforslag hentes først, når panelet åbnes (ikke ved hver sidevisning)
+  const [categoryOptions, setCategoryOptions] = useState<string[]>([])
+  const [optionsLoaded, setOptionsLoaded]     = useState(false)
+  useEffect(() => {
+    if (!open || optionsLoaded) return
+    setOptionsLoaded(true)
+    fetch('/api/products/category-options')
+      .then(r => r.ok ? r.json() : { options: [] })
+      .then(j => setCategoryOptions(Array.isArray(j.options) ? j.options : []))
+      .catch(() => {})
+  }, [open, optionsLoaded])
   const [form, setForm]     = useState(product)
   const [price, setPrice]   = useState(product.sales_price != null ? String(product.sales_price).replace('.', ',') : '')
   const [newCat, setNewCat] = useState('')
@@ -65,7 +76,7 @@ export function AdminEdit({ product, categoryOptions }: { product: EditableProdu
   const removeCategory = (c: string) => set('categories', form.categories.filter(x => x !== c))
   const makePrimary    = (c: string) => set('categories', [c, ...form.categories.filter(x => x !== c)])
 
-  const isNewCategory = (c: string) => !categoryOptions.some(o => o.toLowerCase() === c.toLowerCase())
+  const isNewCategory = (c: string) => optionsLoaded && categoryOptions.length > 0 && !categoryOptions.some(o => o.toLowerCase() === c.toLowerCase())
 
   async function save() {
     if (!dirty || priceInvalid || !form.name.trim()) return

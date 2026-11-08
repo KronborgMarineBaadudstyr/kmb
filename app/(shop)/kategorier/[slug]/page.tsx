@@ -1,10 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/server'
-import { headers } from 'next/headers'
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { ProductCard } from '../../_product-card'
 import { CategoryFilters } from './_filters'
 import { Suspense } from 'react'
+import { getCategoryCounts, slugify } from '@/lib/shop/categories'
+import { GET as getProducts } from '@/app/api/products/route'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,6 @@ function deslugify(slug: string) {
   return slug
     .replace(/ae/g, 'æ').replace(/oe/g, 'ø').replace(/aa/g, 'å')
     .replace(/-/g, ' ')
-}
-function slugify(s: string) {
-  return s.toLowerCase()
-    .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -44,11 +40,6 @@ async function fetchProducts(opts: {
   minPrice?: string
   maxPrice?: string
 }) {
-  // Build URL for internal API call
-  const hdrs = await headers()
-  const host  = hdrs.get('host') ?? 'localhost:3000'
-  const proto = host.startsWith('localhost') ? 'http' : 'https'
-
   const [sortCol, sortDir] = opts.sort === 'price_asc'  ? ['sales_price', 'asc']  :
                              opts.sort === 'price_desc' ? ['sales_price', 'desc'] :
                              opts.sort === 'name_desc'  ? ['name',        'desc'] :
@@ -67,9 +58,8 @@ async function fetchProducts(opts: {
   if (opts.minPrice) params.set('min_price', opts.minPrice)
   if (opts.maxPrice) params.set('max_price', opts.maxPrice)
 
-  const res = await fetch(`${proto}://${host}/api/products?${params.toString()}`, {
-    cache: 'no-store',
-  })
+  // Kalder API'ets handler direkte i samme proces (samme logik, intet ekstra HTTP-hop/koldstart)
+  const res = await getProducts(new Request(`http://internal/api/products?${params.toString()}`))
   if (!res.ok) return { products: [], total: 0 }
   const json = await res.json()
   return {
@@ -103,15 +93,8 @@ export default async function CategoryPage({
 
   const supabase = createServiceClient()
 
-  // Resolve category name from slug
-  const { data: allCatRows } = await supabase
-    .from('products')
-    .select('categories')
-    .not('categories', 'is', null)
-
-  const matchedCat = [...new Set(
-    (allCatRows ?? []).flatMap(r => r.categories as string[])
-  )].find(c => slugify(c) === slug)
+  // Find kategorinavnet ud fra slug (ét kald via product_category_counts())
+  const matchedCat = (await getCategoryCounts()).find(c => slugify(c.name) === slug)?.name
 
   if (!matchedCat) {
     return (
@@ -123,8 +106,8 @@ export default async function CategoryPage({
     )
   }
 
-  // Fetch category description + products via the shared backend engine
-  const [catInfo, { products, total }] = await Promise.all([
+  // Beskrivelse, produkter, brands og prisinterval hentes samtidig
+  const [catInfo, { products, total }, { data: brandRows }, { data: priceRange }] = await Promise.all([
     supabase
       .from('categories')
       .select('description')
@@ -133,31 +116,29 @@ export default async function CategoryPage({
       .then(r => r.data),
 
     fetchProducts({ category: matchedCat, sort, page, brand: brand || undefined, inStock, minPrice: minPrice || undefined, maxPrice: maxPrice || undefined }),
+
+    // Brands til filter-chips (ufiltreret — viser altid alle brands i kategorien)
+    supabase
+      .from('products')
+      .select('brand')
+      .not('status', 'in', '(archived,rejected)')
+      .contains('categories', [matchedCat])
+      .not('brand', 'is', null),
+
+    // Prisinterval (ufiltreret)
+    supabase
+      .from('products')
+      .select('sales_price')
+      .not('status', 'in', '(archived,rejected)')
+      .contains('categories', [matchedCat])
+      .not('sales_price', 'is', null),
   ])
 
   const pages = Math.ceil(total / PAGE_SIZE)
 
-  // Fetch available brands for filter chips (unfiltered — always show all brands in category)
-  const { data: brandRows } = await supabase
-    .from('products')
-    .select('brand')
-    .not('status', 'eq', 'archived')
-    .not('status', 'eq', 'rejected')
-    .contains('categories', [matchedCat])
-    .not('brand', 'is', null)
-
   const brands = [...new Set((brandRows ?? []).map(r => r.brand as string))]
     .filter(Boolean)
     .sort()
-
-  // Price range hints (unfiltered)
-  const { data: priceRange } = await supabase
-    .from('products')
-    .select('sales_price')
-    .not('status', 'eq', 'archived')
-    .not('status', 'eq', 'rejected')
-    .contains('categories', [matchedCat])
-    .not('sales_price', 'is', null)
 
   const prices    = (priceRange ?? []).map(r => r.sales_price as number).filter(Boolean)
   const globalMin = prices.length ? Math.min(...prices) : 0
