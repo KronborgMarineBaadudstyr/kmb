@@ -187,6 +187,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - **Admin-login:** `/login` → e-mail → magic link `/login/bekraeft?token=` → knap → cookie `kmb_admin` (session i `admin_sessions`, 14 dage). Ejere opretter/deaktiverer admins på `/admin/admins`. Kan mailen ikke sendes, logges linket i serverloggen (Vercel) som nødadgang
 - **`middleware.ts` (Node.js-runtime) kræver admin-session på alt under `/api`**, undtagen `/api/shop/*`, `/api/cron/*` (egen Bearer), `/api/auth/login`, `/api/health` og `GET /api/products?shop=1`. Nye offentlige ruter skal lægges under `/api/shop/`
 - Server actions går ikke gennem middleware — kald selv `isAdmin()` (`lib/admin-auth.ts`)
+- **Redigering fra shoppen:** er man logget ind som admin, viser produktsiden (`/produkt/[id]`) en "✏️ Rediger produkt"-knap → panel (`_admin-edit.tsx`) med navn, brand, pris, status, kategorier (første = primær; forslag fra `categories` + alle brugte kategorier) og beskrivelser. Gemmer kun ændrede felter via `PATCH /api/products/[id]`
 
 ## Kundekonto & levetid
 - Login uden adgangskode: `/konto` → `POST /api/shop/auth/request` (e-mail eller telefon) → mail med `/konto/login?token=` → knap → server action `verifyLogin` → cookie `ls_session`
