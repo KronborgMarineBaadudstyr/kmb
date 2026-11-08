@@ -5,6 +5,8 @@ import { AddToCartBtn } from './_add-to-cart'
 import { VariantPicker } from './_variant-picker'
 import { WishlistBtn } from './_wishlist-btn'
 import { ProductCard } from '../../_product-card'
+import { AdminEdit } from './_admin-edit'
+import { getCurrentAdmin } from '@/lib/admin-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,7 +38,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const { data: p } = await supabase
     .from('products')
     .select(`
-      id, name, description, short_description, categories, brand,
+      id, name, description, short_description, categories, brand, status,
       sales_price, internal_sku, ean, manufacturer_sku,
       weight, length, width, height,
       product_images ( url, is_primary, position ),
@@ -121,6 +123,33 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   }[]
 
   const hasVariants = variants.length > 0
+
+  // Admin surfer på shoppen → redigeringspanel. Kategoriforslag: kategoritabellen + alle brugte kategorier
+  const admin = await getCurrentAdmin()
+  let categoryOptions: string[] = []
+  if (admin) {
+    // Supabase giver højst 1000 rækker pr. kald — hent brugte kategorier side for side
+    const usedRows: { categories: string[] | null }[] = []
+    const loadUsed = async () => {
+      for (let from = 0; ; from += 1000) {
+        const { data } = await supabase.from('products').select('categories')
+          .not('categories', 'is', null).order('id').range(from, from + 999)
+        usedRows.push(...((data ?? []) as { categories: string[] | null }[]))
+        if (!data || data.length < 1000 || from >= 50000) break
+      }
+    }
+    const [{ data: catRows }] = await Promise.all([
+      supabase.from('categories').select('name, subcategories'),
+      loadUsed(),
+    ])
+    const names = new Set<string>()
+    for (const c of catRows ?? []) {
+      if (c.name) names.add(c.name)
+      for (const sub of (c.subcategories as { name?: string }[] | null) ?? []) if (sub?.name) names.add(sub.name)
+    }
+    for (const r of usedRows) for (const c of (r.categories as string[] | null) ?? []) if (c) names.add(c)
+    categoryOptions = [...names].sort((a, b) => a.localeCompare(b, 'da'))
+  }
 
   return (
     <>
@@ -222,6 +251,13 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
       )}
 
       <div style={{ height: 48 }} />
+
+      {admin && (
+        <AdminEdit categoryOptions={categoryOptions} product={{
+          id: p.id, name: p.name, brand: p.brand ?? null, sales_price: p.sales_price ?? null,
+          status: p.status, categories: cats, short_description: p.short_description ?? null, description: p.description ?? null,
+        }} />
+      )}
     </>
   )
 }
