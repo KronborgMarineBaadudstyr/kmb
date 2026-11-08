@@ -97,6 +97,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `060_ai_knowledge.sql` — `ai_knowledge` (butikkens egen viden til AI-assistenten) ✅ kørt
 - `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle) ✅ kørt
 - `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()` ✅ kørt
+- `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald)
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -187,7 +188,8 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - **Admin-login:** `/login` → e-mail → magic link `/login/bekraeft?token=` → knap → cookie `kmb_admin` (session i `admin_sessions`, 14 dage). Ejere opretter/deaktiverer admins på `/admin/admins`. Kan mailen ikke sendes, logges linket i serverloggen (Vercel) som nødadgang
 - **`middleware.ts` (Node.js-runtime) kræver admin-session på alt under `/api`**, undtagen `/api/shop/*`, `/api/cron/*` (egen Bearer), `/api/auth/login`, `/api/health` og `GET /api/products?shop=1`. Nye offentlige ruter skal lægges under `/api/shop/`
 - Server actions går ikke gennem middleware — kald selv `isAdmin()` (`lib/admin-auth.ts`)
-- **Redigering fra shoppen:** er man logget ind som admin, viser produktsiden (`/produkt/[id]`) en "✏️ Rediger produkt"-knap → panel (`_admin-edit.tsx`) med navn, brand, pris, status, kategorier (første = primær; forslag fra `categories` + alle brugte kategorier) og beskrivelser. Gemmer kun ændrede felter via `PATCH /api/products/[id]`
+- **Redigering fra shoppen:** er man logget ind som admin, viser produktsiden (`/produkt/[id]`) en "✏️ Rediger produkt"-knap → panel (`_admin-edit.tsx`) med navn, brand, pris, status, kategorier (første = primær; forslag hentes først når panelet åbnes, via `GET /api/products/category-options`) og beskrivelser. Gemmer kun ændrede felter via `PATCH /api/products/[id]`
+- **Shop-hastighed:** produktsiden henter produkt, varianter og admin-tjek samtidig (`cache()` deler opslaget med metadata) og streamer "Flere i …" ind bagefter; `loading.tsx` på produkt- og kategorisider. Kategorier slås op via `getCategoryCounts()` (`lib/shop/categories.ts`, RPC fra migration 063 med fallback) — hent aldrig alle produkters kategorier til appen (Supabase giver kun 1000 rækker pr. kald). Kategorisiden kalder `/api/products`-handleren direkte i stedet for over HTTP
 
 ## Kundekonto & levetid
 - Login uden adgangskode: `/konto` → `POST /api/shop/auth/request` (e-mail eller telefon) → mail med `/konto/login?token=` → knap → server action `verifyLogin` → cookie `ls_session`
