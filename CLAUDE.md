@@ -95,8 +95,8 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `058_price_history.sql` — `price_history` + triggere der logger hver ændring af salgs-/tilbudspris (produkter og varianter) ✅ kørt
 - `059_sales_analytics.sql` — view `sales_lines` + `analytics_*()` (dækning, kategorier, topsælgere, måned, sæson, sæsontoppe, købes sammen, kategori-affinitet, prisændringer, kampagner, stk. pr. ordre) + `ai_conversations`/`ai_messages` ✅ kørt
 - `060_ai_knowledge.sql` — `ai_knowledge` (butikkens egen viden til AI-assistenten) ✅ kørt
-- `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle)
-- `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()`
+- `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle) ✅ kørt
+- `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()` ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
