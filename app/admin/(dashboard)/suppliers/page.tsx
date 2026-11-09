@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef } from 'react'
+import { ImportFlow } from '../_import-flow'
 
 type ImportSummary = {
   stage:     'done' | 'error'
@@ -260,8 +261,9 @@ export default function SuppliersPage() {
 
   return (
     <div className="p-8">
+      <ImportFlow className="mb-6" />
       <h2 className="text-2xl font-bold text-gray-900 mb-1">Leverandører</h2>
-      <p className="text-gray-500 mb-8">Administrér leverandører og import af produktdata.</p>
+      <p className="text-gray-500 mb-8">Trin 1: Hent varer, priser og lager ind fra leverandørerne. Importen kører automatisk hver nat — her kan du også starte den manuelt og sætte leverandørprioritet.</p>
 
       {/* Leverandørliste */}
       {loading ? (

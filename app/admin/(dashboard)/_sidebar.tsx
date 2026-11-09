@@ -35,11 +35,12 @@ const navEntries: NavEntry[] = [
   { href: '/admin/navigation',       label: 'Båd-navigation',      icon: '⚓' },
 
   { group: 'Import', icon: '📥', items: [
+    // Rækkefølgen følger flowet (samme trin som _import-flow.tsx)
     { href: '/admin/suppliers',      label: 'Leverandører',        icon: '🏭' },
-    { href: '/admin/matching',       label: 'Produkt match',       icon: '🔗' },
-    { href: '/admin/staging',        label: 'Opret produkter',     icon: '✚' },
     { href: '/admin/changes',        label: 'Import-ændringer',    icon: '📋' },
-    { href: '/admin/auto-log',       label: 'Auto-handling log',   icon: '🤖' },
+    { href: '/admin/matching',       label: 'Saml ens varer',      icon: '🔗' },
+    { href: '/admin/staging',        label: 'Nye varer',           icon: '✚' },
+    { href: '/admin/auto-log',       label: 'Automatik-log',       icon: '🤖' },
   ]},
 
   { group: 'Indstillinger', icon: '⚙️', items: [

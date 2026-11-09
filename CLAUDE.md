@@ -109,6 +109,14 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 | `/api/cron/sync-columbus` | 23:00 dagligt | Columbus Marine produktimport |
 | `/api/cron/sync-kaphorn` | 23:00 dagligt | Kap-Horn produktimport |
 
+## Import-flow i admin (menu → Import)
+Rækkefølge og navne (trin-bjælke `_import-flow.tsx` øverst på hver side, samme som menuen i `_sidebar.tsx`):
+1. **Leverandører** (`/admin/suppliers`) — import af varer/priser/lager
+2. **Import-ændringer** (`/admin/changes`) — prisændringer, nye og udgåede varer fra seneste import
+3. **Saml ens varer** (`/admin/matching`, tidl. "Produkt match") — forslag om samme vare hos flere leverandører; faner: Samme EAN / Lignende navn / Varianter
+4. **Nye varer** (`/admin/staging`, tidl. "Opret produkter") — varer uden match: opret, tilknyt eller afvis
+- **Automatik-log** (`/admin/auto-log`) — hvad pipelinen selv har gjort
+
 ## Staging-flow
 1. Import matcher på EAN mod `products` tabellen
 2. Match → opdaterer `product_suppliers`; `review-checker` flagger matchede produkter med manglende data som `needs_review`

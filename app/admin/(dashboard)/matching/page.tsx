@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { ImportFlow } from '../_import-flow'
 
 // ── Types ──
 
@@ -57,9 +58,9 @@ type ProgressEvent = {
 // ── Helpers ──
 
 const CONFIDENCE_LABELS: Record<string, { label: string; color: string }> = {
-  high:   { label: 'Høj (EAN)',  color: 'bg-green-100 text-green-700 border-green-200' },
-  medium: { label: 'Middel',     color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
-  low:    { label: 'Lav',        color: 'bg-gray-100 text-gray-600 border-gray-200' },
+  high:   { label: 'Sikker',     color: 'bg-green-100 text-green-700 border-green-200' },
+  medium: { label: 'Tjek efter', color: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+  low:    { label: 'Usikker',    color: 'bg-gray-100 text-gray-600 border-gray-200' },
 }
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
@@ -205,11 +206,11 @@ function MemberDetailPanel({
 type TabKey = 'all' | 'high' | 'medium' | 'variant' | 'confirmed' | 'rejected'
 
 const TABS: { key: TabKey; label: string; status?: string; method?: string; confidence?: string }[] = [
-  { key: 'all',       label: 'Alle afventer',           status: 'pending_review' },
-  { key: 'high',      label: 'EAN-match',               status: 'pending_review', confidence: 'high'   },
-  { key: 'medium',    label: 'Fuzzy navn',              status: 'pending_review', confidence: 'medium' },
+  { key: 'all',       label: 'Alle forslag',            status: 'pending_review' },
+  { key: 'high',      label: 'Samme EAN',               status: 'pending_review', confidence: 'high'   },
+  { key: 'medium',    label: 'Lignende navn',           status: 'pending_review', confidence: 'medium' },
   { key: 'variant',   label: 'Varianter',               status: 'pending_review', method: 'variant,parent_sku' },
-  { key: 'confirmed', label: 'Bekræftet gruppering',    status: 'confirmed'      },
+  { key: 'confirmed', label: 'Bekræftet',               status: 'confirmed'      },
   { key: 'rejected',  label: 'Afvist',                  status: 'rejected'       },
 ]
 
@@ -292,12 +293,12 @@ function GroupCard({
               </span>
               {group.match_method === 'ean' && (
                 <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-                  EAN match
+                  Samme EAN
                 </span>
               )}
               {group.match_method === 'fuzzy_name' && (
                 <span className="text-xs px-2 py-0.5 rounded-full border bg-purple-50 text-purple-700 border-purple-200">
-                  Fuzzy navn
+                  Lignende navn
                 </span>
               )}
               {isSingle && (
@@ -533,7 +534,7 @@ function GroupCard({
                   disabled={loading}
                   className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
                 >
-                  Bekræft leverandørgruppering
+                  ✅ Bekræft — samme vare
                 </button>
                 <button
                   onClick={handleRejectClick}
@@ -914,13 +915,22 @@ export default function MatchingPage() {
     <div className="min-h-full flex flex-col">
       {/* ── Header (scroller væk med siden, så listen får hele skærmen) ── */}
       <div className="bg-white px-6 pt-4">
-        <h2 className="text-xl font-bold text-gray-900 mb-0.5">Produkt match mellem leverandører</h2>
-        <p className="text-sm text-gray-500 mb-2">Find produkter der sælges af flere leverandører — bekræft at de hører sammen, så de samles under ét produkt i kataloget</p>
+        <ImportFlow className="mb-4" />
+        <h2 className="text-xl font-bold text-gray-900 mb-0.5">Saml ens varer</h2>
+        <p className="text-sm text-gray-500 mb-2">Trin 3: Systemet har fundet varer, der ser ud til at være den samme vare hos flere leverandører. Sig ja, hvis de hører sammen — så bliver de til ét produkt i kataloget med flere leverandører.</p>
         <details className="group text-sm bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 mb-4 leading-relaxed">
           <summary className="cursor-pointer font-medium text-blue-800 list-none flex items-center gap-1.5 select-none">
             <span className="transition-transform group-open:rotate-90">▸</span> Hvad gør du her?
           </summary>
-          <p className="text-blue-700 mt-1.5">Pipelinen har fundet leverandørprodukter der sandsynligvis er <em>det samme produkt</em> solgt af flere leverandører — eller varianter af samme produkt (f.eks. samme fender i forskellig størrelse eller farve). Bekræft grupperne der er korrekte, og afvis dem der ikke hører sammen. Bekræftede grupper oprettes automatisk som produkter. Resten kan oprettes enkeltvis under <a href="/admin/staging" className="underline font-medium">Opret produkter</a>.</p>
+          <div className="text-blue-700 mt-1.5 space-y-1.5">
+            <p>Hvert kort er et <strong>forslag</strong> om, at nogle leverandørvarer er den samme vare (eller varianter af den, fx samme fender i flere størrelser eller farver).</p>
+            <ul className="list-none space-y-0.5">
+              <li>✅ <strong>Bekræft</strong> — de hører sammen. Der oprettes ét produkt med alle leverandørerne.</li>
+              <li>✕ <strong>Afvis</strong> — de hører ikke sammen. Varerne kommer videre til trin 4.</li>
+              <li>☑️ Fjern fluebenet ved en vare, der ikke passer ind i gruppen, før du bekræfter.</li>
+            </ul>
+            <p>Fanerne viser, <em>hvorfor</em> varerne er foreslået: <strong>Samme EAN</strong> (stregkode — næsten altid rigtigt), <strong>Lignende navn</strong> (tjek efter) og <strong>Varianter</strong>. Varer uden noget match finder du under <a href="/admin/staging" className="underline font-medium">Nye varer</a>.</p>
+          </div>
         </details>
 
         {/* Pipeline panel */}
@@ -930,11 +940,11 @@ export default function MatchingPage() {
         {stats && (
           <div className="flex gap-3 flex-wrap text-sm mb-3">
             {[
-              { label: 'Afventer gennemgang',  value: stats.pending,    color: 'text-orange-700' },
-              { label: 'EAN-match (afventer)', value: stats.high,       color: 'text-green-700'  },
-              { label: 'Fuzzy (afventer)',     value: stats.medium,     color: 'text-yellow-700' },
-              { label: 'Varianter (afventer)', value: stats.variant,    color: 'text-purple-700' },
-              { label: 'Bekræftet gruppering', value: stats.confirmed,  color: 'text-blue-700'   },
+              { label: 'Forslag at gennemgå',  value: stats.pending,    color: 'text-orange-700' },
+              { label: 'Samme EAN',            value: stats.high,       color: 'text-green-700'  },
+              { label: 'Lignende navn',        value: stats.medium,     color: 'text-yellow-700' },
+              { label: 'Varianter',            value: stats.variant,    color: 'text-purple-700' },
+              { label: 'Bekræftet',            value: stats.confirmed,  color: 'text-blue-700'   },
               { label: 'Produkt oprettet',     value: stats.created,    color: 'text-emerald-700'},
               { label: 'Afvist',               value: stats.rejected,   color: 'text-gray-400'   },
             ].map(s => (

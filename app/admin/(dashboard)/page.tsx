@@ -34,7 +34,7 @@ const STEPS: Step[] = [
   { label: 'Produktliste med kolonne-vælger, filtrering og sortering',                                      status: 'done' },
   { label: 'Produktredigering inkl. billeder, varianter og variantfamilier',                                status: 'done' },
   { label: 'Levetid og vedligehold på produkter',                                                            status: 'done' },
-  { label: 'Kør matching og gennemgå match-grupper',                                                         status: 'progress', note: 'gennemgang i Produkt match' },
+  { label: 'Kør matching og gennemgå match-grupper',                                                         status: 'progress', note: 'gennemgang i Saml ens varer' },
 
   // ── Leverandører & import ──
   { group: 'Leverandører & import', label: 'Leverandørstyring — opret og konfigurér leverandører',         status: 'done' },

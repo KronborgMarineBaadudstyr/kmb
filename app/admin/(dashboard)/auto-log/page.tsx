@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { ImportFlow } from '../_import-flow'
 import Link from 'next/link'
 
 type AutoAction = {
@@ -83,10 +84,11 @@ export default function AutoLogPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-6 pt-6 pb-4 border-b border-gray-200 shrink-0">
-        <h1 className="text-xl font-semibold text-gray-900">Auto-handling log</h1>
+      <div className="px-6 pt-4 pb-4 border-b border-gray-200 shrink-0">
+        <ImportFlow className="mb-4" />
+        <h1 className="text-xl font-semibold text-gray-900">Automatik-log</h1>
         <p className="text-sm text-gray-500 mt-0.5">
-          Automatiske pipeline-handlinger — {total.toLocaleString('da-DK')} poster i alt
+          Hvad systemet selv har gjort (fx oprettet eller tilknyttet varer automatisk) — {total.toLocaleString('da-DK')} poster i alt
         </p>
       </div>
 
