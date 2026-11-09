@@ -897,6 +897,7 @@
   transition: background .15s;
 }
 .ls-checkout-btn:hover { background: var(--navy-soft); }
+.ls-checkout-btn:active:not(:disabled) { transform: scale(.98); }
 
 /* ── CHECKOUT ────────────────────────────────────────────────── */
 .ls-checkout-back { font-size: 13px; color: var(--ink-3); text-decoration: none; }
