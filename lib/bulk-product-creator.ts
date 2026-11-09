@@ -42,11 +42,15 @@ type StagingRow = {
   raw_data:        RawData
 }
 
+type VariantAttr = { name: string; value: string }
+
 type GroupRow = {
-  id:             string
-  suggested_name: string | null
-  suggested_ean:  string | null
-  match_method:   string | null
+  id:                 string
+  suggested_name:     string | null
+  suggested_ean:      string | null
+  match_method:       string | null
+  create_as?:         'same' | 'variants' | null                 // migration 064 — admins valg
+  member_attributes?: Record<string, VariantAttr[]> | null       // egenskaber pr. staging-række
 }
 
 // ── Variant methods — these create product_variants instead of flat product_suppliers ──
@@ -56,6 +60,7 @@ type PreparedProduct = {
   groupId:    string
   members:    StagingRow[]
   isVariant:  boolean
+  memberAttributes?: Record<string, VariantAttr[]> | null
   dbRow: {
     internal_sku:      string
     name:              string
@@ -144,16 +149,21 @@ export async function bulkCreateProductsFromGroups(
     .select('id, keywords, our_category, our_subcategory')
   const productTypes = (ptData ?? []) as ProductType[]
 
-  // 1. Load confirmed groups (including match_method for variant detection)
-  const { data: groupData, error: gErr } = await supabase
+  // 1. Load confirmed groups (including match_method for variant detection).
+  //    create_as/member_attributes findes først efter migration 064 — ellers hentes uden.
+  const loadGroups = (cols: string) => supabase
     .from('staging_match_groups')
-    .select('id, suggested_name, suggested_ean, match_method')
+    .select(cols)
     .eq('status', 'confirmed')
     .is('product_id', null)
     .limit(limit)
+  let { data: groupData, error: gErr } = await loadGroups('id, suggested_name, suggested_ean, match_method, create_as, member_attributes')
+  if (gErr && (gErr.code === '42703' || /create_as|member_attributes/.test(gErr.message))) {
+    ;({ data: groupData, error: gErr } = await loadGroups('id, suggested_name, suggested_ean, match_method'))
+  }
 
   if (gErr) throw new Error(`Gruppe-hentning fejlede: ${gErr.message}`)
-  const groups = (groupData ?? []) as GroupRow[]
+  const groups = (groupData ?? []) as unknown as GroupRow[]
   if (groups.length === 0) return { created: 0, skipped: 0, remaining: 0 }
 
   const groupIds = groups.map(g => g.id)
@@ -184,7 +194,10 @@ export async function bulkCreateProductsFromGroups(
     const members = membersByGroup.get(group.id) ?? []
     if (members.length === 0) { skipped.push(group.id); continue }
 
-    const isVariant = VARIANT_METHODS.has(group.match_method ?? '')
+    // Admins valg vinder; ellers afgør match-metoden det
+    const isVariant = group.create_as
+      ? group.create_as === 'variants'
+      : VARIANT_METHODS.has(group.match_method ?? '')
 
     const name = isVariant
       ? inferBaseName(members, group.suggested_name)
@@ -212,6 +225,7 @@ export async function bulkCreateProductsFromGroups(
       groupId:   group.id,
       members,
       isVariant,
+      memberAttributes: group.member_attributes ?? null,
       dbRow: {
         internal_sku:      generateSku(idx),
         name,
@@ -465,22 +479,42 @@ export async function bulkCreateProductsFromGroups(
       if (!productId) continue
       variantGroupToProductId.set(p.groupId, productId)
 
-      // Sort members: by supplier_variant_attributes presence, then by name
+      // Egenskaber pr. vare: admins (migration 064) ellers leverandørens egne
+      const attrsOf = (m: StagingRow): VariantAttr[] =>
+        p.memberAttributes?.[m.id] ?? extractVariantAttributes(m.raw_data)
+
+      // Sort members: by attributes presence, then by name
       const ordered = [...p.members].sort((a, b) => {
-        const aAttrs = Array.isArray(a.raw_data.supplier_variant_attributes)
-          ? (a.raw_data.supplier_variant_attributes as unknown[]).length : 0
-        const bAttrs = Array.isArray(b.raw_data.supplier_variant_attributes)
-          ? (b.raw_data.supplier_variant_attributes as unknown[]).length : 0
+        const aAttrs = attrsOf(a).length
+        const bAttrs = attrsOf(b).length
         if (aAttrs !== bAttrs) return bAttrs - aAttrs
         return (a.normalized_name ?? '').localeCompare(b.normalized_name ?? '', 'da')
       })
 
-      // Insert product_variants for this product — one per member
-      const variantRows = ordered.map((m, i) => ({
+      // Én variant pr. forskellig egenskabs-kombination — samme variant fra flere leverandører
+      // bliver til én variant med flere leverandører. Varer uden egenskaber får hver sin variant.
+      const slots: { key: string; attrs: VariantAttr[]; ean: string | null; sku: string }[] = []
+      const slotOfMember = new Map<string, number>()
+      for (const m of ordered) {
+        const attrs = attrsOf(m)
+        const key = attrs.length > 0
+          ? JSON.stringify(attrs.map(a => [a.name.toLowerCase(), a.value.toLowerCase()]).sort())
+          : `member:${m.id}`
+        let idx = slots.findIndex(sl => sl.key === key)
+        if (idx < 0) {
+          idx = slots.length
+          slots.push({ key, attrs, ean: null, sku: generateVariantSku(p.dbRow.internal_sku, idx) })
+        }
+        if (!slots[idx].ean && m.normalized_ean) slots[idx].ean = m.normalized_ean
+        slotOfMember.set(m.id, idx)
+      }
+
+      // Insert product_variants for this product — one per slot
+      const variantRows = slots.map(sl => ({
         product_id:           productId,
-        internal_variant_sku: generateVariantSku(p.dbRow.internal_sku, i),
-        attributes:           extractVariantAttributes(m.raw_data),
-        ean:                  m.normalized_ean ?? null,
+        internal_variant_sku: sl.sku,
+        attributes:           sl.attrs,
+        ean:                  sl.ean,
         own_stock_quantity:   0,
         own_stock_reserved:   0,
         status:               'active',
@@ -502,9 +536,27 @@ export async function bulkCreateProductsFromGroups(
         variantSkuToId.set(v.internal_variant_sku, v.id)
       }
 
-      // Insert product_suppliers — one per variant, with variant_id
-      const supplierRows = ordered.map((m, i) => {
-        const variantSku = generateVariantSku(p.dbRow.internal_sku, i)
+      // Insert product_suppliers — one per member, linked to its variant.
+      // Prioritet tælles pr. variant (billigste med EAN først), så hver variant har en foretrukken leverandør.
+      const perSlot = new Map<number, StagingRow[]>()
+      for (const m of ordered) {
+        const i = slotOfMember.get(m.id)!
+        if (!perSlot.has(i)) perSlot.set(i, [])
+        perSlot.get(i)!.push(m)
+      }
+      const priorityOf = new Map<string, number>()
+      for (const list of perSlot.values()) {
+        list.sort((a, b) => {
+          if (!!a.normalized_ean !== !!b.normalized_ean) return a.normalized_ean ? -1 : 1
+          const ap = typeof a.raw_data.purchase_price === 'number' ? a.raw_data.purchase_price : Infinity
+          const bp = typeof b.raw_data.purchase_price === 'number' ? b.raw_data.purchase_price : Infinity
+          return ap - bp
+        })
+        list.forEach((m, i) => priorityOf.set(m.id, i + 1))
+      }
+
+      const supplierRows = ordered.map(m => {
+        const variantSku = slots[slotOfMember.get(m.id)!].sku
         const variantId  = variantSkuToId.get(variantSku) ?? null
         return {
           product_id:              productId,
@@ -521,7 +573,7 @@ export async function bulkCreateProductsFromGroups(
           supplier_images: Array.isArray(m.raw_data.supplier_images) ? m.raw_data.supplier_images : [],
           supplier_files:  Array.isArray(m.raw_data.supplier_files)  ? m.raw_data.supplier_files  : [],
           unit:            typeof m.raw_data.unit === 'string' ? m.raw_data.unit : null,
-          priority:        i + 1,
+          priority:        priorityOf.get(m.id) ?? 1,
           item_status:     typeof m.raw_data.supplier_stock_quantity === 'number' && m.raw_data.supplier_stock_quantity > 0 ? 'active' : 'out_of_stock',
           is_active:       true,
         }

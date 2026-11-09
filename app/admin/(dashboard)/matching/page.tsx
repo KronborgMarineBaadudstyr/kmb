@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { ImportFlow } from '../_import-flow'
 
 // ── Types ──
@@ -33,6 +33,13 @@ type MatchGroup = {
   notes:            string | null
   created_at:       string
   members:          MatchMember[]
+  create_as?:         'same' | 'variants' | null                  // migration 064
+  member_attributes?: Record<string, VariantAttr[]> | null
+}
+
+type GroupPatch = {
+  suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[]; member_ids?: string[]
+  create_as?: 'same' | 'variants'; member_attributes?: Record<string, VariantAttr[]>
 }
 
 type Stats = {
@@ -68,6 +75,50 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   confirmed:       { label: 'Bekræftet',        color: 'bg-blue-50 text-blue-700 border-blue-200'       },
   rejected:        { label: 'Afvist',           color: 'bg-gray-100 text-gray-500 border-gray-200'      },
   product_created: { label: 'Produkt oprettet', color: 'bg-green-50 text-green-700 border-green-200'    },
+}
+
+// ── Varianter: gæt egenskaber ud fra leverandørdata eller forskellen i navnene ──
+type VariantAttr = { name: string; value: string }
+
+const COLOR_RE = /^(rød|røde|rødt|blå|blåt|grøn|grønt|sort|sorte|hvid|hvide|hvidt|gul|gule|grå|brun|orange|lilla|pink|rosa|beige|navy|turkis|sølv|guld|red|blue|green|black|white|yellow|grey|gray|brown|silver|gold|marineblå|mørkeblå|lyseblå)$/i
+const SIZE_RE  = /\d|^(xxs|xs|s|m|l|xl|xxl|xxxl|small|medium|large|lille|stor|mini|maxi)$/i
+
+function inferVariantSetup(members: MatchMember[]): { names: string[]; values: Record<string, Record<string, string>>; base: string } {
+  const values: Record<string, Record<string, string>> = {}
+
+  // 1) Leverandørens egne variant-egenskaber (Palby, Kap-Horn)
+  const names: string[] = []
+  for (const m of members) {
+    const attrs = m.raw_data.supplier_variant_attributes
+    if (!Array.isArray(attrs)) continue
+    for (const a of attrs as { name?: unknown; value?: unknown }[]) {
+      if (typeof a?.name !== 'string' || typeof a?.value !== 'string' || !a.name.trim()) continue
+      const n = a.name.trim()
+      if (!names.includes(n)) names.push(n)
+      ;(values[m.id] ??= {})[n] = a.value.trim()
+    }
+  }
+
+  // 2) Fælles ord i navnene = produktnavnet; resten = det der adskiller varianterne
+  const tokens = members.map(m => (m.normalized_name ?? '').split(/\s+/).filter(Boolean))
+  const lower  = tokens.map(t => t.map(w => w.toLowerCase()))
+  const common = (tokens[0] ?? []).filter((w, i) => lower.every(l => l.includes(lower[0][i])))
+  const commonSet = new Set(common.map(w => w.toLowerCase()))
+  const base = common.join(' ')
+
+  if (names.length === 0) {
+    // Hvert ord der adskiller sig, sorteres i Farve, Størrelse eller (ellers) Variant
+    const kind = (w: string) => COLOR_RE.test(w) ? 'Farve' : SIZE_RE.test(w) ? 'Størrelse' : 'Variant'
+    const used = new Set<string>()
+    members.forEach((m, i) => {
+      const byKind: Record<string, string[]> = {}
+      for (const w of tokens[i]) if (!commonSet.has(w.toLowerCase())) (byKind[kind(w)] ??= []).push(w)
+      for (const [k, ws] of Object.entries(byKind)) { used.add(k); (values[m.id] ??= {})[k] = ws.join(' ') }
+    })
+    for (const k of ['Størrelse', 'Farve', 'Variant']) if (used.has(k)) names.push(k)
+  }
+  if (names.length === 0) names.push('Variant')
+  return { names, values, base }
 }
 
 function fmt(val: unknown, fallback = '—'): string {
@@ -220,12 +271,20 @@ function GroupCard({
   onUpdate,
 }: {
   group:    MatchGroup
-  onUpdate: (id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[]; member_ids?: string[] }) => Promise<void>
+  onUpdate: (id: string, patch: GroupPatch) => Promise<string | null>
 }) {
-  const [editName,        setEditName]        = useState(group.suggested_name ?? '')
+  const [editName,        setEditName]        = useState(() => {
+    // Variant-grupper: start med det fælles navn (uden størrelse/farve), hvis forslaget bare er én af varernes navne
+    const variantDefault = group.create_as === 'variants' || (!group.create_as && (group.match_method === 'variant' || group.match_method === 'parent_sku'))
+    const base = variantDefault && group.members.length > 1 ? inferVariantSetup(group.members).base : ''
+    const s = group.suggested_name ?? ''
+    return base && (!s.trim() || group.members.some(m => m.normalized_name === s)) ? base : s
+  })
   const [loading,         setLoading]         = useState(false)
   const [msg,             setMsg]             = useState<string | null>(null)
-  const [showMembers,     setShowMembers]     = useState(true)
+  // I variant-tilstand viser egenskabstabellen varerne — detaljelisten starter derfor foldet sammen
+  const [showMembers,     setShowMembers]     = useState(() =>
+    !(group.members.length > 1 && (group.create_as === 'variants' || (!group.create_as && (group.match_method === 'variant' || group.match_method === 'parent_sku')))))
   const [detailMember,    setDetailMember]    = useState<MatchMember | null>(null)
   const [rejectMode,      setRejectMode]      = useState(false)
   const [badEanSuppliers, setBadEanSuppliers] = useState<Set<string>>(new Set())
@@ -233,20 +292,52 @@ function GroupCard({
     () => new Set(group.members.map(m => m.id))
   )
 
+  // Samme vare (ét produkt, flere leverandører) eller varianter (ét produkt, flere udgaver)
+  const [mode, setMode] = useState<'same' | 'variants'>(
+    () => group.create_as ?? (group.match_method === 'variant' || group.match_method === 'parent_sku' ? 'variants' : 'same'))
+  const setup = useMemo(() => inferVariantSetup(group.members), [group.members])
+  const [attrNames,  setAttrNames]  = useState<string[]>(() => setup.names)
+  const [attrValues, setAttrValues] = useState<Record<string, Record<string, string>>>(() => setup.values)
+  const selectedMembers = group.members.filter(m => selectedIds.has(m.id))
+
+  function chooseMode(next: 'same' | 'variants') {
+    setMode(next)
+    // Produktnavnet for varianter er det fælles navn (uden størrelse/farve)
+    if (next === 'variants' && setup.base && (!editName.trim() || group.members.some(m => m.normalized_name === editName))) {
+      setEditName(setup.base)
+    }
+  }
+  const memberAttrs = (id: string): VariantAttr[] =>
+    attrNames.map(n => ({ name: n.trim(), value: (attrValues[id]?.[n] ?? '').trim() })).filter(a => a.name && a.value)
+  const attrKey = (id: string) => JSON.stringify(memberAttrs(id).map(a => [a.name.toLowerCase(), a.value.toLowerCase()]).sort())
+  const missingAttrs  = selectedMembers.filter(m => memberAttrs(m.id).length === 0)
+  const variantCount  = new Set(selectedMembers.map(m => attrKey(m.id))).size
+  const sameSupplierDupes = selectedMembers.some((m, i) =>
+    selectedMembers.some((o, j) => j > i && o.supplier_id === m.supplier_id && attrKey(o.id) === attrKey(m.id)))
+
   const conf     = CONFIDENCE_LABELS[group.match_confidence] ?? CONFIDENCE_LABELS.low
   const isSingle = group.match_method === 'single'
   const isEan    = group.match_method === 'ean'
 
   async function handleConfirm() {
     if (selectedIds.size === 0) { setMsg('Vælg mindst ét produkt'); return }
+    if (mode === 'variants') {
+      if (!editName.trim()) { setMsg('Skriv produktnavnet (fælles for alle varianter)'); return }
+      if (missingAttrs.length > 0) { setMsg('Udfyld mindst én egenskab for hver variant'); return }
+    }
     setLoading(true)
     setMsg(null)
-    await onUpdate(group.id, {
+    const err = await onUpdate(group.id, {
       status:        'confirmed',
       suggested_name: editName,
       member_ids:    [...selectedIds],
+      create_as:     group.members.length > 1 ? mode : undefined,
+      member_attributes: mode === 'variants'
+        ? Object.fromEntries(selectedMembers.map(m => [m.id, memberAttrs(m.id)]))
+        : undefined,
     })
-    setMsg('Bekræftet')
+    if (err) { setMsg(`Fejl: ${err}`); setLoading(false); return }
+    setMsg(mode === 'variants' ? `Bekræftet — oprettes som ét produkt med ${variantCount} varianter` : 'Bekræftet')
     setShowMembers(false)
     setLoading(false)
   }
@@ -335,10 +426,33 @@ function GroupCard({
               </div>
             )}
 
+            {/* Samme vare eller varianter? */}
+            {!isActioned && group.members.length > 1 && (
+              <div className="mb-3">
+                <p className="text-xs font-medium text-gray-700 mb-1.5">Hvordan hører varerne sammen?</p>
+                <div className="grid sm:grid-cols-2 gap-2" role="radiogroup">
+                  {([
+                    ['same',     '🟰 Samme vare',  'Præcis den samme vare — bare fra flere leverandører. Bliver til ét produkt.'],
+                    ['variants', '🔀 Varianter',   'Samme produkt i forskellige udgaver (fx størrelse eller farve). Bliver til ét produkt, hvor kunden vælger variant.'],
+                  ] as const).map(([value, title, text]) => (
+                    <button key={value} type="button" role="radio" aria-checked={mode === value}
+                      onClick={() => chooseMode(value)}
+                      className={`text-left rounded-lg border px-3 py-2 transition-colors ${
+                        mode === value ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <span className="block text-sm font-medium text-gray-900">{title}</span>
+                      <span className="block text-xs text-gray-500 leading-snug">{text}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Foreslået navn — editable */}
             {!isActioned && (
               <div className="mb-3">
-                <label className="block text-xs text-gray-500 mb-1">Foreslået produktnavn</label>
+                <label className="block text-xs text-gray-500 mb-1">
+                  {mode === 'variants' && group.members.length > 1 ? 'Produktnavn (fælles for alle varianter — uden størrelse/farve)' : 'Foreslået produktnavn'}
+                </label>
                 <div className="flex gap-2">
                   <input
                     type="text"
@@ -452,9 +566,87 @@ function GroupCard({
                 })}
                 {!isActioned && selectedIds.size < group.members.length && (
                   <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                    {group.members.length - selectedIds.size} produkt(er) frigøres til staging ved bekræftelse
+                    {group.members.length - selectedIds.size} vare(r) uden flueben tages ud af gruppen og havner under Nye varer
                   </p>
                 )}
+              </div>
+            )}
+
+            {/* Varianter: hvad adskiller dem? */}
+            {!isActioned && mode === 'variants' && group.members.length > 1 && selectedMembers.length > 0 && (
+              <div className="mt-3 border border-blue-200 rounded-lg overflow-hidden">
+                <div className="bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                  <span className="font-medium">Hvad adskiller varianterne?</span> Angiv egenskaben (fx Størrelse, Farve) og værdien for hver vare.
+                  Varer med samme værdier — fx samme størrelse fra to leverandører — bliver til én variant med flere leverandører.
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-gray-100 bg-white">
+                        <th className="text-left font-medium text-gray-500 px-3 py-2">Vare</th>
+                        {attrNames.map((n, i) => (
+                          <th key={i} className="px-2 py-1.5 font-normal min-w-[8rem]">
+                            <div className="flex items-center gap-1">
+                              <input value={n} placeholder="Egenskab" aria-label="Navn på egenskab"
+                                onChange={e => {
+                                  const v = e.target.value
+                                  setAttrNames(prev => prev.map((x, j) => j === i ? v : x))
+                                  setAttrValues(prev => Object.fromEntries(Object.entries(prev).map(([id, vals]) => {
+                                    const { [n]: old, ...rest } = vals
+                                    return [id, old !== undefined ? { ...rest, [v]: old } : rest]
+                                  })))
+                                }}
+                                className="w-full px-2 py-1 font-medium text-gray-800 border border-gray-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                              {attrNames.length > 1 && (
+                                <button type="button" title="Fjern egenskab" className="text-gray-400 hover:text-red-600 px-1"
+                                  onClick={() => setAttrNames(prev => prev.filter((_, j) => j !== i))}>×</button>
+                              )}
+                            </div>
+                          </th>
+                        ))}
+                        <th className="px-2 py-1.5 w-px">
+                          {attrNames.length < 4 && (
+                            <button type="button" className="whitespace-nowrap text-blue-600 hover:underline"
+                              onClick={() => setAttrNames(prev => [...prev, !prev.includes('Farve') ? 'Farve' : !prev.includes('Størrelse') ? 'Størrelse' : `Egenskab ${prev.length + 1}`])}>
+                              + Egenskab
+                            </button>
+                          )}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {selectedMembers.map(m => {
+                        const missing = memberAttrs(m.id).length === 0
+                        return (
+                          <tr key={m.id} className={missing ? 'bg-red-50/50' : ''}>
+                            <td className="px-3 py-1.5">
+                              <div className="text-gray-800">{m.normalized_name}</div>
+                              <div className="text-gray-400">{m.suppliers?.name ?? '—'} · {m.normalized_sku}</div>
+                            </td>
+                            {attrNames.map((n, i) => (
+                              <td key={i} className="px-2 py-1.5">
+                                <input value={attrValues[m.id]?.[n] ?? ''} placeholder={missing && i === 0 ? 'Mangler' : ''}
+                                  aria-label={`${n || 'Egenskab'} for ${m.normalized_name}`}
+                                  onChange={e => {
+                                    const v = e.target.value
+                                    setAttrValues(prev => ({ ...prev, [m.id]: { ...prev[m.id], [n]: v } }))
+                                  }}
+                                  className={`w-full px-2 py-1 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                                    missing ? 'border-red-300' : 'border-gray-200'}`} />
+                              </td>
+                            ))}
+                            <td />
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="px-3 py-2 border-t border-gray-100 text-xs flex flex-wrap gap-x-4 gap-y-1">
+                  <span className="text-gray-600">Bliver til <strong>{variantCount}</strong> {variantCount === 1 ? 'variant' : 'varianter'}</span>
+                  {missingAttrs.length > 0 && <span className="text-red-600">{missingAttrs.length} vare(r) mangler en værdi</span>}
+                  {sameSupplierDupes && <span className="text-amber-700">⚠ To varer fra samme leverandør har samme værdier — er det virkelig samme variant?</span>}
+                </div>
               </div>
             )}
 
@@ -534,7 +726,9 @@ function GroupCard({
                   disabled={loading}
                   className="px-4 py-1.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
                 >
-                  ✅ Bekræft — samme vare
+                  {mode === 'variants' && group.members.length > 1
+                    ? `✅ Bekræft — ét produkt med ${variantCount} ${variantCount === 1 ? 'variant' : 'varianter'}`
+                    : '✅ Bekræft — samme vare'}
                 </button>
                 <button
                   onClick={handleRejectClick}
@@ -546,9 +740,11 @@ function GroupCard({
               </div>
             )}
 
-            {group.status === 'confirmed' && (
-              <div className="mt-3 text-xs text-blue-600 bg-blue-50 rounded px-3 py-2">
-                Gå til <a href="/admin/staging" className="font-medium underline">Til gennemgang</a> for at oprette produktet
+            {group.status === 'confirmed' && !group.product_id && (
+              <div className="mt-3 text-xs text-blue-700 bg-blue-50 rounded px-3 py-2">
+                {group.create_as === 'variants' || (!group.create_as && (group.match_method === 'variant' || group.match_method === 'parent_sku'))
+                  ? 'Oprettes som ét produkt med varianter'
+                  : 'Oprettes som ét produkt med flere leverandører'} næste gang pipelinen kører (&quot;Kør igen&quot; øverst).
               </div>
             )}
 
@@ -902,13 +1098,20 @@ export default function MatchingPage() {
 
   useEffect(() => { fetchGroups() }, [fetchGroups])
 
-  async function handleUpdate(id: string, patch: { suggested_name?: string; status?: string; bad_ean_supplier_ids?: string[]; member_ids?: string[] }) {
-    await fetch(`/api/matching/${id}`, {
-      method:  'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(patch),
-    })
+  // Returnerer en fejltekst, eller null hvis det lykkedes
+  async function handleUpdate(id: string, patch: GroupPatch): Promise<string | null> {
+    try {
+      const res = await fetch(`/api/matching/${id}`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(patch),
+      })
+      if (!res.ok) return (await res.json().catch(() => ({}))).error ?? `Kunne ikke gemme (${res.status})`
+    } catch {
+      return 'Ingen forbindelse'
+    }
     setGroups(prev => prev.map(g => g.id === id ? { ...g, ...patch } as MatchGroup : g))
+    return null
   }
 
   return (
@@ -925,7 +1128,8 @@ export default function MatchingPage() {
           <div className="text-blue-700 mt-1.5 space-y-1.5">
             <p>Hvert kort er et <strong>forslag</strong> om, at nogle leverandørvarer er den samme vare (eller varianter af den, fx samme fender i flere størrelser eller farver).</p>
             <ul className="list-none space-y-0.5">
-              <li>✅ <strong>Bekræft</strong> — de hører sammen. Der oprettes ét produkt med alle leverandørerne.</li>
+              <li>🟰 / 🔀 Vælg først, om det er <strong>samme vare</strong> (fra flere leverandører) eller <strong>varianter</strong> (samme produkt i fx forskellige størrelser eller farver). Ved varianter angiver du, hvad der adskiller dem.</li>
+              <li>✅ <strong>Bekræft</strong> — de hører sammen. Der oprettes ét produkt (med varianter, hvis du valgte det).</li>
               <li>✕ <strong>Afvis</strong> — de hører ikke sammen. Varerne kommer videre til trin 4.</li>
               <li>☑️ Fjern fluebenet ved en vare, der ikke passer ind i gruppen, før du bekræfter.</li>
             </ul>
