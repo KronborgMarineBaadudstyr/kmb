@@ -122,10 +122,6 @@ export async function importColumbus(
   const s           = supplier as SupplierRow
   const SUPPLIER_ID = s.id
 
-  // Notér at en kørsel er startet — er den senere end last_synced_at, blev kørslen ikke færdig (vises på Leverandører)
-  const runStartedAt = new Date().toISOString()
-  s.sync_state = { ...(s.sync_state ?? {}), last_run_started_at: runStartedAt }
-  await supabase.from('suppliers').update({ sync_state: s.sync_state }).eq('id', SUPPLIER_ID)
 
   onProgress({
     stage: 'connecting', total: 0, processed: 0, matched: 0,

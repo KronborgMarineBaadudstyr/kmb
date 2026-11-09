@@ -1,4 +1,5 @@
 import { importPalby } from '@/lib/importers/palby'
+import { trackImport } from '@/lib/import-run'
 import { verifyCronRequest } from '@/lib/cron-auth'
 import { NextResponse } from 'next/server'
 
@@ -14,9 +15,9 @@ export async function GET(request: Request) {
   let matched = 0, updated = 0, staged = 0, errors = 0
 
   try {
-    await importPalby(p => {
-      matched = p.matched; updated = p.updated; staged = p.staged; errors = p.errors
-    }, { delta: false })  // fuld fil — Palby har ikke en stabil delta-produktfil endnu
+    await trackImport({ supplier: 'Palby', source: 'cron', kind: 'products' }, onP => importPalby(onP, { delta: false }), p => {
+      matched = p.matched ?? 0; updated = p.updated ?? 0; staged = p.staged ?? 0; errors = p.errors ?? 0
+    })  // fuld fil — Palby har ikke en stabil delta-produktfil endnu
 
     console.log(`[cron] Palby produktsync done — matched:${matched} updated:${updated} staged:${staged} errors:${errors}`)
     return NextResponse.json({ ok: true, matched, updated, staged, errors })

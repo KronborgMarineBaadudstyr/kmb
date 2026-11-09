@@ -1,4 +1,5 @@
 import { importKapHorn } from '@/lib/importers/kaphorn'
+import { trackImport } from '@/lib/import-run'
 import type { KapHornImportProgress } from '@/lib/importers/kaphorn'
 
 export const dynamic    = 'force-dynamic'
@@ -20,12 +21,11 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await importKapHorn(
+      await trackImport({ supplier: 'Kap-Horn', source: 'manual', kind: 'products', test: !!limit },
+        onP => importKapHorn(onP, { limit: limit ? parseInt(limit, 10) : undefined }),
         (data: KapHornImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
-        },
-        { limit: limit ? parseInt(limit, 10) : undefined }
-      )
+        })
     } catch (e: unknown) {
       ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({
         stage: 'error', total: 0, processed: 0, matched: 0,

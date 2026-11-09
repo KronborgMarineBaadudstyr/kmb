@@ -1,4 +1,5 @@
 import { syncPalbyStock } from '@/lib/importers/palby'
+import { trackImport } from '@/lib/import-run'
 import { verifyCronRequest } from '@/lib/cron-auth'
 import { NextResponse } from 'next/server'
 
@@ -15,9 +16,9 @@ export async function GET(request: Request) {
   let updated = 0, errors = 0
 
   try {
-    await syncPalbyStock(p => {
-      updated = p.updated; errors = p.errors
-    }, { full: false })  // kun delta-filer
+    await trackImport({ supplier: 'Palby', source: 'cron', kind: 'stock' }, onP => syncPalbyStock(onP, { full: false }), p => {
+      updated = p.updated ?? 0; errors = p.errors ?? 0
+    })  // kun delta-filer
 
     console.log(`[cron] Palby lagersync done — updated:${updated} errors:${errors}`)
     return NextResponse.json({ ok: true, updated, errors })
