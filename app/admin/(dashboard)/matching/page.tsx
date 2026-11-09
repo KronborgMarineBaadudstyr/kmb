@@ -574,6 +574,8 @@ type PipelineStep = {
   detail?:  string
 }
 
+const COLLAPSE_KEY = 'kmb_matching_pipeline_collapsed'
+
 const PIPELINE_STAGES = [
   { key: 'categories',   label: '1 · Kategorier',        icon: '🗂' },
   { key: 'matching',     label: '2 · Matching',           icon: '🔗' },
@@ -598,6 +600,18 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
   const runIdRef   = useRef<string | null>(null)
   const loopRef    = useRef(0)   // tracks current auto-loop iteration
   const totalSummaryRef = useRef<Record<string, number>>({})  // accumulated totals across loops
+
+  // Panelet kan minimeres til én linje, så listen får pladsen. Valget huskes i browseren.
+  const [collapsed, setCollapsed] = useState(false)
+  useEffect(() => {
+    try { setCollapsed(localStorage.getItem(COLLAPSE_KEY) === '1') } catch { /* ingen storage */ }
+  }, [])
+  function toggleCollapsed() {
+    setCollapsed(c => {
+      try { localStorage.setItem(COLLAPSE_KEY, c ? '0' : '1') } catch { /* ingen storage */ }
+      return !c
+    })
+  }
 
   // Hent seneste kørsel ved mount
   useEffect(() => {
@@ -739,15 +753,7 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
 
   useEffect(() => () => { esRef.current?.close() }, [])
 
-  return (
-    <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-5 text-white mb-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h3 className="font-semibold text-base mb-0.5">🚀 Onboarding pipeline</h3>
-          <p className="text-gray-400 text-sm">
-            Kører automatisk: kategorioprydning → matching → auto-bekræft → produktoprettelse → kategorisering → match-forslag
-          </p>
-        </div>
+  const runButton = (
         <button
           onClick={startPipeline}
           disabled={running}
@@ -758,6 +764,47 @@ function PipelinePanel({ onDone }: { onDone: () => void }) {
             ? loopIteration > 0 ? `Kører runde ${loopIteration + 1}…` : 'Kører pipeline…'
             : done ? '↺ Kør igen' : '▶ Kør pipeline'}
         </button>
+  )
+
+  if (collapsed) {
+    const current = PIPELINE_STAGES.find(s => steps[s.key]?.status === 'running')
+    const lastRun = lastRunAt ? new Date(lastRunAt).toLocaleString('da-DK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null
+    return (
+      <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl px-4 py-2.5 text-white mb-4 flex items-center gap-3 flex-wrap text-sm">
+        <span className="font-semibold">🚀 Onboarding pipeline</span>
+        <span className="text-gray-400 flex-1 min-w-0 truncate">
+          {running
+            ? `Kører${current ? ` — ${current.label}` : '…'}`
+            : error
+              ? <span className="text-red-300">⚠️ Fejl ved sidste kørsel</span>
+              : done && summary
+                ? <>Sidst kørt {lastRun}{' · '}📦 {summary.products_created ?? 0} produkter oprettet · 🔗 {summary.groups_created ?? 0} nye grupper{(summary.remaining ?? 0) > 0 && <span className="text-orange-300"> · ⏳ {summary.remaining} tilbage</span>}</>
+                : lastRun ? `Sidst kørt ${lastRun}` : 'Ikke kørt endnu'}
+        </span>
+        <button onClick={toggleCollapsed} className="px-3 py-1.5 text-xs text-gray-200 border border-white/20 rounded-lg hover:bg-white/10">
+          Vis detaljer ▾
+        </button>
+        {runButton}
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-gradient-to-r from-gray-900 to-gray-800 rounded-xl p-5 text-white mb-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="font-semibold text-base mb-0.5">🚀 Onboarding pipeline</h3>
+          <p className="text-gray-400 text-sm">
+            Kører automatisk: kategorioprydning → matching → auto-bekræft → produktoprettelse → kategorisering → match-forslag
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={toggleCollapsed} title="Minimér panelet, så listen får mere plads"
+            className="px-3 py-2 text-xs text-gray-200 border border-white/20 rounded-lg hover:bg-white/10">
+            Minimér ▴
+          </button>
+          {runButton}
+        </div>
       </div>
 
       {/* Step progress */}
@@ -864,22 +911,24 @@ export default function MatchingPage() {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* ── Header ── */}
-      <div className="border-b border-gray-200 bg-white px-6 py-4 shrink-0">
+    <div className="min-h-full flex flex-col">
+      {/* ── Header (scroller væk med siden, så listen får hele skærmen) ── */}
+      <div className="bg-white px-6 pt-4">
         <h2 className="text-xl font-bold text-gray-900 mb-0.5">Produkt match mellem leverandører</h2>
-        <p className="text-sm text-gray-500 mb-1">Find produkter der sælges af flere leverandører — bekræft at de hører sammen, så de samles under ét produkt i kataloget</p>
-        <div className="text-sm text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 mb-4 leading-relaxed">
-          <span className="font-medium text-blue-800">Hvad gør du her?</span>
-          <span className="text-blue-700"> Pipelinen har fundet leverandørprodukter der sandsynligvis er <em>det samme produkt</em> solgt af flere leverandører — eller varianter af samme produkt (f.eks. samme fender i forskellig størrelse eller farve). Bekræft grupperne der er korrekte, og afvis dem der ikke hører sammen. Bekræftede grupper oprettes automatisk som produkter. Resten kan oprettes enkeltvis under <a href="/admin/staging" className="underline font-medium">Opret produkter</a>.</span>
-        </div>
+        <p className="text-sm text-gray-500 mb-2">Find produkter der sælges af flere leverandører — bekræft at de hører sammen, så de samles under ét produkt i kataloget</p>
+        <details className="group text-sm bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 mb-4 leading-relaxed">
+          <summary className="cursor-pointer font-medium text-blue-800 list-none flex items-center gap-1.5 select-none">
+            <span className="transition-transform group-open:rotate-90">▸</span> Hvad gør du her?
+          </summary>
+          <p className="text-blue-700 mt-1.5">Pipelinen har fundet leverandørprodukter der sandsynligvis er <em>det samme produkt</em> solgt af flere leverandører — eller varianter af samme produkt (f.eks. samme fender i forskellig størrelse eller farve). Bekræft grupperne der er korrekte, og afvis dem der ikke hører sammen. Bekræftede grupper oprettes automatisk som produkter. Resten kan oprettes enkeltvis under <a href="/admin/staging" className="underline font-medium">Opret produkter</a>.</p>
+        </details>
 
         {/* Pipeline panel */}
         <PipelinePanel onDone={fetchGroups} />
 
         {/* Stats */}
         {stats && (
-          <div className="flex gap-3 flex-wrap text-sm mb-4">
+          <div className="flex gap-3 flex-wrap text-sm mb-3">
             {[
               { label: 'Afventer gennemgang',  value: stats.pending,    color: 'text-orange-700' },
               { label: 'EAN-match (afventer)', value: stats.high,       color: 'text-green-700'  },
@@ -897,8 +946,11 @@ export default function MatchingPage() {
           </div>
         )}
 
-        {/* Filter tabs */}
-        <div className="flex gap-0 rounded-lg border border-gray-200 overflow-hidden w-fit text-sm">
+      </div>
+
+      {/* Filter tabs — bliver stående øverst, når man scroller i listen */}
+      <div className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-gray-200 px-6 py-2.5">
+        <div className="flex gap-0 rounded-lg border border-gray-200 overflow-hidden w-fit max-w-full overflow-x-auto text-sm bg-white">
           {TABS.map(tab => {
             const count = stats ? (
               tab.key === 'all'       ? stats.pending :
@@ -937,7 +989,7 @@ export default function MatchingPage() {
       </div>
 
       {/* ── List ── */}
-      <div className="flex-1 overflow-auto px-6 py-4">
+      <div className="flex-1 px-6 py-4">
         {loading ? (
           <div className="text-center text-gray-400 py-16">Henter grupper...</div>
         ) : groups.length === 0 ? (
@@ -947,7 +999,7 @@ export default function MatchingPage() {
             <div className="text-sm">Kør pipeline ovenfor for at importere og matche leverandørprodukter</div>
           </div>
         ) : (
-          <div className="space-y-3 max-w-4xl">
+          <div className="space-y-3 max-w-5xl">
             {groups.map(g => (
               <GroupCard
                 key={g.id}
@@ -961,7 +1013,7 @@ export default function MatchingPage() {
 
       {/* ── Pagination ── */}
       {totalPages > 1 && (
-        <div className="border-t border-gray-200 bg-white px-6 py-3 flex items-center justify-between shrink-0">
+        <div className="sticky bottom-0 z-20 border-t border-gray-200 bg-white/95 backdrop-blur px-6 py-3 flex items-center justify-between">
           <p className="text-sm text-gray-500">
             Side {page} / {totalPages} — {total.toLocaleString('da-DK')} leverandørgrupperinger
           </p>
