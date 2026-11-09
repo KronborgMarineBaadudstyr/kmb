@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useCart } from '../../_cart'
+import { compareAttrValues, orderAttributeNames, type AttrOrder } from '@/lib/variant-attributes'
 
 type Variant = {
   id:                 string
@@ -21,27 +22,27 @@ type Props = {
   productName: string
   basePrice:   number | null
   image?:      string | null
+  attrOrder?:  AttrOrder      // rækkefølge fra Sortiment → Variant-egenskaber
 }
 
 function fmtPrice(n: number) {
   return n.toLocaleString('da-DK', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' kr'
 }
 
-export function VariantPicker({ variants, productId, productName, basePrice, image }: Props) {
+export function VariantPicker({ variants, productId, productName, basePrice, image, attrOrder = [] }: Props) {
   const { add } = useCart()
   const [selected, setSelected] = useState<string | null>(null)
   const [toasted, setToasted]   = useState(false)
 
+  // Build selection map: attrName → chosen value (første variant i rækkefølgen er valgt fra start)
+  const [selections, setSelections] = useState<Record<string, string>>(() =>
+    Object.fromEntries((variants[0]?.attributes ?? []).map(a => [a.name, a.value])))
+
+  // Hooks skal kaldes før en tidlig return
   if (variants.length === 0) return null
 
   // Group attribute names
-  const attrNames = [...new Set(variants.flatMap(v => v.attributes.map(a => a.name)))]
-
-  // Build selection map: attrName → chosen value
-  const [selections, setSelections] = useState<Record<string, string>>(() => {
-    const first = variants[0]
-    return Object.fromEntries(first.attributes.map(a => [a.name, a.value]))
-  })
+  const attrNames = orderAttributeNames([...new Set(variants.flatMap(v => v.attributes.map(a => a.name)))], attrOrder)
 
   // Find variant that matches all current selections
   const matched = variants.find(v =>
@@ -70,7 +71,8 @@ export function VariantPicker({ variants, productId, productName, basePrice, ima
   return (
     <div className="ls-varpicker">
       {attrNames.map(attrName => {
-        const values = [...new Set(variants.map(v => v.attributes.find(a => a.name === attrName)?.value).filter(Boolean))] as string[]
+        const values = ([...new Set(variants.map(v => v.attributes.find(a => a.name === attrName)?.value).filter(Boolean))] as string[])
+          .sort((a, b) => compareAttrValues(attrName, a, b, attrOrder))
         return (
           <div key={attrName} className="ls-varpicker-group">
             <div className="ls-varpicker-label">

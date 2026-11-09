@@ -65,3 +65,43 @@ export function canonicalValue(attrName: string, value: string, defs: VariantAtt
   const hit = d.values.find(v => v.value.toLowerCase() === w || v.synonyms.some(s => s.toLowerCase() === w))
   return hit ? hit.value : value
 }
+
+// ── Rækkefølge (shoppens variantvælger) ─────────────────────────────────────
+// Egenskaber vises i listens rækkefølge (Størrelse før Farve …), værdier i den rækkefølge de står
+// under egenskaben (S før M før L). Ukendte værdier kommer bagefter i "naturlig" orden (8mm før 10mm).
+
+export type AttrOrder = { name: string; values: string[] }[]
+
+export const toAttrOrder = (defs: Pick<VariantAttributeDef, 'name' | 'values'>[]): AttrOrder =>
+  defs.map(d => ({ name: d.name, values: d.values.map(v => v.value) }))
+
+const natural = (a: string, b: string) => a.localeCompare(b, 'da', { numeric: true, sensitivity: 'base' })
+const findAttr = (order: AttrOrder, name: string) => order.find(o => o.name.toLowerCase() === name.toLowerCase())
+
+export function orderAttributeNames(names: string[], order: AttrOrder): string[] {
+  const idx = (n: string) => { const i = order.findIndex(o => o.name.toLowerCase() === n.toLowerCase()); return i < 0 ? Infinity : i }
+  return [...names].sort((a, b) => idx(a) - idx(b) || natural(a, b))
+}
+
+export function compareAttrValues(attrName: string, a: string, b: string, order: AttrOrder): number {
+  const vals = (findAttr(order, attrName)?.values ?? []).map(v => v.toLowerCase())
+  const ia = vals.indexOf(a.toLowerCase()), ib = vals.indexOf(b.toLowerCase())
+  if (ia >= 0 || ib >= 0) return (ia < 0 ? Infinity : ia) - (ib < 0 ? Infinity : ib) || natural(a, b)
+  return natural(a, b)
+}
+
+export function sortVariantsByAttributes<T extends { attributes: { name: string; value: string }[] }>(variants: T[], order: AttrOrder): T[] {
+  const names = orderAttributeNames([...new Set(variants.flatMap(v => v.attributes.map(a => a.name)))], order)
+  const valueOf = (v: T, n: string) => v.attributes.find(a => a.name === n)?.value
+  return [...variants].sort((x, y) => {
+    for (const n of names) {
+      const a = valueOf(x, n), b = valueOf(y, n)
+      if (a === b) continue
+      if (a === undefined) return 1
+      if (b === undefined) return -1
+      const c = compareAttrValues(n, a, b, order)
+      if (c !== 0) return c
+    }
+    return 0
+  })
+}
