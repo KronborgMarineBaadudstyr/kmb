@@ -59,7 +59,8 @@ function getLastSummary(s: Supplier): ImportSummary | null {
   return (s.sync_state?.last_import_summary as ImportSummary) ?? null
 }
 
-function saveImportSummary(supplierId: string, data: ImportProgress) {
+// Gemmer sammendraget og venter på svaret — ellers kan listen genindlæses før det er gemt
+async function saveImportSummary(supplierId: string, data: ImportProgress) {
   const summary: ImportSummary = {
     stage:     data.stage as 'done' | 'error',
     message:   data.message,
@@ -70,11 +71,11 @@ function saveImportSummary(supplierId: string, data: ImportProgress) {
     errors:    data.errors,
     timestamp: new Date().toISOString(),
   }
-  fetch(`/api/suppliers/${supplierId}`, {
+  await fetch(`/api/suppliers/${supplierId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sync_state: { last_import_summary: summary } }),
-  })
+  }).catch(() => {})
 }
 
 function ErrorLogPopover({ errors }: { errors: string[] }) {
@@ -105,6 +106,7 @@ export default function SuppliersPage() {
   const [selectedFile, setSelectedFile] = useState<Record<string, File>>({})
   const [savingPrio,   setSavingPrio]   = useState(false)
   const esRef = useRef<EventSource | null>(null)
+  const progressRef = useRef<ImportProgress | null>(null)   // seneste status, hvis forbindelsen afbrydes
 
   async function movePriority(id: string, direction: 'up' | 'down') {
     const sorted = [...suppliers].sort((a, b) => (a.global_priority ?? 999) - (b.global_priority ?? 999))
@@ -172,23 +174,33 @@ export default function SuppliersPage() {
 
     const es = new EventSource(url)
     esRef.current = es
+    progressRef.current = null
 
     es.onmessage = (e) => {
       const data: ImportProgress = JSON.parse(e.data)
+      progressRef.current = data
       setProgress(data)
       if (data.stage === 'done' || data.stage === 'error') {
         es.close()
         setLastImported(supplier.id)
         setImporting(null)
-        saveImportSummary(supplier.id, data)
-        reloadSuppliers()
+        saveImportSummary(supplier.id, data).then(reloadSuppliers)
       }
     }
 
     es.onerror = () => {
+      // Forbindelsen blev afbrudt før importen meldte færdig — typisk fordi den ramte Vercels tidsgrænse (5 min)
       es.close()
       setImporting(null)
-      setProgress(p => p ? { ...p, stage: 'error', message: 'Forbindelsesfejl' } : null)
+      setLastImported(supplier.id)
+      const p = progressRef.current
+      const aborted: ImportProgress = {
+        ...(p ?? { total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0 }),
+        stage: 'error',
+        message: `Importen blev afbrudt${p?.processed ? ` efter ${p.processed.toLocaleString('da-DK')} af ${p.total.toLocaleString('da-DK')} varer` : ''} — sandsynligvis ramte den tidsgrænsen på 5 minutter. Det der nåede at blive importeret er gemt, men resten mangler.`,
+      }
+      setProgress(aborted)
+      saveImportSummary(supplier.id, aborted).then(reloadSuppliers)
     }
   }
 
@@ -236,8 +248,7 @@ export default function SuppliersPage() {
           if (data.stage === 'done' || data.stage === 'error') {
             setLastImported(supplier.id)
             setImporting(null)
-            saveImportSummary(supplier.id, data)
-            reloadSuppliers()
+            saveImportSummary(supplier.id, data).then(reloadSuppliers)
           }
         }
       }
@@ -328,6 +339,18 @@ s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
                           ? new Date(s.last_synced_at).toLocaleString('da-DK', { hour12: false })
                           : <span className="text-orange-500">Aldrig</span>}
                       </div>
+                      {(() => {
+                        // Importen noterer hvornår den starter — er det senere end sidste fuldførte, blev den ikke færdig
+                        const started = typeof s.sync_state?.last_run_started_at === 'string' ? s.sync_state.last_run_started_at : null
+                        if (!started || importing === s.id) return null
+                        if (s.last_synced_at && new Date(s.last_synced_at) >= new Date(started)) return null
+                        return (
+                          <div className="text-orange-600">
+                            <span className="text-gray-400 w-28 inline-block">Ufuldført</span>
+                            Kørsel startet {new Date(started).toLocaleString('da-DK', { hour12: false })} blev ikke færdig (fx stoppet af tidsgrænsen på 5 min)
+                          </div>
+                        )
+                      })()}
                       {s.notes && (
                         <div className="text-xs text-gray-400 mt-2 max-w-xl">{s.notes}</div>
                       )}
