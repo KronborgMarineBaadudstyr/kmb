@@ -106,6 +106,14 @@ export async function importEngholm(
 ): Promise<void> {
   const supabase = createServiceClient()
 
+  // Notér at en kørsel er startet — er den senere end last_synced_at, blev kørslen ikke færdig (vises på Leverandører)
+  {
+    const { data: sup } = await supabase.from('suppliers').select('sync_state').eq('id', SUPPLIER_ID).single()
+    await supabase.from('suppliers')
+      .update({ sync_state: { ...((sup?.sync_state ?? {}) as Record<string, unknown>), last_run_started_at: new Date().toISOString() } })
+      .eq('id', SUPPLIER_ID)
+  }
+
   onProgress({
     stage: 'fetching', total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0,
     message: 'Henter produkter fra Engholm API...',
@@ -339,18 +347,20 @@ export async function importEngholm(
   // Opdater last_synced_at + gem fejllog i sync_state
   const { data: supRow } = await supabase.from('suppliers').select('sync_state').eq('id', SUPPLIER_ID).single()
   const existingState = (supRow?.sync_state ?? {}) as Record<string, unknown>
-  await supabase
+  const { error: syncErr } = await supabase
     .from('suppliers')
     .update({
       last_synced_at: new Date().toISOString(),
       sync_state: { ...existingState, last_import_errors: errorLog.slice(0, 500) },
     })
     .eq('id', SUPPLIER_ID)
+  if (syncErr) console.error('[engholm] kunne ikke gemme sync-tidspunkt:', syncErr.message)
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 
   onProgress({
     stage: 'done', total, processed, matched, staged, updated, errors,
-    message: `Færdig! ${matched} matchet · ${updated} opdateret · ${staged} afventer gennemgang · ${errors} fejl`,
+    message: `Færdig! ${matched} matchet · ${updated} opdateret · ${staged} afventer gennemgang · ${errors} fejl`
+      + (syncErr ? ' — OBS: "Sidst synkret" kunne ikke gemmes' : ''),
   })
 }
