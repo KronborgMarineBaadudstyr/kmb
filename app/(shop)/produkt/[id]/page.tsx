@@ -9,6 +9,8 @@ import { ProductCard } from '../../_product-card'
 import { AdminEdit } from './_admin-edit'
 import { getCurrentAdmin } from '@/lib/admin-auth'
 import { slugify } from '@/lib/shop/categories'
+import { getAttrOrder } from '@/lib/shop/variant-order'
+import { sortVariantsByAttributes } from '@/lib/variant-attributes'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,8 +99,9 @@ async function RelatedProducts({ id, category }: { id: string; category: string 
 export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
 
-  // Produkt, varianter og admin-tjek hentes samtidig
-  const [p, variants, admin] = await Promise.all([getProduct(id), getVariants(id), getCurrentAdmin()])
+  // Produkt, varianter, admin-tjek og variant-rækkefølgen (Sortiment → Variant-egenskaber) hentes samtidig
+  const [p, rawVariants, admin, attrOrder] = await Promise.all([getProduct(id), getVariants(id), getCurrentAdmin(), getAttrOrder()])
+  const variants = sortVariantsByAttributes(rawVariants, attrOrder)
 
   if (!p) {
     return (
@@ -188,6 +191,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
                 productName={p.name}
                 basePrice={p.sales_price ?? null}
                 image={primaryImage}
+                attrOrder={attrOrder}
               />
             : <AddToCartBtn
                 product={{ id: p.id, name: p.name, price: p.sales_price ?? 0, image: primaryImage }}
