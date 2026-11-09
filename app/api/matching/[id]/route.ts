@@ -18,6 +18,8 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     notes?:                 string
     bad_ean_supplier_ids?:  string[]  // leverandør-IDs med dokumenteret forkert EAN
     member_ids?:            string[]  // kun disse staging-rækker forbliver i gruppen; resten frigøres
+    create_as?:             'same' | 'variants' | null      // migration 064
+    member_attributes?:     Record<string, { name: string; value: string }[]> | null
   }
 
   const allowed = ['pending_review', 'confirmed', 'rejected', 'product_created']
@@ -30,6 +32,19 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   if (body.status          !== undefined) update.status          = body.status
   if (body.notes           !== undefined) update.notes           = body.notes
 
+  // Samme vare eller varianter (+ egenskaber pr. vare) — se migration 064
+  if (body.create_as !== undefined) {
+    if (body.create_as !== null && body.create_as !== 'same' && body.create_as !== 'variants') {
+      return NextResponse.json({ error: 'Ugyldig create_as' }, { status: 400 })
+    }
+    update.create_as = body.create_as
+  }
+  if (body.member_attributes !== undefined) {
+    const attrs = cleanMemberAttributes(body.member_attributes, body.member_ids)
+    if (attrs === 'invalid') return NextResponse.json({ error: 'Ugyldige variant-egenskaber' }, { status: 400 })
+    update.member_attributes = attrs
+  }
+
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('staging_match_groups')
@@ -38,7 +53,12 @@ export async function PATCH(request: Request, { params }: RouteParams) {
     .select()
     .single()
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (error) {
+    if ((error.code === '42703' || error.code === 'PGRST204') && ('create_as' in update || 'member_attributes' in update)) {
+      return NextResponse.json({ error: 'Kør migration 064 i Supabase for at gemme varianter' }, { status: 503 })
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 })
+  }
 
   // Frigør members der ikke er valgt — sæt match_group_id = null og status = 'pending_review'
   if (body.member_ids) {
@@ -79,4 +99,26 @@ export async function PATCH(request: Request, { params }: RouteParams) {
   }
 
   return NextResponse.json({ ok: true, data })
+}
+
+// Validerer { stagingId: [{name, value}] } — trimmer, dropper tomme værdier og varer der ikke længere er i gruppen
+function cleanMemberAttributes(
+  raw: unknown, keepIds?: string[],
+): Record<string, { name: string; value: string }[]> | null | 'invalid' {
+  if (raw === null) return null
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'invalid'
+  const keep = keepIds ? new Set(keepIds) : null
+  const out: Record<string, { name: string; value: string }[]> = {}
+  for (const [id, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (keep && !keep.has(id)) continue
+    if (!Array.isArray(list) || list.length > 10) return 'invalid'
+    const clean: { name: string; value: string }[] = []
+    for (const a of list) {
+      const name  = typeof a?.name  === 'string' ? a.name.trim().slice(0, 50)   : ''
+      const value = typeof a?.value === 'string' ? a.value.trim().slice(0, 100) : ''
+      if (name && value) clean.push({ name, value })
+    }
+    out[id] = clean
+  }
+  return out
 }

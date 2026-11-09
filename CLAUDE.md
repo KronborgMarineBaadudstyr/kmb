@@ -98,6 +98,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle) ✅ kørt
 - `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()` ✅ kørt
 - `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald) ✅ kørt
+- `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -114,6 +115,7 @@ Rækkefølge og navne (trin-bjælke `_import-flow.tsx` øverst på hver side, sa
 1. **Leverandører** (`/admin/suppliers`) — import af varer/priser/lager
 2. **Import-ændringer** (`/admin/changes`) — prisændringer, nye og udgåede varer fra seneste import
 3. **Saml ens varer** (`/admin/matching`, tidl. "Produkt match") — forslag om samme vare hos flere leverandører; faner: Samme EAN / Lignende navn / Varianter
+   - På hvert kort vælger admin **Samme vare** (ét produkt, flere leverandører) eller **Varianter** (ét produkt med varianter). Ved varianter angives egenskaber pr. vare i en tabel (forudfyldt fra `supplier_variant_attributes` eller forskellen i navnene, `inferVariantSetup()`). Gemmes som `create_as` + `member_attributes` på gruppen; `bulkCreateProductsFromGroups()` laver én variant pr. forskellig egenskabs-kombination (samme variant fra flere leverandører = én variant med flere leverandører, prioritet pr. variant)
 4. **Nye varer** (`/admin/staging`, tidl. "Opret produkter") — varer uden match: opret, tilknyt eller afvis
 - **Automatik-log** (`/admin/auto-log`) — hvad pipelinen selv har gjort
 
