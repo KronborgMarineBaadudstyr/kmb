@@ -97,7 +97,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `060_ai_knowledge.sql` — `ai_knowledge` (butikkens egen viden til AI-assistenten) ✅ kørt
 - `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle) ✅ kørt
 - `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()` ✅ kørt
-- `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald)
+- `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald) ✅ kørt
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -142,7 +142,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
 RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
-EMAIL_FROM=           # Afsender — standard midlertidigt "LoveSailing <onboarding@resend.dev>" (leverer KUN til Resend-kontoens egen e-mail)
+EMAIL_FROM=           # Valgfri. Afsender — standard "LoveSailing <no-reply@lovesailing.dk>" (domænet er verificeret i Resend)
 SETTINGS_ENCRYPTION_KEY= # Valgfri. Krypterer app_settings (ellers afledt af SUPABASE_SERVICE_ROLE_KEY — skift = gemte nøgler skal indtastes igen)
 NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brugeren står på (fx kmb-nine.vercel.app)
 ```
@@ -160,7 +160,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
 - [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
 - [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
-- [ ] **Verificér lovesailing.dk i Resend** — skift derefter afsender til `no-reply@lovesailing.dk` i `lib/shop/email.ts`. Indtil da får kunder og andre admins ingen mails
+- [x] **Verificér lovesailing.dk i Resend** — afsender er `no-reply@lovesailing.dk` (`lib/shop/email.ts`)
 - [x] **Salgsindsigt + AI-assistent** — `/admin/insights` og `/admin/ai` (se afsnit nedenfor)
 - [x] **Egen AI-nøgle til butikken** — `/admin/ai-noegle` (kun ejere); krypteret i `app_settings`, fallback til `ANTHROPIC_API_KEY`
 - [x] **Anthropic SDK 1.x** — `@anthropic-ai/sdk` 1.6 (API-version 2026-10-21: ingen `temperature`/`top_p`/`top_k`, nøglen sendes som `Authorization: Bearer`). AI-chat har server-side fallback ved afvisning
