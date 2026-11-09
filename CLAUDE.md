@@ -98,7 +98,8 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `061_app_settings.sql` — `app_settings` (krypterede indstillinger, fx butikkens Anthropic-nøgle) ✅ kørt
 - `062_fuzzy_matching_v2.sql` — `normalize_for_matching()` v2 + `matching_numbers()`/`numbers_compatible()` (talværn) i `find_fuzzy_staging_matches()` og `auto_match_staging_to_products()` ✅ kørt
 - `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald) ✅ kørt
-- `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer
+- `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer ✅ kørt
+- `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber
 
 ## Cron Jobs (vercel.json)
 | Endpoint | Schedule | Beskrivelse |
@@ -109,6 +110,13 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 | `/api/cron/sync-palby-stock` | 07, 12, 17, 22 dagligt | Palby lager delta-sync |
 | `/api/cron/sync-columbus` | 23:00 dagligt | Columbus Marine produktimport |
 | `/api/cron/sync-kaphorn` | 23:00 dagligt | Kap-Horn produktimport |
+
+## Sortiment (Indstillinger → Sortiment, `/admin/sortiment?tab=…`)
+Erstatter de tidligere sider Kategorier, Produkttyper og Kategori-søgefiltre (gamle URL'er viderestiller). Faner i `sortiment/_tabs/`:
+1. **Kategorier** (`categories` tabel) — kategorier/underkategorier + nøgleord til auto-kategorisering
+2. **Varetyper** (`product_types`, tidl. "Produkttyper") — nøgleord, kategori og variant-egenskaber pr. type; egenskaber vælges fra den fælles liste (enhed er valgfri — uden enhed bruges de kun som forslag)
+3. **Variant-egenskaber** (`variant_attributes`, migration 065) — fælles liste: navn, enhed, værdier i visningsrækkefølge med synonymer ("Marineblå = navy, marine"). `lib/variant-attributes.ts`: `classifyWord()` / `canonicalValue()`. Bruges af Saml ens varer (forslag, rullelister, synonymer oversættes) og søgefiltre
+4. **Søgefiltre** (`category_attribute_filters`) — hvilke egenskaber der er filtre pr. kategori i shoppen
 
 ## Import-flow i admin (menu → Import)
 Rækkefølge og navne (trin-bjælke `_import-flow.tsx` øverst på hver side, samme som menuen i `_sidebar.tsx`):

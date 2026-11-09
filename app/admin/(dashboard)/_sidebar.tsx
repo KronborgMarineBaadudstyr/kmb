@@ -44,10 +44,8 @@ const navEntries: NavEntry[] = [
   ]},
 
   { group: 'Indstillinger', icon: '⚙️', items: [
-    { href: '/admin/categories',       label: 'Kategorier',          icon: '📂' },
+    { href: '/admin/sortiment',        label: 'Sortiment',           icon: '📂' },   // kategorier, varetyper, variant-egenskaber, søgefiltre
     { href: '/admin/brands',           label: 'Brands',              icon: '🔖' },
-    { href: '/admin/category-filters', label: 'Kategori-søgefiltre', icon: '🔍' },
-    { href: '/admin/product-types',    label: 'Produkttyper',        icon: '🏷' },
   ]},
 ]
 

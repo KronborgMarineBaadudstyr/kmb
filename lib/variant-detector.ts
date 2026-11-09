@@ -31,6 +31,7 @@ export function extractVariantValues(
 ): Record<string, string> {
   const result: Record<string, string> = {}
   for (const attr of attrs) {
+    if (!attr.unit?.trim()) continue   // egenskaber uden enhed (fx Farve) kan ikke findes som tal i navnet
     const regex = new RegExp(`(\\d+(?:[.,]\\d+)?\\s*${escapeRegex(attr.unit)})\\b`, 'i')
     const match = name.match(regex)
     if (match) result[attr.name] = match[1].replace(/\s+/g, '').toLowerCase()
@@ -43,6 +44,7 @@ export function extractVariantValues(
 export function getBaseName(name: string, attrs: VariantAttribute[]): string {
   let base = name
   for (const attr of attrs) {
+    if (!attr.unit?.trim()) continue
     const regex = new RegExp(`\\s*\\d+(?:[.,]\\d+)?\\s*${escapeRegex(attr.unit)}\\b`, 'gi')
     base = base.replace(regex, '')
   }

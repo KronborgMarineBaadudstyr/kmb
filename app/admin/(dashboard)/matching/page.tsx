@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { classifyWord, canonicalValue, type VariantAttributeDef } from '@/lib/variant-attributes'
 import { ImportFlow } from '../_import-flow'
 
 // ── Types ──
@@ -83,41 +84,59 @@ type VariantAttr = { name: string; value: string }
 const COLOR_RE = /^(rød|røde|rødt|blå|blåt|grøn|grønt|sort|sorte|hvid|hvide|hvidt|gul|gule|grå|brun|orange|lilla|pink|rosa|beige|navy|turkis|sølv|guld|red|blue|green|black|white|yellow|grey|gray|brown|silver|gold|marineblå|mørkeblå|lyseblå)$/i
 const SIZE_RE  = /\d|^(xxs|xs|s|m|l|xl|xxl|xxxl|small|medium|large|lille|stor|mini|maxi)$/i
 
-function inferVariantSetup(members: MatchMember[]): { names: string[]; values: Record<string, Record<string, string>>; base: string } {
+function inferVariantSetup(members: MatchMember[], defs: VariantAttributeDef[] = []): { names: string[]; values: Record<string, Record<string, string>>; base: string } {
   const values: Record<string, Record<string, string>> = {}
+  const order = (n: string) => { const i = defs.findIndex(d => d.name.toLowerCase() === n.toLowerCase()); return i < 0 ? 999 : i }
 
-  // 1) Leverandørens egne variant-egenskaber (Palby, Kap-Horn)
+  // 1) Leverandørens egne variant-egenskaber (Palby, Kap-Horn) — værdier oversat til fælles stavemåde
   const names: string[] = []
   for (const m of members) {
     const attrs = m.raw_data.supplier_variant_attributes
     if (!Array.isArray(attrs)) continue
     for (const a of attrs as { name?: unknown; value?: unknown }[]) {
       if (typeof a?.name !== 'string' || typeof a?.value !== 'string' || !a.name.trim()) continue
-      const n = a.name.trim()
+      const raw = a.name.trim()
+      const n = defs.find(d => d.name.toLowerCase() === raw.toLowerCase())?.name ?? raw
       if (!names.includes(n)) names.push(n)
-      ;(values[m.id] ??= {})[n] = a.value.trim()
+      ;(values[m.id] ??= {})[n] = canonicalValue(n, a.value.trim(), defs)
     }
   }
 
-  // 2) Fælles ord i navnene = produktnavnet; resten = det der adskiller varianterne
-  const tokens = members.map(m => (m.normalized_name ?? '').split(/\s+/).filter(Boolean))
+  // 2) Fælles ord i navnene = produktnavnet; resten = det der adskiller varianterne.
+  //    "10 mm" samles til "10mm", så tal med enhed genkendes.
+  const units = new Set(['mm', 'cm', 'm', 'l', 'ml', 'kg', 'g', 'v', 'w', 'a', 'ah', ...defs.map(d => d.unit?.toLowerCase()).filter((u): u is string => !!u)])
+  const split = (name: string) => {
+    const out: string[] = []
+    for (const w of name.split(/\s+/).filter(Boolean)) {
+      const prev = out[out.length - 1]
+      if (prev && /^\d+([.,]\d+)?$/.test(prev) && units.has(w.toLowerCase())) out[out.length - 1] = prev + w
+      else out.push(w)
+    }
+    return out
+  }
+  const tokens = members.map(m => split(m.normalized_name ?? ''))
   const lower  = tokens.map(t => t.map(w => w.toLowerCase()))
   const common = (tokens[0] ?? []).filter((w, i) => lower.every(l => l.includes(lower[0][i])))
   const commonSet = new Set(common.map(w => w.toLowerCase()))
   const base = common.join(' ')
 
   if (names.length === 0) {
-    // Hvert ord der adskiller sig, sorteres i Farve, Størrelse eller (ellers) Variant
-    const kind = (w: string) => COLOR_RE.test(w) ? 'Farve' : SIZE_RE.test(w) ? 'Størrelse' : 'Variant'
+    // Hvert ord der adskiller sig: først de fælles egenskaber (værdier, synonymer, enheder), ellers Farve/Størrelse/Variant
+    const fallback = (w: string) => COLOR_RE.test(w) ? 'Farve' : SIZE_RE.test(w) ? 'Størrelse' : 'Variant'
     const used = new Set<string>()
     members.forEach((m, i) => {
       const byKind: Record<string, string[]> = {}
-      for (const w of tokens[i]) if (!commonSet.has(w.toLowerCase())) (byKind[kind(w)] ??= []).push(w)
+      for (const w of tokens[i]) {
+        if (commonSet.has(w.toLowerCase())) continue
+        const hit = classifyWord(w, defs)
+        const k = hit?.name ?? fallback(w)
+        ;(byKind[k] ??= []).push(hit?.value ?? canonicalValue(k, w, defs))
+      }
       for (const [k, ws] of Object.entries(byKind)) { used.add(k); (values[m.id] ??= {})[k] = ws.join(' ') }
     })
-    for (const k of ['Størrelse', 'Farve', 'Variant']) if (used.has(k)) names.push(k)
+    for (const k of [...used].sort((a, b) => order(a) - order(b) || ['Størrelse', 'Farve', 'Variant'].indexOf(a) - ['Størrelse', 'Farve', 'Variant'].indexOf(b))) names.push(k)
   }
-  if (names.length === 0) names.push('Variant')
+  if (names.length === 0) names.push(defs[0]?.name ?? 'Variant')
   return { names, values, base }
 }
 
@@ -269,14 +288,16 @@ const TABS: { key: TabKey; label: string; status?: string; method?: string; conf
 function GroupCard({
   group,
   onUpdate,
+  attrDefs,
 }: {
   group:    MatchGroup
   onUpdate: (id: string, patch: GroupPatch) => Promise<string | null>
+  attrDefs: VariantAttributeDef[]     // fælles variant-egenskaber (Sortiment)
 }) {
   const [editName,        setEditName]        = useState(() => {
     // Variant-grupper: start med det fælles navn (uden størrelse/farve), hvis forslaget bare er én af varernes navne
     const variantDefault = group.create_as === 'variants' || (!group.create_as && (group.match_method === 'variant' || group.match_method === 'parent_sku'))
-    const base = variantDefault && group.members.length > 1 ? inferVariantSetup(group.members).base : ''
+    const base = variantDefault && group.members.length > 1 ? inferVariantSetup(group.members, attrDefs).base : ''
     const s = group.suggested_name ?? ''
     return base && (!s.trim() || group.members.some(m => m.normalized_name === s)) ? base : s
   })
@@ -295,7 +316,7 @@ function GroupCard({
   // Samme vare (ét produkt, flere leverandører) eller varianter (ét produkt, flere udgaver)
   const [mode, setMode] = useState<'same' | 'variants'>(
     () => group.create_as ?? (group.match_method === 'variant' || group.match_method === 'parent_sku' ? 'variants' : 'same'))
-  const setup = useMemo(() => inferVariantSetup(group.members), [group.members])
+  const setup = useMemo(() => inferVariantSetup(group.members, attrDefs), [group.members, attrDefs])
   const [attrNames,  setAttrNames]  = useState<string[]>(() => setup.names)
   const [attrValues, setAttrValues] = useState<Record<string, Record<string, string>>>(() => setup.values)
   const selectedMembers = group.members.filter(m => selectedIds.has(m.id))
@@ -587,7 +608,7 @@ function GroupCard({
                         {attrNames.map((n, i) => (
                           <th key={i} className="px-2 py-1.5 font-normal min-w-[8rem]">
                             <div className="flex items-center gap-1">
-                              <input value={n} placeholder="Egenskab" aria-label="Navn på egenskab"
+                              <input value={n} placeholder="Egenskab" aria-label="Navn på egenskab" list={`attr-names-${group.id}`}
                                 onChange={e => {
                                   const v = e.target.value
                                   setAttrNames(prev => prev.map((x, j) => j === i ? v : x))
@@ -626,6 +647,12 @@ function GroupCard({
                             {attrNames.map((n, i) => (
                               <td key={i} className="px-2 py-1.5">
                                 <input value={attrValues[m.id]?.[n] ?? ''} placeholder={missing && i === 0 ? 'Mangler' : ''}
+                                  list={`attr-values-${group.id}-${i}`}
+                                  onBlur={e => {
+                                    // Synonymer oversættes til den fælles stavemåde ("navy" → "Marineblå")
+                                    const v = canonicalValue(n, e.target.value, attrDefs)
+                                    if (v !== e.target.value) setAttrValues(prev => ({ ...prev, [m.id]: { ...prev[m.id], [n]: v } }))
+                                  }}
                                   aria-label={`${n || 'Egenskab'} for ${m.normalized_name}`}
                                   onChange={e => {
                                     const v = e.target.value
@@ -641,6 +668,14 @@ function GroupCard({
                       })}
                     </tbody>
                   </table>
+                  <datalist id={`attr-names-${group.id}`}>
+                    {attrDefs.map(d => <option key={d.id} value={d.name} />)}
+                  </datalist>
+                  {attrNames.map((n, i) => (
+                    <datalist key={i} id={`attr-values-${group.id}-${i}`}>
+                      {(attrDefs.find(d => d.name.toLowerCase() === n.trim().toLowerCase())?.values ?? []).map(v => <option key={v.value} value={v.value} />)}
+                    </datalist>
+                  ))}
                 </div>
                 <div className="px-3 py-2 border-t border-gray-100 text-xs flex flex-wrap gap-x-4 gap-y-1">
                   <span className="text-gray-600">Bliver til <strong>{variantCount}</strong> {variantCount === 1 ? 'variant' : 'varianter'}</span>
@@ -1079,6 +1114,12 @@ export default function MatchingPage() {
 
   const tabConfig = TABS.find(t => t.key === activeTab) ?? TABS[0]
 
+  // Fælles variant-egenskaber (Sortiment → Variant-egenskaber) — bruges til forslag på variant-kortene
+  const [attrDefs, setAttrDefs] = useState<VariantAttributeDef[]>([])
+  useEffect(() => {
+    fetch('/api/variant-attributes').then(r => r.json()).then(j => setAttrDefs(j.data ?? [])).catch(() => {})
+  }, [])
+
   const fetchGroups = useCallback(async () => {
     setLoading(true)
     const params = new URLSearchParams({ page: String(page), per_page: '50' })
@@ -1216,9 +1257,10 @@ export default function MatchingPage() {
           <div className="space-y-3 max-w-5xl">
             {groups.map(g => (
               <GroupCard
-                key={g.id}
+                key={`${g.id}-${attrDefs.length}`}
                 group={g}
                 onUpdate={handleUpdate}
+                attrDefs={attrDefs}
               />
             ))}
           </div>

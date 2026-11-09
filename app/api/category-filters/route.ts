@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export async function GET() {
   const supabase = createServiceClient()
 
-  const [{ data: filters }, { data: cats }, { data: variants }] = await Promise.all([
+  const [{ data: filters }, { data: cats }, { data: variants }, { data: globalAttrs }] = await Promise.all([
     supabase
       .from('category_attribute_filters')
       .select('*')
@@ -16,6 +16,7 @@ export async function GET() {
       .order('attribute_name'),
     supabase.rpc('get_all_categories'),
     supabase.from('product_variants').select('attributes').limit(5000),
+    supabase.from('variant_attributes').select('name').order('sort_order'),   // tom før migration 065
   ])
 
   // Kendte kategorier
@@ -34,7 +35,8 @@ export async function GET() {
   }
 
   // Kendte attributnavne fra product_variants.attributes
-  const attrSet = new Set<string>()
+  // + de fælles variant-egenskaber (Sortiment → Variant-egenskaber)
+  const attrSet = new Set<string>(((globalAttrs ?? []) as { name: string }[]).map(a => a.name))
   for (const v of (variants ?? []) as { attributes: { name?: string }[] }[]) {
     for (const a of (v.attributes ?? [])) {
       if (a.name) attrSet.add(a.name)
