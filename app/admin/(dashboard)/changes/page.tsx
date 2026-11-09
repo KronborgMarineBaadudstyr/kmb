@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { ImportFlow } from '../_import-flow'
 import Link from 'next/link'
 
 type ChangeType = 'price_changed' | 'new_product' | 'discontinued'
@@ -124,11 +125,12 @@ export default function ChangesPage() {
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 shrink-0">
+        <ImportFlow className="mb-4" />
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Import-ændringer</h2>
             <p className="text-sm text-gray-500 mt-0.5">
-              Prisændringer, nye og udgåede produkter fra leverandørfeeds
+              Trin 2: Hvad leverandørernes seneste import ændrede — nye priser, nye varer og varer der er udgået
             </p>
           </div>
 

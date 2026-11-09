@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { ImportFlow } from '../_import-flow'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -379,17 +380,18 @@ export default function OpretProdukterPage() {
     <div className="flex flex-col h-full">
 
       {/* Header */}
-      <div className="px-6 pt-6 pb-4 border-b border-gray-200 shrink-0">
-        <h1 className="text-xl font-semibold text-gray-900">Opret produkter</h1>
+      <div className="px-6 pt-4 pb-4 border-b border-gray-200 shrink-0">
+        <ImportFlow className="mb-4" />
+        <h1 className="text-xl font-semibold text-gray-900">Nye varer</h1>
         <p className="text-sm text-gray-500 mt-0.5 mb-3">
-          Produkter fra leverandørerne der endnu ikke er oprettet i kataloget
+          Trin 4: Leverandørvarer, der ikke findes i kataloget endnu, og som systemet ikke kunne parre med noget
         </p>
 
         {/* Workflow explanation */}
         <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 text-sm text-blue-800 leading-relaxed">
           <p className="font-medium mb-1">Hvad gør du her?</p>
           <p className="text-blue-700 text-xs">
-            Disse produkter matchede hverken på EAN eller fuzzy navn mod eksisterende produkter. For hvert produkt kan du:
+            Systemet fandt hverken et produkt med samme stregkode (EAN) eller et med lignende navn. Du afgør, hvad varen er:
           </p>
           <ul className="text-xs text-blue-700 mt-2 space-y-1 list-none">
             <li>✚ <strong>Opret som nyt produkt</strong> — produktet er unikt og skal have sin egen side i kataloget</li>
