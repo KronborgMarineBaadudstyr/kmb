@@ -27,7 +27,7 @@ const STEPS: Step[] = [
   { group: 'Fundament',        label: 'Next.js, Supabase, GitHub og deploy til Vercel',                    status: 'done' },
   { label: 'Admin-login med e-mail og magic link — ejer/admin-roller',                                      status: 'done' },
   { label: 'Database lukket for offentlig adgang (RLS) + login på alle admin-API\'er',                       status: 'done' },
-  { label: 'E-mails fra lovesailing.dk',                                                                     status: 'progress', note: 'midlertidig afsender — domænet skal verificeres i Resend' },
+  { label: 'E-mails fra lovesailing.dk',                                                                     status: 'done' },
 
   // ── Produktdata ──
   { group: 'Produktdata',      label: 'Engangsimport af eksisterende produkter (37.011)',                   status: 'done' },
