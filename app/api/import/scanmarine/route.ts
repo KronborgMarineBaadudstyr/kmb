@@ -1,4 +1,5 @@
 import { importScanmarine } from '@/lib/importers/scanmarine'
+import { trackImport } from '@/lib/import-run'
 import type { ScanmarineImportProgress } from '@/lib/importers/scanmarine'
 
 export const dynamic = 'force-dynamic'
@@ -20,12 +21,11 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await importScanmarine(
+      await trackImport({ supplier: 'Scanmarine', source: 'manual', kind: 'products', test: !!limit },
+        onP => importScanmarine(onP, { limit: limit ? parseInt(limit, 10) : undefined }),
         (data: ScanmarineImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
-        },
-        { limit: limit ? parseInt(limit, 10) : undefined }
-      )
+        })
     } catch (e: unknown) {
       ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({
         stage: 'error', total: 0, processed: 0, matched: 0,

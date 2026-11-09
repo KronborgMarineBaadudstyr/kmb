@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from 'react'
 import { ImportFlow } from '../_import-flow'
+import { scheduleFor } from '@/lib/cron-schedule'
 
 type ImportSummary = {
   stage:     'done' | 'error'
@@ -12,6 +13,20 @@ type ImportSummary = {
   staged:    number
   errors:    number
   timestamp: string
+  started_at?: string                 // gemmes af serveren (lib/import-run.ts)
+  source?:   'manual' | 'cron'
+  kind?:     'products' | 'stock'
+  test?:     boolean
+}
+
+const KIND_LABEL   = { products: 'Produkter', stock: 'Lager' } as const
+const SOURCE_LABEL = { manual: 'Manuel', cron: 'Automatisk' } as const
+const fmtTime = (iso: string) => new Date(iso).toLocaleString('da-DK', { hour12: false, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+function fmtDuration(from?: string, to?: string) {
+  if (!from || !to) return null
+  const sec = Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000)
+  if (!(sec >= 0)) return null
+  return sec < 60 ? `${sec} sek` : `${Math.floor(sec / 60)} min ${sec % 60} sek`
 }
 
 type Supplier = {
@@ -59,7 +74,17 @@ function getLastSummary(s: Supplier): ImportSummary | null {
   return (s.sync_state?.last_import_summary as ImportSummary) ?? null
 }
 
-function saveImportSummary(supplierId: string, data: ImportProgress) {
+// Seneste kørsel pr. type (produkter / lager). Ældre data har kun last_import_summary.
+function getSummaries(s: Supplier): ImportSummary[] {
+  const products = s.sync_state?.last_products_summary as ImportSummary | undefined
+  const stock    = s.sync_state?.last_stock_summary    as ImportSummary | undefined
+  if (products || stock) return [products, stock].filter((x): x is ImportSummary => !!x)
+  const last = getLastSummary(s)
+  return last ? [last] : []
+}
+
+// Bruges kun når forbindelsen afbrydes (serveren er stoppet og kan ikke selv gemme). Ellers gemmer serveren (lib/import-run.ts)
+async function saveImportSummary(supplierId: string, data: ImportProgress, kind: 'products' | 'stock') {
   const summary: ImportSummary = {
     stage:     data.stage as 'done' | 'error',
     message:   data.message,
@@ -69,12 +94,14 @@ function saveImportSummary(supplierId: string, data: ImportProgress) {
     staged:    data.staged,
     errors:    data.errors,
     timestamp: new Date().toISOString(),
+    source:    'manual',
+    kind,
   }
-  fetch(`/api/suppliers/${supplierId}`, {
+  await fetch(`/api/suppliers/${supplierId}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sync_state: { last_import_summary: summary } }),
-  })
+    body: JSON.stringify({ sync_state: { last_import_summary: summary, [`last_${kind}_summary`]: summary } }),
+  }).catch(() => {})
 }
 
 function ErrorLogPopover({ errors }: { errors: string[] }) {
@@ -105,6 +132,7 @@ export default function SuppliersPage() {
   const [selectedFile, setSelectedFile] = useState<Record<string, File>>({})
   const [savingPrio,   setSavingPrio]   = useState(false)
   const esRef = useRef<EventSource | null>(null)
+  const progressRef = useRef<ImportProgress | null>(null)   // seneste status, hvis forbindelsen afbrydes
 
   async function movePriority(id: string, direction: 'up' | 'down') {
     const sorted = [...suppliers].sort((a, b) => (a.global_priority ?? 999) - (b.global_priority ?? 999))
@@ -172,23 +200,33 @@ export default function SuppliersPage() {
 
     const es = new EventSource(url)
     esRef.current = es
+    progressRef.current = null
 
     es.onmessage = (e) => {
       const data: ImportProgress = JSON.parse(e.data)
+      progressRef.current = data
       setProgress(data)
       if (data.stage === 'done' || data.stage === 'error') {
         es.close()
         setLastImported(supplier.id)
         setImporting(null)
-        saveImportSummary(supplier.id, data)
-        reloadSuppliers()
+        reloadSuppliers()   // serveren har gemt "Seneste kørsel", før den sendte done/error
       }
     }
 
     es.onerror = () => {
+      // Forbindelsen blev afbrudt før importen meldte færdig — typisk fordi den ramte Vercels tidsgrænse (5 min)
       es.close()
       setImporting(null)
-      setProgress(p => p ? { ...p, stage: 'error', message: 'Forbindelsesfejl' } : null)
+      setLastImported(supplier.id)
+      const p = progressRef.current
+      const aborted: ImportProgress = {
+        ...(p ?? { total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0 }),
+        stage: 'error',
+        message: `Importen blev afbrudt${p?.processed ? ` efter ${p.processed.toLocaleString('da-DK')} af ${p.total.toLocaleString('da-DK')} varer` : ''} — sandsynligvis ramte den tidsgrænsen på 5 minutter. Det der nåede at blive importeret er gemt, men resten mangler.`,
+      }
+      setProgress(aborted)
+      saveImportSummary(supplier.id, aborted, mode === 'stock' || mode === 'stock-full' ? 'stock' : 'products').then(reloadSuppliers)
     }
   }
 
@@ -236,7 +274,6 @@ export default function SuppliersPage() {
           if (data.stage === 'done' || data.stage === 'error') {
             setLastImported(supplier.id)
             setImporting(null)
-            saveImportSummary(supplier.id, data)
             reloadSuppliers()
           }
         }
@@ -318,16 +355,35 @@ export default function SuppliersPage() {
                       {s.api_url && (
                         <div><span className="text-gray-400 w-28 inline-block">API URL</span>{s.api_url}</div>
                       )}
-                      <div><span className="text-gray-400 w-28 inline-block">Sync interval</span>{s.sync_interval_hours === 24 ? 'Dagligt' :
-s.sync_interval_hours === 168 ? 'Ugentligt' :
-s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
-`Hver ${s.sync_interval_hours} timer`}</div>
                       <div>
-                        <span className="text-gray-400 w-28 inline-block">Sidst synkret</span>
+                        <span className="text-gray-400 w-28 inline-block">Automatisk</span>
+                        {(() => {
+                          const lines = scheduleFor(s.name)
+                          if (lines.length === 0) return <span className="text-gray-500">{IMPORT_CONFIG[s.name]?.needsFile ? 'Nej — manuel filupload' : 'Nej — kun manuel import'}</span>
+                          return lines.map((l, i) => <span key={i}>{i > 0 && ' · '}{KIND_LABEL[l.kind]} {l.text}</span>)
+                        })()}
+                      </div>
+                      <div>
+                        <span className="text-gray-400 w-28 inline-block">Data opdateret</span>
                         {s.last_synced_at
-                          ? new Date(s.last_synced_at).toLocaleString('da-DK', { hour12: false })
+                          ? fmtTime(s.last_synced_at)
                           : <span className="text-orange-500">Aldrig</span>}
                       </div>
+                      {(() => {
+                        // Serveren noterer når en kørsel starter. Er den nyere end seneste afsluttede, blev den ikke færdig.
+                        const started = typeof s.sync_state?.last_run_started_at === 'string' ? s.sync_state.last_run_started_at : null
+                        if (!started || importing === s.id) return null
+                        const finished = [lastSummary, ...getSummaries(s)].filter((x): x is ImportSummary => !!x)
+                          .map(x => new Date(x.started_at ?? x.timestamp).getTime())
+                        if (finished.some(t => t >= new Date(started).getTime())) return null
+                        const recent = Date.now() - new Date(started).getTime() < 10 * 60_000
+                        return (
+                          <div className="text-orange-600">
+                            <span className="text-gray-400 w-28 inline-block">Ufuldført</span>
+                            Kørsel startet {fmtTime(started)} {recent ? 'kører måske stadig' : 'blev ikke færdig (fx stoppet af tidsgrænsen på 5 min)'}
+                          </div>
+                        )
+                      })()}
                       {s.notes && (
                         <div className="text-xs text-gray-400 mt-2 max-w-xl">{s.notes}</div>
                       )}
@@ -478,39 +534,45 @@ s.sync_interval_hours >= 8760 ? 'Manuel filupload' :
                   </div>
                 )}
 
-                {/* Sidst kendte resultat — fra DB (vises når ingen aktiv import i denne session) */}
-                {lastImported !== s.id && importing !== s.id && lastSummary && (
-                  <div className={`mt-4 border-t border-gray-100 pt-3 text-xs rounded px-3 py-2 ${
-                    lastSummary.stage === 'error'
-                      ? 'text-red-600 bg-red-50'
-                      : 'text-gray-500 bg-gray-50'
+                {/* Seneste kørsler — fra DB (produkter og lager hver for sig), når ingen aktiv import i denne session */}
+                {lastImported !== s.id && importing !== s.id && getSummaries(s).map(sum => (
+                  <div key={sum.kind ?? 'any'} className={`mt-3 first-of-type:mt-4 border-t border-gray-100 pt-3 text-xs rounded px-3 py-2 ${
+                    sum.stage === 'error' ? 'text-red-600 bg-red-50' : 'text-gray-500 bg-gray-50'
                   }`}>
-                    <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
                       <span className="font-medium">
-                        {lastSummary.stage === 'error' ? '✗ Seneste import fejlede' : '✓ Seneste import'}
+                        {sum.stage === 'error' ? '✗ Seneste kørsel fejlede' : '✓ Seneste kørsel'}
+                        <span className="font-normal text-gray-400">
+                          {sum.kind && ` · ${KIND_LABEL[sum.kind]}`}
+                          {sum.source && ` · ${SOURCE_LABEL[sum.source]}`}
+                          {sum.test && ' · test (begrænset antal)'}
+                        </span>
                       </span>
                       <span className="text-gray-400">
-                        {new Date(lastSummary.timestamp).toLocaleString('da-DK', { hour12: false })}
+                        {fmtTime(sum.timestamp)}
+                        {fmtDuration(sum.started_at, sum.timestamp) && ` · ${fmtDuration(sum.started_at, sum.timestamp)}`}
                       </span>
                     </div>
                     <div className="flex gap-4 flex-wrap">
-                      {lastSummary.stage !== 'error' && <>
-                        <span>Matchet: <strong>{lastSummary.matched}</strong></span>
-                        <span>Opdateret: <strong>{lastSummary.updated}</strong></span>
-                        <span>Til gennemgang: <strong>{lastSummary.staged}</strong></span>
-                      </>}
-                      {lastSummary.errors > 0 && (
+                      {sum.stage !== 'error' && (sum.kind === 'stock'
+                        ? <span>Lager opdateret: <strong>{sum.updated}</strong></span>
+                        : <>
+                            <span>Matchet: <strong>{sum.matched}</strong></span>
+                            <span>Opdateret: <strong>{sum.updated}</strong></span>
+                            <span>Til gennemgang: <strong>{sum.staged}</strong></span>
+                          </>)}
+                      {sum.errors > 0 && (
                         <span className="text-red-500">
-                          Fejl: <strong>{lastSummary.errors}</strong>
-                          {Array.isArray(s.sync_state?.last_import_errors) && (s.sync_state.last_import_errors as string[]).length > 0 && (
+                          Fejl: <strong>{sum.errors}</strong>
+                          {sum.kind !== 'stock' && Array.isArray(s.sync_state?.last_import_errors) && (s.sync_state.last_import_errors as string[]).length > 0 && (
                             <ErrorLogPopover errors={s.sync_state.last_import_errors as string[]} />
                           )}
                         </span>
                       )}
-                      {lastSummary.stage === 'error' && <span>{lastSummary.message}</span>}
+                      {sum.stage === 'error' && <span>{sum.message}</span>}
                     </div>
                   </div>
-                )}
+                ))}
               </div>
             )
           })}

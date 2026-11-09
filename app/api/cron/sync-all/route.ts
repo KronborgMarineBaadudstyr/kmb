@@ -1,4 +1,5 @@
 import { importEngholm }      from '@/lib/importers/engholm'
+import { trackImport } from '@/lib/import-run'
 import { importScanmarine }   from '@/lib/importers/scanmarine'
 import { importPalby, syncPalbyStock } from '@/lib/importers/palby'
 import { importColumbus }     from '@/lib/importers/columbus'
@@ -10,7 +11,6 @@ export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const noop = (_: any) => {}
 
 export async function GET(request: Request) {
   if (!verifyCronRequest(request)) {
@@ -31,13 +31,13 @@ export async function GET(request: Request) {
     }
   }
 
-  await run('engholm',       () => importEngholm(noop))
-  await run('scanmarine',    () => importScanmarine(noop))
-  await run('palby',         () => importPalby(noop))
-  await run('palby-stock',   () => syncPalbyStock(noop, { full: true }))
-  await run('columbus',      () => importColumbus(noop))
-  await run('kaphorn',       () => importKapHorn(noop))
-  await run('kaphorn-stock', () => syncKapHornStock(noop))
+  await run('engholm',       () => trackImport({ supplier: 'Engholm',         source: 'cron', kind: 'products' }, onP => importEngholm(onP)))
+  await run('scanmarine',    () => trackImport({ supplier: 'Scanmarine',      source: 'cron', kind: 'products' }, onP => importScanmarine(onP)))
+  await run('palby',         () => trackImport({ supplier: 'Palby',           source: 'cron', kind: 'products' }, onP => importPalby(onP)))
+  await run('palby-stock',   () => trackImport({ supplier: 'Palby',           source: 'cron', kind: 'stock' },    onP => syncPalbyStock(onP, { full: true })))
+  await run('columbus',      () => trackImport({ supplier: 'Columbus Marine', source: 'cron', kind: 'products' }, onP => importColumbus(onP)))
+  await run('kaphorn',       () => trackImport({ supplier: 'Kap-Horn',        source: 'cron', kind: 'products' }, onP => importKapHorn(onP)))
+  await run('kaphorn-stock', () => trackImport({ supplier: 'Kap-Horn',        source: 'cron', kind: 'stock' },    onP => syncKapHornStock(onP)))
 
   const allOk = Object.values(results).every(v => v === 'ok')
   console.log('[cron] sync-all færdig:', results)

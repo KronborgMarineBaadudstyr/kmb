@@ -1,4 +1,5 @@
 import { syncKapHornStock } from '@/lib/importers/kaphorn'
+import { trackImport } from '@/lib/import-run'
 import { verifyCronRequest } from '@/lib/cron-auth'
 import { NextResponse } from 'next/server'
 
@@ -13,8 +14,8 @@ export async function GET(request: Request) {
   let updated = 0, skipped = 0, errors = 0
 
   try {
-    await syncKapHornStock(p => {
-      updated = p.updated; skipped = p.skipped; errors = p.errors
+    await trackImport({ supplier: 'Kap-Horn', source: 'cron', kind: 'stock' }, onP => syncKapHornStock(onP), p => {
+      updated = p.updated ?? 0; skipped = p.skipped ?? 0; errors = p.errors ?? 0
     })
 
     console.log(`[cron] Kap-Horn lager sync done — updated:${updated} skipped:${skipped} errors:${errors}`)

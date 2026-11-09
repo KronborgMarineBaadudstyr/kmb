@@ -1,4 +1,5 @@
 import { importPalby, syncPalbyStock } from '@/lib/importers/palby'
+import { trackImport } from '@/lib/import-run'
 import type { PalbyImportProgress } from '@/lib/importers/palby'
 
 export const dynamic = 'force-dynamic'
@@ -30,15 +31,15 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      if (mode === 'stock') {
-        await syncPalbyStock(send, { full: false })
-      } else if (mode === 'stock-full') {
-        await syncPalbyStock(send, { full: true })
+      if (mode === 'stock' || mode === 'stock-full') {
+        await trackImport({ supplier: 'Palby', source: 'manual', kind: 'stock' },
+          onP => syncPalbyStock(onP, { full: mode === 'stock-full' }), send)
       } else {
-        await importPalby(send, {
-          limit: limit ? parseInt(limit, 10) : undefined,
-          delta: delta === '1',
-        })
+        await trackImport({ supplier: 'Palby', source: 'manual', kind: 'products', test: !!limit },
+          onP => importPalby(onP, {
+            limit: limit ? parseInt(limit, 10) : undefined,
+            delta: delta === '1',
+          }), send)
       }
     } catch (e: unknown) {
       send({

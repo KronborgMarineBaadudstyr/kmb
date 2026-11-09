@@ -122,6 +122,7 @@ export async function importColumbus(
   const s           = supplier as SupplierRow
   const SUPPLIER_ID = s.id
 
+
   onProgress({
     stage: 'connecting', total: 0, processed: 0, matched: 0,
     staged: 0, updated: 0, skipped: 0, errors: 0,
@@ -345,18 +346,23 @@ export async function importColumbus(
       })
     }
 
-    await supabase.from('suppliers')
+    const { error: syncErr } = await supabase.from('suppliers')
       .update({
         last_synced_at: new Date().toISOString(),
         sync_state:     { ...(s.sync_state ?? {}), last_full_sync: new Date().toISOString(), last_import_errors: errorLog.slice(0, 500) },
       })
       .eq('id', SUPPLIER_ID)
+    if (syncErr) {
+      console.error('[columbus] kunne ikke gemme sync-tidspunkt:', syncErr.message)
+      errorLog.push(`Kunne ikke gemme "Sidst synkret": ${syncErr.message}`)
+    }
 
     await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 
     onProgress({
       stage: 'done', total, processed, matched, staged, updated, skipped, errors,
-      message: `Færdig! ${matched} matchet · ${updated} opdateret · ${staged} afventer gennemgang · ${errors} fejl`,
+      message: `Færdig! ${matched} matchet · ${updated} opdateret · ${staged} afventer gennemgang · ${errors} fejl`
+        + (syncErr ? ' — OBS: "Sidst synkret" kunne ikke gemmes' : ''),
     })
 
   } finally {

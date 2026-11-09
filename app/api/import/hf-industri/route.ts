@@ -1,4 +1,5 @@
 import { importHfIndustri } from '@/lib/importers/hf-industri'
+import { trackImport } from '@/lib/import-run'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -29,7 +30,8 @@ export async function POST(request: Request) {
 
   ;(async () => {
     try {
-      await importHfIndustri(buffer, send, options)
+      await trackImport({ supplier: 'HF Industri Marine', source: 'manual', kind: 'products', test: !!limitParam },
+        onP => importHfIndustri(buffer, onP, options), send)
     } catch (e: unknown) {
       send({
         stage: 'error', total: 0, processed: 0, matched: 0,

@@ -101,15 +101,18 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer ✅ kørt
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
 
-## Cron Jobs (vercel.json)
-| Endpoint | Schedule | Beskrivelse |
-|----------|----------|-------------|
-| `/api/cron/sync-engholm` | 23:00 dagligt | Engholm produktimport |
-| `/api/cron/sync-scanmarine` | 06:00 dagligt | Scanmarine produktimport |
-| `/api/cron/sync-palby-products` | 23:00 dagligt | Palby produktimport (fuld CSV) |
-| `/api/cron/sync-palby-stock` | 07, 12, 17, 22 dagligt | Palby lager delta-sync |
-| `/api/cron/sync-columbus` | 23:00 dagligt | Columbus Marine produktimport |
-| `/api/cron/sync-kaphorn` | 23:00 dagligt | Kap-Horn produktimport |
+## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
+| Endpoint | UTC | Beskrivelse |
+|----------|-----|-------------|
+| `/api/cron/sync-engholm` | 23:00 | Engholm produktimport |
+| `/api/cron/sync-scanmarine` | 23:15 | Scanmarine produktimport |
+| `/api/cron/sync-palby-products` | 23:30 | Palby produktimport (fuld CSV) |
+| `/api/cron/sync-columbus` | 23:45 | Columbus Marine produktimport |
+| `/api/cron/sync-kaphorn` | 00:00 | Kap-Horn produktimport |
+| `/api/cron/sync-palby-stock` | 07:00 | Palby lager (delta) |
+| `/api/cron/sync-kaphorn-stock` | 07:30 | Kap-Horn lager |
+
+**Registrering af kørsler:** alle `/api/import/*` og `/api/cron/*` går gennem `trackImport()` (`lib/import-run.ts`), som gemmer `sync_state.last_run_started_at` ved start og `last_import_summary` + `last_products_summary`/`last_stock_summary` (resultat, kilde manuel/automatisk, varighed) ved slut — før done/error sendes til browseren. Leverandører (`/admin/suppliers`) viser automatiske tider læst fra `vercel.json` (`lib/cron-schedule.ts` — nye cron-ruter skal tilføjes i `ROUTES` dér), seneste kørsel pr. type og "Ufuldført" hvis en kørsel startede uden at blive færdig (fx Vercels tidsgrænse). Leverandørens `sync_interval_hours` bruges ikke til visning.
 
 ## Sortiment (Indstillinger → Sortiment, `/admin/sortiment?tab=…`)
 Erstatter de tidligere sider Kategorier, Produkttyper og Kategori-søgefiltre (gamle URL'er viderestiller). Faner i `sortiment/_tabs/`:

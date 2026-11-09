@@ -1,4 +1,5 @@
 import { importColumbus } from '@/lib/importers/columbus'
+import { trackImport } from '@/lib/import-run'
 import type { ColumbusImportProgress } from '@/lib/importers/columbus'
 
 export const dynamic    = 'force-dynamic'
@@ -20,12 +21,11 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await importColumbus(
+      await trackImport({ supplier: 'Columbus Marine', source: 'manual', kind: 'products', test: !!limit },
+        onP => importColumbus(onP, { limit: limit ? parseInt(limit, 10) : undefined }),
         (data: ColumbusImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
-        },
-        { limit: limit ? parseInt(limit, 10) : undefined }
-      )
+        })
     } catch (e: unknown) {
       ctrl.enqueue(encoder.encode(`data: ${JSON.stringify({
         stage: 'error', total: 0, processed: 0, matched: 0,
