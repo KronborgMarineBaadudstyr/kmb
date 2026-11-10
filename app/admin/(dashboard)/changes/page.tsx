@@ -20,7 +20,17 @@ type ChangeRow = {
   product_id:           string | null
   staging_id:           string | null
   suppliers:            { id: string; name: string } | null
+  products?:            { sales_price: number | null } | null   // vores nuværende salgspris
+  // Migration 066 — hvad ændringen gjorde ved vores salgspris
+  variant_id?:          string | null
+  our_price_old?:       number | null
+  our_price_new?:       number | null
+  price_action?:        PriceAction | null
 }
+
+type PriceAction = 'followed' | 'own_price' | 'not_primary' | 'no_price' | 'inherits' | 'applied'
+
+const kr = (n: number) => `${n.toLocaleString('da-DK')} kr`
 
 type Supplier = { id: string; name: string }
 
@@ -32,23 +42,53 @@ const CHANGE_LABELS: Record<ChangeType, { label: string; color: string; icon: st
 
 function PriceDiff({ oldVal, newVal }: { oldVal: number | null; newVal: number | null }) {
   if (oldVal == null && newVal == null) return <span className="text-gray-300">—</span>
-  if (oldVal == null) return <span className="text-green-600 font-medium">{newVal!.toLocaleString('da-DK')} kr</span>
-  if (newVal == null) return <span className="text-gray-500">{oldVal.toLocaleString('da-DK')} kr</span>
+  if (oldVal == null) return <span className="text-green-600 font-medium">{kr(newVal!)}</span>
+  if (newVal == null) return <span className="text-gray-500">{kr(oldVal)}</span>
+  if (oldVal === newVal) return <span className="text-gray-400" title="Uændret">{kr(newVal)}</span>
 
   const pct = ((newVal - oldVal) / oldVal) * 100
   const up  = newVal > oldVal
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
       <span className="text-gray-400 line-through text-xs">{oldVal.toLocaleString('da-DK')}</span>
       <span className="text-gray-300">→</span>
-      <span className={`font-medium ${up ? 'text-red-600' : 'text-green-600'}`}>
-        {newVal.toLocaleString('da-DK')} kr
-      </span>
-      <span className={`text-xs px-1 py-0.5 rounded ${up ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
+      <span className={`font-medium ${up ? 'text-red-600' : 'text-green-600'}`}>{kr(newVal)}</span>
+      <span className={`text-xs px-1 py-0.5 rounded w-14 text-right ${up ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>
         {up ? '+' : ''}{pct.toFixed(1)}%
       </span>
     </div>
   )
+}
+
+// Hvad leverandørens prisændring gjorde ved vores salgspris (trigger fra migration 066)
+function OurPrice({ row, onApply, applying }: { row: ChangeRow; onApply: (row: ChangeRow) => void; applying: boolean }) {
+  if (!row.product_id) return <span className="text-xs text-gray-400">Ikke oprettet hos os</span>
+  const current = row.our_price_new ?? row.products?.sales_price ?? null
+  const newVejl = row.new_recommended_price
+  const canApply = newVejl != null && newVejl > 0 && current !== newVejl
+  const applyBtn = canApply && (
+    <button onClick={() => onApply(row)} disabled={applying}
+      className="mt-1 text-xs text-blue-600 hover:underline disabled:opacity-40">
+      {applying ? 'Gemmer…' : `Brug ${kr(newVejl!)}`}
+    </button>
+  )
+  switch (row.price_action) {
+    case 'followed':
+      return <div><PriceDiff oldVal={row.our_price_old ?? null} newVal={row.our_price_new ?? null} /><div className="text-xs text-gray-400 mt-0.5">Fulgte vejl. pris</div></div>
+    case 'applied':
+      return <div><PriceDiff oldVal={row.our_price_old ?? null} newVal={row.our_price_new ?? null} /><div className="text-xs text-gray-400 mt-0.5">Ny pris brugt</div></div>
+    case 'own_price':
+      return <div><span className="text-gray-700">{current != null ? kr(current) : '—'}</span><div className="text-xs text-gray-400 mt-0.5">Egen pris — ikke ændret</div>{applyBtn}</div>
+    case 'not_primary':
+      return <div><span className="text-gray-700">{current != null ? kr(current) : '—'}</span><div className="text-xs text-gray-400 mt-0.5">Anden leverandør er foretrukken</div>{applyBtn}</div>
+    case 'no_price':
+      return <Link href="/admin/pricing" className="text-xs text-orange-600 hover:underline">Ingen salgspris — sæt pris →</Link>
+    case 'inherits':
+      return <span className="text-xs text-gray-400">Varianten bruger produktets pris</span>
+    default:
+      // Kun indkøbsprisen er ændret (eller ændringen er fra før migration 066)
+      return <div><span className="text-gray-700">{current != null ? kr(current) : '—'}</span>{row.price_action === undefined && applyBtn}</div>
+  }
 }
 
 export default function ChangesPage() {
@@ -63,6 +103,18 @@ export default function ChangesPage() {
   const [page,        setPage]        = useState(1)
   const [detecting,   setDetecting]   = useState(false)
   const [detectMsg,   setDetectMsg]   = useState<string | null>(null)
+  const [applying,    setApplying]    = useState<string | null>(null)
+
+  async function applyPrice(row: ChangeRow) {
+    if (!row.new_recommended_price) return
+    if (!confirm(`Sæt salgsprisen på "${row.product_name ?? row.supplier_sku}" til ${kr(row.new_recommended_price)}?`)) return
+    setApplying(row.id)
+    const res = await fetch(`/api/import-changes/${row.id}/apply`, { method: 'POST' })
+    const j = await res.json().catch(() => ({}))
+    setApplying(null)
+    if (!res.ok) { alert(j.error ?? 'Kunne ikke gemme prisen'); return }
+    load()
+  }
 
   // Summary counts
   const [summary, setSummary] = useState<{ price_changed: number; new_product: number; discontinued: number } | null>(null)
@@ -234,14 +286,15 @@ export default function ChangesPage() {
             <span className="text-xs">Ændringer registreres automatisk ved næste import</span>
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full text-sm tabular-nums">
             <thead className="bg-gray-50 border-b border-gray-200 sticky top-0">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide w-28">Type</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Produkt</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide">Leverandør</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Indkøbspris</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide">Vejl. pris</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide w-56">Indkøbspris</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide w-56">Vejl. pris</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wide w-56" title="Vores salgspris i shoppen — og om den fulgte leverandørens ændring">Vores pris</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wide w-32">Tidspunkt</th>
                 <th className="px-4 py-3 w-16" />
               </tr>
@@ -289,6 +342,15 @@ export default function ChangesPage() {
                       ) : <span className="text-gray-300">—</span>}
                     </td>
 
+                    {/* Vores pris */}
+                    <td className="px-4 py-3 text-right">
+                      {row.change_type === 'price_changed'
+                        ? <OurPrice row={row} onApply={applyPrice} applying={applying === row.id} />
+                        : row.products?.sales_price != null
+                          ? <span className="text-gray-700">{kr(row.products.sales_price)}</span>
+                          : <span className="text-gray-300">—</span>}
+                    </td>
+
                     {/* Tidspunkt */}
                     <td className="px-4 py-3">
                       <div className="text-xs text-gray-600">{new Date(row.seen_at).toLocaleDateString('da-DK')}</div>
@@ -300,7 +362,7 @@ export default function ChangesPage() {
                       <div className="flex items-center gap-1">
                         {row.product_id && (
                           <Link href={`/admin/products/${row.product_id}`}
-                            className="text-xs text-blue-500 hover:underline" title="Se produkt">
+                            className="text-xs text-blue-500 hover:underline whitespace-nowrap" title="Se produkt">
                             Produkt ↗
                           </Link>
                         )}

@@ -100,6 +100,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald) ✅ kørt
 - `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer ✅ kørt
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
+- `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ⏳ skal køres
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -113,6 +114,8 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 | `/api/cron/sync-kaphorn-stock` | 07:30 | Kap-Horn lager |
 
 **Registrering af kørsler:** alle `/api/import/*` og `/api/cron/*` går gennem `trackImport()` (`lib/import-run.ts`), som gemmer `sync_state.last_run_started_at` ved start og `last_import_summary` + `last_products_summary`/`last_stock_summary` (resultat, kilde manuel/automatisk, varighed) ved slut — før done/error sendes til browseren. Leverandører (`/admin/suppliers`) viser automatiske tider læst fra `vercel.json` (`lib/cron-schedule.ts` — nye cron-ruter skal tilføjes i `ROUTES` dér), seneste kørsel pr. type og "Ufuldført" hvis en kørsel startede uden at blive færdig (fx Vercels tidsgrænse). Leverandørens `sync_interval_hours` bruges ikke til visning.
+
+**Opdelte kørsler (Engholm, Palby, Columbus):** produktimporten kan ikke nå alle varer på Vercels 5 min, så den kører i dele á ca. 3½ min (`trackImport({ resumable, resume })` → `RunContext { resume, deadline }`). Varerne behandles sorteret efter varenummer (`remainingAfterCursor()`); når deadline er nået, melder importøren `partial` med en cursor (sidste varenummer + tællere), som gemmes i `sync_state.products_cursor`. Næste del kaldes med `?continue=1`: cron-ruterne svarer straks 202 og kører delen i `after()`, og kalder så sig selv (`lib/import-chain.ts`, Bearer CRON_SECRET); manuelle kørsler fortsættes af browseren. Afslutning (sidst synkroniseret, review-tjek fra kørslens start) sker kun i sidste del. Maks 30 dele; en ny kørsel uden `continue` starter forfra. Nye store importører: tag `RunContext` som option og tjek deadline før hver batch
 
 ## Sortiment (Indstillinger → Sortiment, `/admin/sortiment?tab=…`)
 Erstatter de tidligere sider Kategorier, Produkttyper og Kategori-søgefiltre (gamle URL'er viderestiller). Faner i `sortiment/_tabs/`:
@@ -128,6 +131,7 @@ Rækkefølge og navne (trin-bjælke `_import-flow.tsx` øverst på hver side, sa
 3. **Saml ens varer** (`/admin/matching`, tidl. "Produkt match") — forslag om samme vare hos flere leverandører; faner: Samme EAN / Lignende navn / Varianter
    - På hvert kort vælger admin **Samme vare** (ét produkt, flere leverandører) eller **Varianter** (ét produkt med varianter). Ved varianter angives egenskaber pr. vare i en tabel (forudfyldt fra `supplier_variant_attributes` eller forskellen i navnene, `inferVariantSetup()`). Gemmes som `create_as` + `member_attributes` på gruppen; `bulkCreateProductsFromGroups()` laver én variant pr. forskellig egenskabs-kombination (samme variant fra flere leverandører = én variant med flere leverandører, prioritet pr. variant)
 4. **Nye varer** (`/admin/staging`, tidl. "Opret produkter") — varer uden match: opret, tilknyt eller afvis
+   - Import-ændringer viser pr. prisændring også **Vores pris**: fulgte med / egen pris beholdt (knap "Brug X kr" → `POST /api/import-changes/[id]/apply`) / anden leverandør foretrukken / ingen salgspris. Samme varenummer to gange i en leverandørfil behandles kun én gang (`remainingAfterCursor()`), ellers skifter prisen frem og tilbage hver nat
 - **Automatik-log** (`/admin/auto-log`) — hvad pipelinen selv har gjort
 
 ## Staging-flow

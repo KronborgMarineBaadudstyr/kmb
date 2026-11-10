@@ -5,9 +5,10 @@ import { ImportFlow } from '../_import-flow'
 import { scheduleFor } from '@/lib/cron-schedule'
 
 type ImportSummary = {
-  stage:     'done' | 'error'
+  stage:     'done' | 'error' | 'partial'   // partial = opdelt kørsel, der ikke er nået hele vejen endnu
   message:   string
   total:     number
+  processed?: number
   matched:   number
   updated:   number
   staged:    number
@@ -17,6 +18,7 @@ type ImportSummary = {
   source?:   'manual' | 'cron'
   kind?:     'products' | 'stock'
   test?:     boolean
+  chunks?:   number                   // antal dele en opdelt kørsel har brugt
 }
 
 const KIND_LABEL   = { products: 'Produkter', stock: 'Lager' } as const
@@ -45,7 +47,7 @@ type Supplier = {
 }
 
 type ImportProgress = {
-  stage:     'fetching' | 'connecting' | 'downloading' | 'parsing' | 'importing' | 'done' | 'error'
+  stage:     'fetching' | 'connecting' | 'downloading' | 'parsing' | 'importing' | 'partial' | 'done' | 'error'
   total:     number
   processed: number
   matched:   number
@@ -86,7 +88,7 @@ function getSummaries(s: Supplier): ImportSummary[] {
 // Bruges kun når forbindelsen afbrydes (serveren er stoppet og kan ikke selv gemme). Ellers gemmer serveren (lib/import-run.ts)
 async function saveImportSummary(supplierId: string, data: ImportProgress, kind: 'products' | 'stock') {
   const summary: ImportSummary = {
-    stage:     data.stage as 'done' | 'error',
+    stage:     data.stage as ImportSummary['stage'],
     message:   data.message,
     total:     data.total,
     matched:   data.matched,
@@ -133,6 +135,7 @@ export default function SuppliersPage() {
   const [savingPrio,   setSavingPrio]   = useState(false)
   const esRef = useRef<EventSource | null>(null)
   const progressRef = useRef<ImportProgress | null>(null)   // seneste status, hvis forbindelsen afbrydes
+  const chunkRef = useRef(0)                                 // antal færdige dele i en opdelt import
 
   async function movePriority(id: string, direction: 'up' | 'down') {
     const sorted = [...suppliers].sort((a, b) => (a.global_priority ?? 999) - (b.global_priority ?? 999))
@@ -198,36 +201,55 @@ export default function SuppliersPage() {
       url += `?mode=${mode}`
     }
 
-    const es = new EventSource(url)
-    esRef.current = es
     progressRef.current = null
+    const kind = mode === 'stock' || mode === 'stock-full' ? 'stock' : 'products'
 
-    es.onmessage = (e) => {
-      const data: ImportProgress = JSON.parse(e.data)
-      progressRef.current = data
-      setProgress(data)
-      if (data.stage === 'done' || data.stage === 'error') {
+    // Store importer (Palby, Columbus) kører i dele á ca. 3½ min. Melder en del 'partial',
+    // åbnes næste del med ?continue=1, og den fortsætter fra det varenummer, serveren har gemt.
+    const connect = (src: string) => {
+      const es = new EventSource(src)
+      esRef.current = es
+      let finished = false
+
+      es.onmessage = (e) => {
+        const data: ImportProgress = JSON.parse(e.data)
+        progressRef.current = data
+        if (data.stage === 'partial') {
+          finished = true
+          es.close()
+          setProgress({ ...data, message: `${data.message} (del ${chunkRef.current + 1} færdig)` })
+          chunkRef.current++
+          if (esRef.current === es) connect(cfg.endpoint + (cfg.endpoint.includes('?') ? '&' : '?') + 'continue=1')
+          return
+        }
+        setProgress(data)
+        if (data.stage === 'done' || data.stage === 'error') {
+          finished = true
+          es.close()
+          setLastImported(supplier.id)
+          setImporting(null)
+          reloadSuppliers()   // serveren har gemt "Seneste kørsel", før den sendte done/error
+        }
+      }
+
+      es.onerror = () => {
+        if (finished) return
+        // Forbindelsen blev afbrudt før importen meldte færdig — typisk fordi den ramte Vercels tidsgrænse (5 min)
         es.close()
-        setLastImported(supplier.id)
         setImporting(null)
-        reloadSuppliers()   // serveren har gemt "Seneste kørsel", før den sendte done/error
+        setLastImported(supplier.id)
+        const p = progressRef.current
+        const aborted: ImportProgress = {
+          ...(p ?? { total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0 }),
+          stage: 'error',
+          message: `Importen blev afbrudt${p?.processed ? ` efter ${p.processed.toLocaleString('da-DK')} af ${p.total.toLocaleString('da-DK')} varer` : ''} — sandsynligvis ramte den tidsgrænsen på 5 minutter. Det der nåede at blive importeret er gemt, men resten mangler.`,
+        }
+        setProgress(aborted)
+        saveImportSummary(supplier.id, aborted, kind).then(reloadSuppliers)
       }
     }
-
-    es.onerror = () => {
-      // Forbindelsen blev afbrudt før importen meldte færdig — typisk fordi den ramte Vercels tidsgrænse (5 min)
-      es.close()
-      setImporting(null)
-      setLastImported(supplier.id)
-      const p = progressRef.current
-      const aborted: ImportProgress = {
-        ...(p ?? { total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0 }),
-        stage: 'error',
-        message: `Importen blev afbrudt${p?.processed ? ` efter ${p.processed.toLocaleString('da-DK')} af ${p.total.toLocaleString('da-DK')} varer` : ''} — sandsynligvis ramte den tidsgrænsen på 5 minutter. Det der nåede at blive importeret er gemt, men resten mangler.`,
-      }
-      setProgress(aborted)
-      saveImportSummary(supplier.id, aborted, mode === 'stock' || mode === 'stock-full' ? 'stock' : 'products').then(reloadSuppliers)
-    }
+    chunkRef.current = 0
+    connect(url)
   }
 
   async function startFileImport(supplier: Supplier) {
@@ -289,6 +311,7 @@ export default function SuppliersPage() {
 
   function stopImport() {
     esRef.current?.close()
+    esRef.current = null      // forhindrer at næste del startes
     setImporting(null)
   }
 
@@ -374,7 +397,7 @@ export default function SuppliersPage() {
                         const started = typeof s.sync_state?.last_run_started_at === 'string' ? s.sync_state.last_run_started_at : null
                         if (!started || importing === s.id) return null
                         const finished = [lastSummary, ...getSummaries(s)].filter((x): x is ImportSummary => !!x)
-                          .map(x => new Date(x.started_at ?? x.timestamp).getTime())
+                          .map(x => new Date(x.timestamp).getTime())
                         if (finished.some(t => t >= new Date(started).getTime())) return null
                         const recent = Date.now() - new Date(started).getTime() < 10 * 60_000
                         return (
@@ -537,15 +560,16 @@ export default function SuppliersPage() {
                 {/* Seneste kørsler — fra DB (produkter og lager hver for sig), når ingen aktiv import i denne session */}
                 {lastImported !== s.id && importing !== s.id && getSummaries(s).map(sum => (
                   <div key={sum.kind ?? 'any'} className={`mt-3 first-of-type:mt-4 border-t border-gray-100 pt-3 text-xs rounded px-3 py-2 ${
-                    sum.stage === 'error' ? 'text-red-600 bg-red-50' : 'text-gray-500 bg-gray-50'
+                    sum.stage === 'error' ? 'text-red-600 bg-red-50' : sum.stage === 'partial' ? 'text-amber-800 bg-amber-50' : 'text-gray-500 bg-gray-50'
                   }`}>
                     <div className="flex items-center justify-between mb-1 gap-3 flex-wrap">
                       <span className="font-medium">
-                        {sum.stage === 'error' ? '✗ Seneste kørsel fejlede' : '✓ Seneste kørsel'}
+                        {sum.stage === 'error' ? '✗ Seneste kørsel fejlede' : sum.stage === 'partial' ? '⏳ Kørsel i gang (opdelt)' : '✓ Seneste kørsel'}
                         <span className="font-normal text-gray-400">
                           {sum.kind && ` · ${KIND_LABEL[sum.kind]}`}
                           {sum.source && ` · ${SOURCE_LABEL[sum.source]}`}
                           {sum.test && ' · test (begrænset antal)'}
+                          {sum.chunks && sum.chunks > 1 && sum.stage !== 'partial' && ` · ${sum.chunks} dele`}
                         </span>
                       </span>
                       <span className="text-gray-400">
@@ -570,6 +594,14 @@ export default function SuppliersPage() {
                         </span>
                       )}
                       {sum.stage === 'error' && <span>{sum.message}</span>}
+                      {sum.stage === 'partial' && (
+                        <span>
+                          {(sum.processed ?? 0).toLocaleString('da-DK')} af {sum.total.toLocaleString('da-DK')} varer behandlet efter {sum.chunks ?? 1} {sum.chunks === 1 ? 'del' : 'dele'}
+                          {Date.now() - new Date(sum.timestamp).getTime() < 15 * 60_000
+                            ? ' — næste del fortsætter automatisk'
+                            : ' — stoppede før den var færdig; næste kørsel starter forfra'}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}

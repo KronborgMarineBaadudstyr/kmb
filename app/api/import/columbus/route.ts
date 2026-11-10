@@ -7,10 +7,12 @@ export const maxDuration = 300
 
 // GET /api/import/columbus          → fuld import
 // GET /api/import/columbus?limit=N  → test med N produkter
+// GET /api/import/columbus?continue=1 → næste del af en opdelt kørsel (browseren kalder selv, når en del melder 'partial')
 
 export async function GET(request: Request) {
   const url   = new URL(request.url)
   const limit = url.searchParams.get('limit')
+  const resume = url.searchParams.get('continue') === '1'
 
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
@@ -21,8 +23,8 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await trackImport({ supplier: 'Columbus Marine', source: 'manual', kind: 'products', test: !!limit },
-        onP => importColumbus(onP, { limit: limit ? parseInt(limit, 10) : undefined }),
+      await trackImport({ supplier: 'Columbus Marine', source: 'manual', kind: 'products', test: !!limit, resumable: true, resume },
+        (onP, ctx) => importColumbus(onP, { limit: limit ? parseInt(limit, 10) : undefined, ...ctx }),
         (data: ColumbusImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         })

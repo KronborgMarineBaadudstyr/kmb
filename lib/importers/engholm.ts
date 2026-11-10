@@ -4,6 +4,7 @@ import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 import { syncImagesToProduct } from './image-sync'
 import { enrichMatchedProduct } from './product-enrichment'
 import { batchEanLookup, type EanMatch } from './ean-lookup'
+import { mergeSyncState, remainingAfterCursor, NO_CHUNKING, type ImportCursor, type RunContext } from '@/lib/import-run'
 
 const SUPPLIER_ID = '37d879e5-c0f7-48ae-b514-168264c80f9f'
 const API_URL     = 'https://www.engholm.dk/api/products'
@@ -27,7 +28,7 @@ type EngholmProduct = {
 }
 
 export type EngholmImportProgress = {
-  stage:         'fetching' | 'importing' | 'done' | 'error'
+  stage:         'fetching' | 'importing' | 'partial' | 'done' | 'error'
   total:         number
   processed:     number
   matched:       number  // tilknyttet eksisterende produkt
@@ -35,6 +36,7 @@ export type EngholmImportProgress = {
   updated:       number  // opdateret eksisterende product_supplier
   errors:        number
   message:       string
+  cursor?:       ImportCursor  // kun ved 'partial': hvor næste del skal fortsætte
 }
 
 type ProgressCallback = (p: EngholmImportProgress) => void
@@ -102,9 +104,10 @@ async function findFuzzyMatches(
 
 export async function importEngholm(
   onProgress: ProgressCallback,
-  options: { limit?: number } = {}
+  options: { limit?: number } & Partial<RunContext> = {}
 ): Promise<void> {
   const supabase = createServiceClient()
+  const { resume, deadline } = { ...NO_CHUNKING, ...options }
 
   onProgress({
     stage: 'fetching', total: 0, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0,
@@ -121,13 +124,18 @@ export async function importEngholm(
   const json = await resp.json() as { success: boolean; products: EngholmProduct[] }
   if (!json.success) throw new Error('Engholm API returnerede success: false')
 
-  let products = json.products
-  if (options.limit) products = products.slice(0, options.limit)
+  let all = json.products
+  if (options.limit) all = all.slice(0, options.limit)
 
-  const total = products.length
+  // Sorteret efter varenummer, hvert varenummer én gang — en fortsat kørsel springer de behandlede over
+  const total    = new Set(all.map(p => p.sku)).size
+  const products = remainingAfterCursor(all, p => p.sku, resume)
   onProgress({
-    stage: 'importing', total, processed: 0, matched: 0, staged: 0, updated: 0, errors: 0,
-    message: `${total.toLocaleString('da-DK')} produkter hentet — starter matching...`,
+    stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,
+    staged: resume?.staged ?? 0, updated: resume?.updated ?? 0, errors: resume?.errors ?? 0,
+    message: resume
+      ? `Fortsætter (del ${resume.chunk + 1}) — ${products.length.toLocaleString('da-DK')} af ${total.toLocaleString('da-DK')} produkter tilbage...`
+      : `${total.toLocaleString('da-DK')} produkter hentet — starter matching...`,
   })
 
   // ── 2. Hent eksisterende product_suppliers for Engholm (til priority-bevarelse) ──
@@ -164,11 +172,21 @@ export async function importEngholm(
 
   // ── 4. Importer i batches ──
   const BATCH = 100
-  const importStart = new Date()
-  let processed = 0, matched = 0, staged = 0, updated = 0, errors = 0
-  const errorLog: string[] = []
+  const importStart = resume ? new Date(resume.started_at) : new Date()
+  let processed = resume?.processed ?? 0, matched = resume?.matched ?? 0, staged = resume?.staged ?? 0
+  let updated   = resume?.updated   ?? 0, errors  = resume?.errors  ?? 0
+  const errorLog: string[] = [...(resume?.error_log ?? [])]
 
   for (let i = 0; i < products.length; i += BATCH) {
+    // Tiden er ved at løbe ud — gem hvor vi er nået til, så næste del fortsætter herfra
+    if (deadline && i > 0 && Date.now() > deadline) {
+      onProgress({
+        stage: 'partial', total, processed, matched, staged, updated, errors,
+        message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} behandlet — fortsætter i næste del...`,
+        cursor: { after_sku: products[i - 1].sku, processed, matched, updated, staged, skipped: 0, errors, error_log: errorLog, started_at: '', chunk: 0 },
+      })
+      return
+    }
     const batch = products.slice(i, i + BATCH)
 
     // Hent Supabase-produkter via EAN for hele batchen på én gang
@@ -337,16 +355,12 @@ export async function importEngholm(
   }
 
   // Opdater last_synced_at + gem fejllog i sync_state
-  const { data: supRow } = await supabase.from('suppliers').select('sync_state').eq('id', SUPPLIER_ID).single()
-  const existingState = (supRow?.sync_state ?? {}) as Record<string, unknown>
   const { error: syncErr } = await supabase
     .from('suppliers')
-    .update({
-      last_synced_at: new Date().toISOString(),
-      sync_state: { ...existingState, last_import_errors: errorLog.slice(0, 500) },
-    })
+    .update({ last_synced_at: new Date().toISOString() })
     .eq('id', SUPPLIER_ID)
   if (syncErr) console.error('[engholm] kunne ikke gemme sync-tidspunkt:', syncErr.message)
+  await mergeSyncState(SUPPLIER_ID, { last_import_errors: errorLog.slice(0, 500) })
 
   await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 

@@ -8,6 +8,7 @@ export const maxDuration = 300
 // GET /api/import/palby                 → fuld produktimport
 // GET /api/import/palby?delta=1         → delta produktimport (kun ændringer siden sidst)
 // GET /api/import/palby?limit=N         → test-import med N produkter
+// GET /api/import/palby?continue=1      → næste del af en opdelt produktimport (browseren kalder selv ved 'partial')
 // GET /api/import/palby?mode=stock      → delta lagersync (kun nye delta-filer)
 // GET /api/import/palby?mode=stock-full → komplet lagersync (web_stockstatus_newitemid.xml)
 
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
   const mode  = url.searchParams.get('mode')   // 'stock' | 'stock-full' | null
   const delta = url.searchParams.get('delta')  // '1' = brug delta produktfil
   const limit = url.searchParams.get('limit')
+  const resume = url.searchParams.get('continue') === '1'
 
   const encoder = new TextEncoder()
   // eslint-disable-next-line prefer-const
@@ -35,10 +37,11 @@ export async function GET(request: Request) {
         await trackImport({ supplier: 'Palby', source: 'manual', kind: 'stock' },
           onP => syncPalbyStock(onP, { full: mode === 'stock-full' }), send)
       } else {
-        await trackImport({ supplier: 'Palby', source: 'manual', kind: 'products', test: !!limit },
-          onP => importPalby(onP, {
+        await trackImport({ supplier: 'Palby', source: 'manual', kind: 'products', test: !!limit, resumable: true, resume },
+          (onP, ctx) => importPalby(onP, {
             limit: limit ? parseInt(limit, 10) : undefined,
             delta: delta === '1',
+            ...ctx,
           }), send)
       }
     } catch (e: unknown) {
