@@ -48,7 +48,7 @@ const STEPS: Step[] = [
   { label: 'Checkout med betal ved afhentning for kendte kunder',                                           status: 'done' },
   { label: 'Online betaling',                                                                                status: 'waiting', note: 'valg af betalingsudbyder' },
   { label: 'Handelsbetingelser-side (firmaoplysninger udfyldes under Butiksoplysninger)',                   status: 'done' },
-  { label: 'Login med telefonnummer (SMS)',                                                                  status: 'waiting', note: 'valg af SMS-udbyder' },
+  { label: 'Login med telefonnummer (SMS via GatewayAPI — token sættes under Indstillinger → SMS)',         status: 'done' },
 
   // ── Kunder & ordrer ──
   { group: 'Kunder & ordrer',  label: 'Ordreflow: Ny → Klar til afhentning (mail) → Afhentet og betalt',   status: 'done' },

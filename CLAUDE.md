@@ -101,7 +101,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer ✅ kørt
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
 - `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ✅ kørt
-- `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ⏳ skal køres
+- `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ✅ kørt
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -170,6 +170,7 @@ CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel da
 RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
 EMAIL_FROM=           # Valgfri. Afsender — standard "LoveSailing <no-reply@lovesailing.dk>" (domænet er verificeret i Resend)
 SETTINGS_ENCRYPTION_KEY= # Valgfri. Krypterer app_settings (ellers afledt af SUPABASE_SERVICE_ROLE_KEY — skift = gemte nøgler skal indtastes igen)
+GATEWAYAPI_TOKEN=     # Valgfri. SMS-login — sættes hellere på /admin/sms (GATEWAYAPI_REGION=eu for EU-konto, SMS_SENDER=afsendernavn)
 NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brugeren står på (fx kmb-nine.vercel.app)
 ```
 
@@ -190,7 +191,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [x] **Salgsindsigt + AI-assistent** — `/admin/insights` og `/admin/ai` (se afsnit nedenfor)
 - [x] **Egen AI-nøgle til butikken** — `/admin/ai-noegle` (kun ejere); krypteret i `app_settings`, fallback til `ANTHROPIC_API_KEY`
 - [x] **Anthropic SDK 1.x** — `@anthropic-ai/sdk` 1.6 (API-version 2026-10-21: ingen `temperature`/`top_p`/`top_k`, nøglen sendes som `Authorization: Bearer`). AI-chat har server-side fallback ved afvisning
-- [ ] **SMS-udbyder** til telefon-login (fx GatewayAPI/CPSMS) — kobles på i `lib/shop/sms.ts`
+- [x] **SMS-udbyder** — GatewayAPI (`lib/shop/sms.ts`): token, konto (.com/.eu) og afsendernavn sættes af ejere på `/admin/sms` (krypteret i `app_settings` 'gatewayapi', fallback env `GATEWAYAPI_TOKEN`/`GATEWAYAPI_REGION`/`SMS_SENDER`), med test-SMS
 - [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
 - [x] **Lagertræk ved salg (webshop)** — reservation ved ordre, træk ved afhentning, frigivelse ved annullering (`order_stock_apply`, migration 057). POS afventer admind
 - [x] **Eget lager justering** — lageroptælling med årsagskode og log (`/admin/inventory`). POS-webhook afventer admind
@@ -220,7 +221,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 ## Kundekonto & levetid
 - Login uden adgangskode: `/konto` → `POST /api/shop/auth/request` (e-mail eller telefon) → mail med `/konto/login?token=` → knap → server action `verifyLogin` → cookie `ls_session`
 - Linket kræver et klik på siden (mail-scannere må ikke bruge engangstokenet). Tokens 30 min, maks 5 pr. time pr. kunde
-- Telefon-login: SMS-udbyder ikke valgt (`lib/shop/sms.ts`) — indtil da sendes linket til kundens e-mail, hvis den kendes
+- Telefon-login: SMS via GatewayAPI (`POST https://gatewayapi.{com|eu}/rest/mtsms`, `Authorization: Token …`). Token gemmes før afsendelse; fejler SMS'en eller er GatewayAPI ikke sat op, sendes linket til kundens e-mail (og tokenets kanal sættes til 'email', så kun den bekræftede kanal knytter ordrer)
 - Ved login knyttes gamle ordrer til kunden via `link_orders_to_shop_user()` — kun via den kanal kunden har bekræftet
 - Importerede ordrer: sæt `ordered_at` (købsdato), `email` og/eller `customer_info.phone`, `line_items[].product_id` = vores produkt-UUID
 - Levetid: `products.expected_lifespan_months` (+ `lifespan_note`). Forfald = `ordered_at` + levetid (view `customer_product_lifecycle`)
