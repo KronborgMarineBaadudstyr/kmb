@@ -14,6 +14,8 @@ export async function GET(request: Request) {
   const inStock    = url.searchParams.get('in_stock')    === '1'
   const minPrice   = url.searchParams.get('min_price')   || ''
   const maxPrice   = url.searchParams.get('max_price')   || ''
+  // boat_type=sejlbåd|motorbåd (shoppen): skjul varer der kun er til den anden bådtype — varer uden bådtype vises altid
+  const boatType   = url.searchParams.get('boat_type')   || ''
   // shop=1 → exclude archived + rejected + variant_of products automatically
   const shopMode = url.searchParams.get('shop') === '1'
   const page       = Math.max(1, parseInt(url.searchParams.get('page')     || '1',  10))
@@ -142,6 +144,10 @@ export async function GET(request: Request) {
       .is('variant_of_product_id', null)
   }
   if (category)           query = query.contains('categories', [category])
+  if (boatType === 'sejlbåd' || boatType === 'motorbåd') {
+    const other = boatType === 'sejlbåd' ? 'motorbåd' : 'sejlbåd'
+    query = query.or(`boat_type.is.null,boat_type.neq.{${other}}`)
+  }
   if (brand)              query = query.eq('brand', brand)
   if (inStock)            query = query.gt('own_stock_quantity', 0)
   if (minPrice)           query = query.gte('sales_price', parseFloat(minPrice))
