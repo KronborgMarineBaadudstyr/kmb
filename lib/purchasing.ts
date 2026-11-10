@@ -28,7 +28,20 @@ export type PurchaseLine = {
   supplier_stock: number | null
   moq:            number
   reason:         'preferred' | 'cheapest' | 'only' | null
-  sources:        { order_id: string; index: number; product_id: string; missing: number }[]
+  sources:        { order_id: string; order_number: string | null; index: number; product_id: string; missing: number }[]
+}
+
+export type PurchaseCustomer = { name?: string; email?: string; phone?: string; address?: string; postcode?: string; city?: string }
+
+// Samme bestilling set pr. ordre — så varen kan bestilles med levering direkte til kunden (dropshipping)
+export type PurchaseOrder = {
+  order_id:        string
+  order_number:    string | null
+  ordered_at:      string | null
+  shipping_method: string | null       // 'delivery' = sendes til kunden, 'pickup' = afhentes i butikken
+  customer:        PurchaseCustomer
+  note:            string | null
+  lines:           { name: string; sku: string; supplier_sku: string | null; qty: number; purchase_price: number | null }[]
 }
 
 export type PurchaseGroup = {
@@ -36,6 +49,7 @@ export type PurchaseGroup = {
   supplier_name: string
   contact_email: string | null
   lines:         PurchaseLine[]
+  orders:        PurchaseOrder[]   // de samme varer fordelt på ordrer (nyeste først)
   total:         number            // indkøbsværdi ekskl. moms (linjer med kendt pris)
 }
 
@@ -74,7 +88,7 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
   const supabase = createServiceClient()
 
   const { data: orders, error } = await supabase.from('orders')
-    .select('id, order_number, line_items')
+    .select('id, order_number, line_items, customer_info, email, shipping_method, ordered_at, customer_note')
     .eq('stock_state', 'reserved')
     .not('status', 'in', '(completed,cancelled)')
     .limit(2000)
@@ -84,7 +98,14 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
   type Need = { product_id: string; variant_id: string | null; name: string; sku: string; missing: number
                 orders: Set<string>; sources: PurchaseLine['sources'] }
   const need = new Map<string, Need>()
+  const orderInfo = new Map<string, Omit<PurchaseOrder, 'lines'>>()
   for (const o of orders ?? []) {
+    const c = (o.customer_info ?? {}) as PurchaseCustomer
+    orderInfo.set(o.id, {
+      order_id: o.id, order_number: o.order_number, ordered_at: o.ordered_at ?? null,
+      shipping_method: o.shipping_method ?? null, note: o.customer_note ?? null,
+      customer: { ...c, email: c.email ?? o.email ?? undefined },
+    })
     const lines = (Array.isArray(o.line_items) ? o.line_items : []) as Line[]
     lines.forEach((l, index) => {
       const pid = l.product_id && UUID.test(l.product_id) ? l.product_id : null
@@ -94,7 +115,7 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
       const key = `${pid}__${vid ?? ''}`
       const n = need.get(key) ?? { product_id: pid, variant_id: vid, name: l.name ?? '', sku: l.sku ?? '', missing: 0, orders: new Set<string>(), sources: [] }
       n.missing += missing
-      n.sources.push({ order_id: o.id, index, product_id: pid, missing })
+      n.sources.push({ order_id: o.id, order_number: o.order_number, index, product_id: pid, missing })
       if (o.order_number) n.orders.add(o.order_number)
       need.set(key, n)
     })
@@ -159,11 +180,24 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
       supplier_id:   ps?.suppliers?.id ?? null,
       supplier_name: ps?.suppliers?.name ?? 'Ingen leverandør fundet',
       contact_email: ps?.suppliers?.contact_email ?? null,
-      lines: [], total: 0,
+      lines: [], orders: [], total: 0,
     }
     g.lines.push(line)
     if (line.purchase_price != null) g.total += line.purchase_price * line.order_qty
     groups.set(gid, g)
+  }
+
+  // Fordel hver leverandørs varer på ordrerne (antal = det der mangler til ordren; minimumsordre-overskud hører ikke til en ordre)
+  for (const g of groups.values()) {
+    const byOrder = new Map<string, PurchaseOrder>()
+    for (const l of g.lines) for (const src of l.sources) {
+      const info = orderInfo.get(src.order_id)
+      if (!info) continue
+      const po = byOrder.get(src.order_id) ?? { ...info, lines: [] }
+      po.lines.push({ name: l.name, sku: l.sku, supplier_sku: l.supplier_sku, qty: src.missing, purchase_price: l.purchase_price })
+      byOrder.set(src.order_id, po)
+    }
+    g.orders = [...byOrder.values()].sort((a, b) => (b.ordered_at ?? '').localeCompare(a.ordered_at ?? ''))
   }
 
   const sorted = [...groups.values()]
@@ -216,7 +250,8 @@ function newRef(supplierName: string): string {
 }
 
 // Markér alt, der skal bestilles hos én leverandør, som bestilt. Listen beregnes igen på serveren.
-export async function markSupplierOrdered(supplierId: string, by: string):
+// Med orderId: kun den ene ordres varer (fx bestilt med levering direkte til kunden).
+export async function markSupplierOrdered(supplierId: string, by: string, orderId?: string):
   Promise<{ ref: string; lines: number; orders: number; failed: number } | { error: string }> {
   const { groups, error } = await buildPurchaseList()
   if (error) return { error }
@@ -226,7 +261,13 @@ export async function markSupplierOrdered(supplierId: string, by: string):
   const ref = newRef(group.supplier_name)
   const at  = new Date().toISOString()
   const byOrder = new Map<string, PurchaseLine['sources']>()
-  for (const l of group.lines) for (const s of l.sources) byOrder.set(s.order_id, [...(byOrder.get(s.order_id) ?? []), s])
+  let lineCount = 0
+  for (const l of group.lines) {
+    const srcs = orderId ? l.sources.filter(s => s.order_id === orderId) : l.sources
+    if (srcs.length) lineCount++
+    for (const s of srcs) byOrder.set(s.order_id, [...(byOrder.get(s.order_id) ?? []), s])
+  }
+  if (byOrder.size === 0) return { error: 'Ordren har intet at bestille hos denne leverandør' }
 
   let failed = 0
   for (const [orderId, sources] of byOrder) {
@@ -246,7 +287,7 @@ export async function markSupplierOrdered(supplierId: string, by: string):
     })
     if (!ok) failed++
   }
-  return { ref, lines: group.lines.length, orders: byOrder.size, failed }
+  return { ref, lines: lineCount, orders: byOrder.size, failed }
 }
 
 export type OrderedBatch = {

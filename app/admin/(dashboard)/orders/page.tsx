@@ -6,6 +6,7 @@ import { confirmationPath } from '@/lib/shop/payment'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 import { getStore, pickupPlaceHtml, type StoreInfo } from '@/lib/shop/store'
 import { orderedQty, type OrderedEntry } from '@/lib/purchasing'
+import { parseCardInput, rememberCard, maskCard } from '@/lib/payment-refs'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,10 +76,13 @@ async function markPickedUpPaid(formData: FormData) {
   if (!me) return
   const id  = String(formData.get('id') ?? '')
   const now = new Date().toISOString()
-  await createServiceClient().from('orders')
+  const { data: o } = await createServiceClient().from('orders')
     .update({ status: 'completed', payment_status: 'paid', paid_at: now, updated_at: now })
-    .eq('id', id)
+    .eq('id', id).select('shop_user_id').maybeSingle()
   await applyStock(id, 'completed', me.email)
+  // Betalt med kort i butikken: sidste 4 cifre (fra kvitteringen) gemmes som reference til kunden — aldrig hele nummeret
+  const card = parseCardInput(String(formData.get('card') ?? ''))
+  if (card) await rememberCard({ shopUserId: o?.shop_user_id ?? null, orderId: id, card, source: 'manual' })
   revalidatePath('/admin/orders')
 }
 
@@ -109,22 +113,40 @@ const kr = (n: number | string | null) =>
 
 const btn = 'px-3 py-1.5 text-sm rounded-md font-medium'
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  const { status } = await searchParams
-  let query = createServiceClient()
-    .from('orders')
-    .select('id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state')
-    .order('ordered_at', { ascending: false })
-    .limit(200)
-  if (status && status in STATUSES) query = query.eq('status', status)
-  const { data: orders, error } = await query
+type OrderListRow = {
+  id: string; order_number: string | null; source: string; status: string; payment_status: string; payment_method: string | null
+  email: string | null; customer_info: unknown; line_items: unknown; shipping_method: string; order_total: number
+  customer_note: string | null; ordered_at: string; ready_at: string | null; stock_state: string | null; payment_card?: unknown
+}
+
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string }> }) {
+  const { status, q } = await searchParams
+  const orderNo = q?.trim() || null     // fra Indkøb: vis én ordre, foldet ud
+  const COLS = 'id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state'
+  const load = (cols: string) => {
+    let query = createServiceClient().from('orders').select(cols)
+      .order('ordered_at', { ascending: false })
+      .limit(200)
+    if (status && status in STATUSES) query = query.eq('status', status)
+    if (orderNo) query = query.eq('order_number', orderNo)
+    return query
+  }
+  // payment_card kommer med migration 068 — uden den vises ordrerne stadig
+  let res = await load(`${COLS}, payment_card`)
+  if (res.error && /payment_card/.test(res.error.message)) res = await load(COLS)
+  const { error } = res
+  const orders = res.data as unknown as OrderListRow[] | null
 
   return (
     <div className="p-8 max-w-6xl">
       <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Ordrer</h2>
-          <p className="text-sm text-gray-500">Seneste 200 ordrer. Klik en ordre for detaljer og handlinger.</p>
+          <p className="text-sm text-gray-500">
+            {orderNo
+              ? <>Viser ordre <span className="font-mono">{orderNo}</span> · <a href="/admin/orders" className="text-blue-600 hover:underline">Vis alle ordrer</a></>
+              : 'Seneste 200 ordrer. Klik en ordre for detaljer og handlinger.'}
+          </p>
         </div>
         <nav className="flex gap-1.5 text-sm flex-wrap">
           <a href="/admin/orders" className={`px-3 py-1.5 rounded-md border ${!status ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>Alle</a>
@@ -157,7 +179,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           const tracked  = o.stock_state === 'reserved' || o.stock_state === 'deducted'
           const toOrder  = tracked ? lines.reduce((s, l) => s + Math.max(0, (Number(l.qty) || 0) - (l.reserved_qty ?? 0) - orderedQty(l)), 0) : 0
           return (
-            <details key={o.id} className="bg-white rounded-lg border border-gray-200 group">
+            <details key={o.id} open={!!orderNo} className="bg-white rounded-lg border border-gray-200 group">
               <summary className="list-none cursor-pointer px-4 py-3 grid grid-cols-[110px_120px_1fr_150px_100px_auto] gap-4 items-center text-sm hover:bg-gray-50">
                 <span className="font-mono font-semibold text-gray-900">
                   {o.order_number ?? '—'}
@@ -203,6 +225,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     {c.phone && <a href={`tel:${c.phone}`} className="text-blue-600">{c.phone}</a>}<br />
                     {c.email && <a href={`mailto:${c.email}`} className="text-blue-600">{c.email}</a>}
                   </div>
+                  {!!o.payment_card && (
+                    <p className="text-xs text-gray-500">Betalt med kort {maskCard(o.payment_card as { last4: string; bin?: string | null })}</p>
+                  )}
                   {o.customer_note && (
                     <p className="text-xs bg-yellow-50 border border-yellow-200 rounded p-2 text-yellow-900 whitespace-pre-wrap">{o.customer_note}</p>
                   )}
@@ -217,8 +242,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           </button>
                         </form>
                       )}
-                      <form action={markPickedUpPaid}>
+                      <form action={markPickedUpPaid} className="flex flex-col gap-1.5">
                         <input type="hidden" name="id" value={o.id} />
+                        {payAtPickup && (
+                          <label className="text-xs text-gray-500">
+                            Betalt med kort? Sidste 4 cifre fra kvitteringen <span className="text-gray-400">(valgfrit — genkender kunden næste gang)</span>
+                            <input name="card" inputMode="numeric" maxLength={24} placeholder="fx 1234"
+                              className="mt-1 w-full px-2 py-1 text-sm border border-gray-300 rounded-md font-mono" />
+                          </label>
+                        )}
                         <button className={`${btn} w-full bg-green-600 text-white hover:bg-green-700`}>
                           {payAtPickup ? `Afhentet og betalt (${kr(o.order_total)})` : 'Afhentet'}
                         </button>
