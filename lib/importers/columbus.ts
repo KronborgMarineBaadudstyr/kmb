@@ -6,7 +6,7 @@ import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 import { syncImagesToProduct } from './image-sync'
 import { enrichMatchedProduct } from './product-enrichment'
 import { batchEanLookup, type EanMatch } from './ean-lookup'
-import { mergeSyncState, remainingAfterCursor, NO_CHUNKING, type ImportCursor, type RunContext } from '@/lib/import-run'
+import { mergeSyncState, prepareImportItems, NO_CHUNKING, type ImportCursor, type RunContext } from '@/lib/import-run'
 
 // Columbus Marine bruger to XML-filer:
 //   ColumbusCommonStock.xml — fælles sortiment (alle kunder)
@@ -153,8 +153,14 @@ export async function importColumbus(
     if (options.limit) all = all.slice(0, options.limit)
 
     // Sorteret efter varenummer — en fortsat kørsel springer dem over, der allerede er behandlet
-    const total    = new Set(all.map(p => String(p.ItemId))).size
-    const products = remainingAfterCursor(all, p => String(p.ItemId), resume)
+    const { products, total } = await prepareImportItems(SUPPLIER_ID, all, p => String(p.ItemId), p => ({
+      'Navn':        p.Text || null,
+      'Indkøbspris': p.SalesPrice      > 0 ? p.SalesPrice      : null,
+      'Vejl. pris':  p.GrossSalesPrice > 0 ? p.GrossSalesPrice : null,
+      'EAN':         p.EAN && String(p.EAN) !== '0' ? String(p.EAN) : null,
+      'Lager':       Number(p.InStock) || 0,
+      'Varegruppe':  p.ItemGroup || null,
+    }), { resume, test: !!options.limit })
 
     onProgress({
       stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,

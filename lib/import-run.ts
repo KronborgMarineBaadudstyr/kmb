@@ -81,17 +81,67 @@ export async function mergeSyncState(supplierId: string, patch: Record<string, u
   return error?.message ?? null
 }
 
-// Sorterer varerne efter varenummer, beholder kun første forekomst af hvert varenummer og springer dem over,
-// som en tidligere del allerede har behandlet.
-// Står samme varenummer flere gange i leverandørens fil (med forskellig pris), ville hver import ellers
-// skifte prisen frem og tilbage — og logge to modsatrettede prisændringer hver nat.
-export function remainingAfterCursor<T>(items: T[], skuOf: (t: T) => string, resume: ImportCursor | null): T[] {
+// ── Dubletter: samme varenummer flere gange i leverandørens fil ─────────────
+// Kun én af linjerne bruges — ellers ville prisen skifte frem og tilbage ved hver import og logge to
+// modsatrettede prisændringer. Som standard bruges første forekomst; admin kan på Leverandører vælge
+// en anden (sync_state.duplicate_choice = { varenr: nummer i rækkefølgen, 0 = første }).
+
+export type DuplicateChoice = Record<string, number>
+export type DuplicateSku = {
+  sku:     string
+  used:    number                                        // hvilken forekomst importen bruger
+  entries: Record<string, string | number | null>[]      // felterne pr. forekomst, i filens rækkefølge
+}
+export type DuplicateReport = { checked_at: string; count: number; items: DuplicateSku[] }
+
+function groupBySku<T>(items: T[], skuOf: (t: T) => string): Map<string, T[]> {
+  const m = new Map<string, T[]>()
+  for (const t of items) { const k = skuOf(t); const g = m.get(k); if (g) g.push(t); else m.set(k, [t]) }
+  return m
+}
+
+const usedIndex = (n: number, choice: number | undefined) =>
+  choice !== undefined && Number.isInteger(choice) && choice >= 0 && choice < n ? choice : 0
+
+// Varenumre der står flere gange — med de felter, der kan vise forskellen (navn, pris, EAN, enhed …)
+export function findDuplicates<T>(
+  items: T[], skuOf: (t: T) => string,
+  describe: (t: T) => Record<string, string | number | null>,
+  choice: DuplicateChoice = {},
+): DuplicateReport {
+  const dups = [...groupBySku(items, skuOf)].filter(([, g]) => g.length > 1)
+  return {
+    checked_at: new Date().toISOString(),
+    count: dups.length,
+    items: dups.slice(0, 300).map(([sku, g]) => ({ sku, used: usedIndex(g.length, choice[sku]), entries: g.map(describe) })),
+  }
+}
+
+// Sorterer varerne efter varenummer, beholder én linje pr. varenummer (første, eller den admin har valgt)
+// og springer dem over, som en tidligere del af kørslen allerede har behandlet.
+export function remainingAfterCursor<T>(
+  items: T[], skuOf: (t: T) => string, resume: ImportCursor | null, choice: DuplicateChoice = {},
+): T[] {
   const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
-  const seen = new Set<string>()
-  const unique = items.filter(t => { const k = skuOf(t); if (seen.has(k)) return false; seen.add(k); return true })
-  if (unique.length < items.length) console.warn(`[import] ${items.length - unique.length} dubletter af varenumre i leverandørens fil sprunget over`)
+  const unique = [...groupBySku(items, skuOf)].map(([sku, g]) => g[usedIndex(g.length, choice[sku])])
   const sorted = unique.sort((a, b) => cmp(skuOf(a), skuOf(b)))
   return resume ? sorted.filter(t => cmp(skuOf(t), resume.after_sku) > 0) : sorted
+}
+
+// Fælles start for store importer: finder dubletter (gemmes i sync_state.duplicate_skus ved kørslens første del,
+// så de kan ses på Leverandører), bruger admins valg pr. varenummer og returnerer de varer, der er tilbage.
+export async function prepareImportItems<T>(
+  supplierId: string, items: T[], skuOf: (t: T) => string,
+  describe: (t: T) => Record<string, string | number | null>,
+  opts: { resume: ImportCursor | null; test?: boolean },
+): Promise<{ products: T[]; total: number; duplicates: number }> {
+  const { data } = await createServiceClient().from('suppliers').select('sync_state').eq('id', supplierId).single()
+  const choice = (((data?.sync_state ?? {}) as Record<string, unknown>).duplicate_choice ?? {}) as DuplicateChoice
+  const report = findDuplicates(items, skuOf, describe, choice)
+  if (!opts.resume && !opts.test) await mergeSyncState(supplierId, { duplicate_skus: report })
+  if (report.count > 0) console.warn(`[import] ${report.count} varenumre står flere gange i leverandørens fil — én linje pr. varenummer bruges`)
+  const products = remainingAfterCursor(items, skuOf, opts.resume, choice)
+  return { products, total: new Set(items.map(skuOf)).size, duplicates: report.count }
 }
 
 export async function trackImport<P extends ProgressLike>(

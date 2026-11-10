@@ -100,7 +100,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `063_category_performance.sql` — GIN-index på `products.categories` + `product_category_counts()` (alle brugte kategorier med antal i ét kald) ✅ kørt
 - `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer ✅ kørt
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
-- `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ⏳ skal køres
+- `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ✅ kørt
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -131,7 +131,7 @@ Rækkefølge og navne (trin-bjælke `_import-flow.tsx` øverst på hver side, sa
 3. **Saml ens varer** (`/admin/matching`, tidl. "Produkt match") — forslag om samme vare hos flere leverandører; faner: Samme EAN / Lignende navn / Varianter
    - På hvert kort vælger admin **Samme vare** (ét produkt, flere leverandører) eller **Varianter** (ét produkt med varianter). Ved varianter angives egenskaber pr. vare i en tabel (forudfyldt fra `supplier_variant_attributes` eller forskellen i navnene, `inferVariantSetup()`). Gemmes som `create_as` + `member_attributes` på gruppen; `bulkCreateProductsFromGroups()` laver én variant pr. forskellig egenskabs-kombination (samme variant fra flere leverandører = én variant med flere leverandører, prioritet pr. variant)
 4. **Nye varer** (`/admin/staging`, tidl. "Opret produkter") — varer uden match: opret, tilknyt eller afvis
-   - Import-ændringer viser pr. prisændring også **Vores pris**: fulgte med / egen pris beholdt (knap "Brug X kr" → `POST /api/import-changes/[id]/apply`) / anden leverandør foretrukken / ingen salgspris. Samme varenummer to gange i en leverandørfil behandles kun én gang (`remainingAfterCursor()`), ellers skifter prisen frem og tilbage hver nat
+   - Import-ændringer viser pr. prisændring også **Vores pris**: fulgte med / egen pris beholdt (knap "Brug X kr" → `POST /api/import-changes/[id]/apply`) / anden leverandør foretrukken / ingen salgspris. Samme varenummer flere gange i en leverandørfil behandles kun én gang (ellers skifter prisen frem og tilbage hver nat): `prepareImportItems()` (`lib/import-run.ts`, Engholm/Palby/Columbus) gemmer dubletterne med deres felter i `sync_state.duplicate_skus`, og Leverandører viser dem ("Vis og vælg"), hvor admin vælger hvilken linje der bruges — `sync_state.duplicate_choice` = { varenr: nummer i filens rækkefølge }, standard første
 - **Automatik-log** (`/admin/auto-log`) — hvad pipelinen selv har gjort
 
 ## Staging-flow
