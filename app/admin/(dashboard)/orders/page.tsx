@@ -109,14 +109,16 @@ const kr = (n: number | string | null) =>
 
 const btn = 'px-3 py-1.5 text-sm rounded-md font-medium'
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
-  const { status } = await searchParams
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string }> }) {
+  const { status, q } = await searchParams
+  const orderNo = q?.trim() || null     // fra Indkøb: vis én ordre, foldet ud
   let query = createServiceClient()
     .from('orders')
     .select('id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state')
     .order('ordered_at', { ascending: false })
     .limit(200)
   if (status && status in STATUSES) query = query.eq('status', status)
+  if (orderNo) query = query.eq('order_number', orderNo)
   const { data: orders, error } = await query
 
   return (
@@ -124,7 +126,11 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       <div className="flex items-end justify-between mb-6 gap-4 flex-wrap">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 mb-1">Ordrer</h2>
-          <p className="text-sm text-gray-500">Seneste 200 ordrer. Klik en ordre for detaljer og handlinger.</p>
+          <p className="text-sm text-gray-500">
+            {orderNo
+              ? <>Viser ordre <span className="font-mono">{orderNo}</span> · <a href="/admin/orders" className="text-blue-600 hover:underline">Vis alle ordrer</a></>
+              : 'Seneste 200 ordrer. Klik en ordre for detaljer og handlinger.'}
+          </p>
         </div>
         <nav className="flex gap-1.5 text-sm flex-wrap">
           <a href="/admin/orders" className={`px-3 py-1.5 rounded-md border ${!status ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>Alle</a>
@@ -157,7 +163,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           const tracked  = o.stock_state === 'reserved' || o.stock_state === 'deducted'
           const toOrder  = tracked ? lines.reduce((s, l) => s + Math.max(0, (Number(l.qty) || 0) - (l.reserved_qty ?? 0) - orderedQty(l)), 0) : 0
           return (
-            <details key={o.id} className="bg-white rounded-lg border border-gray-200 group">
+            <details key={o.id} open={!!orderNo} className="bg-white rounded-lg border border-gray-200 group">
               <summary className="list-none cursor-pointer px-4 py-3 grid grid-cols-[110px_120px_1fr_150px_100px_auto] gap-4 items-center text-sm hover:bg-gray-50">
                 <span className="font-mono font-semibold text-gray-900">
                   {o.order_number ?? '—'}

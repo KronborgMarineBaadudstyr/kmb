@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { buildPurchaseList, buildOrderedList, markSupplierOrdered, undoOrdered, type PurchaseLine } from '@/lib/purchasing'
+import { buildPurchaseList, buildOrderedList, markSupplierOrdered, undoOrdered, type PurchaseLine, type PurchaseOrder } from '@/lib/purchasing'
 import { getCurrentAdmin } from '@/lib/admin-auth'
 import { ConfirmSubmit } from '../_confirm-submit'
 
@@ -20,10 +20,12 @@ async function markOrdered(formData: FormData) {
   const admin = await getCurrentAdmin()
   if (!admin) redirect('/login')
   const supplierId = String(formData.get('supplier') ?? '')
-  const r = await markSupplierOrdered(supplierId, admin.email)
+  const orderId    = String(formData.get('order') ?? '') || undefined     // kun én ordre (fx bestilt til levering hos kunden)
+  const view       = formData.get('view') === 'ordrer' ? '&visning=ordrer' : ''
+  const r = await markSupplierOrdered(supplierId, admin.email, orderId)
   revalidatePath('/admin/purchasing')
-  if ('error' in r) redirect(`/admin/purchasing?err=${encodeURIComponent(r.error)}`)
-  redirect(`/admin/purchasing?ordered=${encodeURIComponent(r.ref)}${r.failed ? `&failed=${r.failed}` : ''}`)
+  if ('error' in r) redirect(`/admin/purchasing?err=${encodeURIComponent(r.error)}${view}`)
+  redirect(`/admin/purchasing?ordered=${encodeURIComponent(r.ref)}${r.failed ? `&failed=${r.failed}` : ''}${view}`)
 }
 
 async function undo(formData: FormData) {
@@ -35,12 +37,71 @@ async function undo(formData: FormData) {
   redirect(`/admin/purchasing?undone=${encodeURIComponent(ref)}${r.failed ? `&failed=${r.failed}` : ''}`)
 }
 
+const orderLink = (n: string | null) => n ? `/admin/orders?q=${encodeURIComponent(n)}` : '/admin/orders'
+
+function OrderLinks({ numbers }: { numbers: string[] }) {
+  return <>{numbers.map((n, i) => <span key={n}>{i > 0 && ', '}<a href={orderLink(n)} className="text-blue-600 hover:underline">{n}</a></span>)}</>
+}
+
+// Én ordre hos én leverandør: kunde, levering og varer — klar til at bestille med levering direkte til kunden
+function OrderCard({ o, supplierId }: { o: PurchaseOrder; supplierId: string | null }) {
+  const c = o.customer
+  const delivery = o.shipping_method === 'delivery'
+  const address = [c.name, c.address, [c.postcode, c.city].filter(Boolean).join(' ')].filter(Boolean)
+  return (
+    <div className="border-t border-gray-100 px-4 py-3 grid md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_auto] gap-4">
+      <div className="text-sm min-w-0">
+        <a href={orderLink(o.order_number)} className="font-mono font-semibold text-blue-600 hover:underline">{o.order_number ?? '—'}</a>
+        {o.ordered_at && <span className="ml-2 text-xs text-gray-400">{new Date(o.ordered_at).toLocaleDateString('da-DK')}</span>}
+        {delivery ? (
+          <div className="mt-1.5">
+            <span className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded px-1.5 py-0.5">Sendes til kunden — kan leveres direkte</span>
+            <address className="not-italic mt-1.5 text-gray-800 leading-snug select-all">
+              {address.map((l, i) => <div key={i}>{l}</div>)}
+            </address>
+            <div className="text-xs text-gray-500 mt-1">{[c.phone, c.email].filter(Boolean).join(' · ')}</div>
+          </div>
+        ) : (
+          <div className="mt-1.5">
+            <span className="text-xs font-medium text-gray-700 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">Afhentes i butikken — bestil til butikken</span>
+            <div className="text-gray-800 mt-1.5">{c.name ?? '—'}</div>
+            <div className="text-xs text-gray-500">{[c.phone, c.email].filter(Boolean).join(' · ')}</div>
+          </div>
+        )}
+        {o.note && <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 rounded px-2 py-1">Kundens note: {o.note}</p>}
+      </div>
+      <table className="text-sm self-start">
+        <tbody>
+          {o.lines.map((l, i) => (
+            <tr key={i}>
+              <td className="pr-3 py-0.5 text-right tabular-nums font-semibold text-gray-900 whitespace-nowrap">{l.qty} ×</td>
+              <td className="pr-3 py-0.5 text-gray-800">{l.name}</td>
+              <td className="py-0.5 font-mono text-xs text-gray-500 whitespace-nowrap">{l.supplier_sku ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {supplierId && (
+        <form action={markOrdered} className="self-start">
+          <input type="hidden" name="supplier" value={supplierId} />
+          <input type="hidden" name="order" value={o.order_id} />
+          <input type="hidden" name="view" value="ordrer" />
+          <ConfirmSubmit label="Markér ordre som bestilt" pendingLabel="Markerer…"
+            confirmText={`Markér varerne til ordre ${o.order_number ?? ''} som bestilt?`}
+            className="px-2.5 py-1 text-xs border border-gray-300 text-gray-700 rounded-md hover:bg-gray-50 font-medium disabled:opacity-40 whitespace-nowrap" />
+        </form>
+      )}
+    </div>
+  )
+}
+
 const fmtDate = (d: string) => new Date(d).toLocaleString('da-DK', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
 
 export default async function PurchasingPage({
   searchParams,
-}: { searchParams: Promise<{ ordered?: string; undone?: string; failed?: string; err?: string }> }) {
+}: { searchParams: Promise<{ ordered?: string; undone?: string; failed?: string; err?: string; visning?: string }> }) {
   const sp = await searchParams
+  const byOrder = sp.visning === 'ordrer'
   const [{ groups, error }, { batches }] = await Promise.all([buildPurchaseList(), buildOrderedList()])
   const lineCount = groups.reduce((s, g) => s + g.lines.length, 0)
 
@@ -65,7 +126,14 @@ export default async function PurchasingPage({
       )}
       {sp.err && <p className="mb-4 text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-2">{sp.err}</p>}
 
-      <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Skal bestilles</h3>
+      <div className="flex items-center justify-between gap-4 mb-3 flex-wrap">
+        <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Skal bestilles</h3>
+        <nav className="flex gap-1 text-sm">
+          <a href="/admin/purchasing" className={`px-3 py-1 rounded-md border ${!byOrder ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>Pr. vare</a>
+          <a href="/admin/purchasing?visning=ordrer" className={`px-3 py-1 rounded-md border ${byOrder ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}
+            title="Varerne fordelt på ordrer med kundens adresse — til bestilling med levering direkte til kunden">Pr. ordre</a>
+        </nav>
+      </div>
 
       {error && <p className="mb-4 text-sm text-red-600">Kunne ikke hente indkøbslisten: {error}</p>}
       {!error && lineCount === 0 && (
@@ -81,7 +149,7 @@ export default async function PurchasingPage({
               <div>
                 <h3 className="font-semibold text-gray-900">{g.supplier_name}</h3>
                 <p className="text-xs text-gray-500">
-                  {g.lines.length} {g.lines.length === 1 ? 'vare' : 'varer'}
+                  {g.lines.length} {g.lines.length === 1 ? 'vare' : 'varer'} · {g.orders.length} {g.orders.length === 1 ? 'ordre' : 'ordrer'}
                   {g.total > 0 && <> · indkøb ca. {kr(g.total)} ekskl. moms</>}
                   {g.contact_email && <> · <a href={`mailto:${g.contact_email}`} className="text-blue-600">{g.contact_email}</a></>}
                   {!g.supplier_id && ' · produkterne har ingen aktiv leverandør — tilknyt en under Produkter'}
@@ -104,6 +172,11 @@ export default async function PurchasingPage({
                 )}
               </div>
             </header>
+            {byOrder ? (
+              g.orders.length > 0
+                ? g.orders.map(o => <OrderCard key={o.order_id} o={o} supplierId={g.supplier_id} />)
+                : <p className="px-4 py-3 text-sm text-gray-400">Varerne kunne ikke knyttes til en ordre.</p>
+            ) : (
             <table className="w-full text-sm">
               <thead className="text-xs text-gray-500 uppercase tracking-wide">
                 <tr className="border-b border-gray-100">
@@ -139,12 +212,13 @@ export default async function PurchasingPage({
                         title={short ? 'Leverandøren har færre på lager end der skal bestilles' : undefined}>
                         {l.supplier_stock ?? '—'}
                       </td>
-                      <td className="px-4 py-2 text-xs text-gray-500">{l.orders.join(', ')}</td>
+                      <td className="px-4 py-2 text-xs text-gray-500"><OrderLinks numbers={l.orders} /></td>
                     </tr>
                   )
                 })}
               </tbody>
             </table>
+            )}
           </section>
         ))}
       </div>
@@ -177,7 +251,7 @@ export default async function PurchasingPage({
                     <tr key={i}>
                       <td className="px-4 py-1.5 text-gray-800">{l.name}<span className="ml-2 font-mono text-xs text-gray-400">{l.sku}</span></td>
                       <td className="px-4 py-1.5 text-right tabular-nums w-20">{l.qty} stk</td>
-                      <td className="px-4 py-1.5 text-xs text-gray-500 w-32">{l.order_number}</td>
+                      <td className="px-4 py-1.5 text-xs w-32">{l.order_number && <a href={orderLink(l.order_number)} className="text-blue-600 hover:underline">{l.order_number}</a>}</td>
                     </tr>
                   ))}
                 </tbody>
