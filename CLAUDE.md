@@ -103,6 +103,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ✅ kørt
 - `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ✅ kørt
 - `068_customer_payment_refs.sql` — `customer_payment_refs` (kunde ↔ delvist kortnummer: sidste 4 + evt. første 6, type, udløb, kilde pos/online/manual) + `orders.payment_card` ⏳ skal køres
+- `069_shop_user_boats.sql` — `shop_user_boats` (kundens båd: navn, sejlbåd/motorbåd, længde i fod — én pr. kunde) ⏳ skal køres
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -219,6 +220,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - Server actions går ikke gennem middleware — kald selv `isAdmin()` (`lib/admin-auth.ts`)
 - **Redigering fra shoppen:** er man logget ind som admin, viser produktsiden (`/produkt/[id]`) en "✏️ Rediger produkt"-knap → panel (`_admin-edit.tsx`) med navn, brand, pris, status, kategorier (første = primær; forslag hentes først når panelet åbnes, via `GET /api/products/category-options`) og beskrivelser. Gemmer kun ændrede felter via `PATCH /api/products/[id]`
 - **Forsiden → bådtype → kategori:** forsiden viser Sejlbåd / Motorbåd (`/sejlbaad`, `/motorbaad`, `app/(shop)/_boat-categories.tsx`). Hver viser kategorierne, hvis `categories.boat_types` indeholder bådtypen (styres i Sortiment → Kategorier; tom = begge), sorteret efter `sort_order`. Kategorilinks får `?baad=`: brødkrumme via bådtypen, og produkter hvis `products.boat_type` kun er den anden bådtype skjules (`/api/products?boat_type=`). `lib/shop/boat-types.ts`
+- **Min båd-profil:** vælger en besøgende Sejlbåd/Motorbåd, huskes det i browseren (`localStorage` `ls_boat_profile`, `inferred: true` — `lib/shop/boat-storage.ts`). Bådtypesiden og kurven viser `BoatPrompt` (`app/(shop)/_boat-prompt.tsx`): "Har du en sejlbåd? Giv den navn og længde" — kun e-mail kræves. Ikke logget ind → login-link med `purpose: 'boat'` og `next=/min-baad?gem=1`; efter klik gemmer Min båd båden på kontoen (`PUT /api/shop/boat`, tabel `shop_user_boats`, migration 069). Logget ind → gemmes direkte. Skjules når båden er gemt, linket er sendt, eller "Ikke nu" (30 dage)
 - **Shop-hastighed:** produktsiden henter produkt, varianter og admin-tjek samtidig (`cache()` deler opslaget med metadata) og streamer "Flere i …" ind bagefter; `loading.tsx` på produkt- og kategorisider. Kategorier slås op via `getCategoryCounts()` (`lib/shop/categories.ts`, RPC fra migration 063 med fallback) — hent aldrig alle produkters kategorier til appen (Supabase giver kun 1000 rækker pr. kald). Kategorisiden kalder `/api/products`-handleren direkte i stedet for over HTTP
 
 ## Kundekonto & levetid

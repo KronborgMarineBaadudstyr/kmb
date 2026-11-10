@@ -1,12 +1,14 @@
 import Link from 'next/link'
 import { BOATS, getBoatCategories, type BoatSlug } from '@/lib/shop/boat-types'
 import { catIcon } from './_category-icons'
+import { BoatPrompt } from './_boat-prompt'
+import { boatPromptContext } from '@/lib/shop/user-boat'
 
 // Side for én bådtype: alle kategorier, der hører til sejlbåd eller motorbåd
 export async function BoatCategoriesPage({ boat }: { boat: BoatSlug }) {
   const b = BOATS[boat]
   const otherSlug: BoatSlug = boat === 'sejlbaad' ? 'motorbaad' : 'sejlbaad'
-  const categories = await getBoatCategories(boat)
+  const [categories, ctx] = await Promise.all([getBoatCategories(boat), boatPromptContext()])
 
   return (
     <>
@@ -26,6 +28,9 @@ export async function BoatCategoriesPage({ boat }: { boat: BoatSlug }) {
           <p>{b.tagline} · {categories.length} kategorier</p>
         </div>
       </div>
+
+      {/* Husker bådtypen og opfordrer til at gemme båden (navn + længde, kun e-mail kræves) */}
+      <BoatPrompt kind={boat === 'sejlbaad' ? 'sail' : 'motor'} loggedIn={ctx.loggedIn} hasBoat={ctx.hasBoat} />
 
       <div className="ls-catgrid-full">
         {categories.map(c => (

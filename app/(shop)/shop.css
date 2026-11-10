@@ -1602,3 +1602,25 @@
 .ls-boattile-cats { margin-top: 8px; font-size: 12px; color: rgba(255,255,255,.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ls-boattile-count { margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--red); }
 @media (max-width: 640px) { .ls-boattile { padding: 18px 16px; min-height: 0; } .ls-boattile-icon { font-size: 42px; } .ls-boattile-name { font-size: 22px; } }
+
+/* ── MIN BÅD-OPFORDRING ──────────────────────────────────────── */
+.ls-boatprompt {
+  position: relative; display: flex; gap: 14px; align-items: flex-start;
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--red);
+  border-radius: var(--r-lg); padding: 16px 18px; margin: 0 0 18px; box-shadow: var(--sh-card);
+}
+.ls-boatprompt-icon { font-size: 32px; line-height: 1; flex-shrink: 0; }
+.ls-boatprompt-body { flex: 1; min-width: 0; }
+.ls-boatprompt strong { color: var(--ink); font-size: 16px; }
+.ls-boatprompt p { margin: 4px 0 0; font-size: 14px; color: var(--ink-2); }
+.ls-boatprompt-fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.ls-boatprompt-fields .ls-input { flex: 1 1 160px; min-width: 0; }
+.ls-boatprompt-fields .ls-boatprompt-len { flex: 0 1 120px; }
+.ls-boatprompt-fields .ls-btn-primary { flex: 0 0 auto; }
+.ls-boatprompt-close { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: var(--ink-3); font-size: 12px; cursor: pointer; }
+.ls-boatprompt-close:hover { color: var(--ink); text-decoration: underline; }
+.ls-boatprompt-error { color: #b42318 !important; }
+.ls-boatprompt--done { border-left-color: var(--stock); }
+.ls-boatprompt--compact { padding: 12px 14px; }
+.ls-boatprompt--compact .ls-boatprompt-icon { font-size: 26px; }
+@media (max-width: 640px) { .ls-boatprompt { padding: 14px 12px; } .ls-boatprompt-icon { display: none; } .ls-boatprompt-close { position: static; align-self: flex-start; } }

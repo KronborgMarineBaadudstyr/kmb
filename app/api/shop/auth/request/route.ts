@@ -14,7 +14,7 @@ const PHONE_MSG = 'Hvis nummeret er registreret hos os, har vi sendt et login-li
 
 // POST /api/shop/auth/request  { identifier: "mail@eksempel.dk" | "12345678" }
 export async function POST(request: Request) {
-  let body: { identifier?: unknown; next?: unknown }
+  let body: { identifier?: unknown; next?: unknown; purpose?: unknown }
   try { body = await request.json() } catch { return NextResponse.json({ error: 'Ugyldig forespørgsel' }, { status: 400 }) }
 
   const id = parseIdentifier(typeof body.identifier === 'string' ? body.identifier : '')
@@ -67,13 +67,17 @@ export async function POST(request: Request) {
     }
   }
 
+  // "Gem min båd" (Min båd-opfordringen): samme login-link, men mailen forklarer hvorfor
+  const boat = body.purpose === 'boat'
   if (!sentBySms) {
-    await sendEmail(user.email!, 'Dit login-link til LoveSailing', `
+    await sendEmail(user.email!, boat ? 'Bekræft din e-mail og gem din båd' : 'Dit login-link til LoveSailing', `
       <div style="font-family:sans-serif;max-width:480px;margin:auto;color:#1a2543">
-        <h2>Log ind på LoveSailing</h2>
-        <p>Klik på knappen for at logge ind. Linket virker i ${LOGIN_TOKEN_MINUTES} minutter og kan kun bruges én gang.</p>
+        <h2>${boat ? 'Gem din båd hos LoveSailing' : 'Log ind på LoveSailing'}</h2>
+        <p>${boat
+          ? 'Klik på knappen for at bekræfte din e-mail. Så gemmer vi din båd på din profil, og du kan se udstyr, der passer, og hvornår dit udstyr bør efterses.'
+          : 'Klik på knappen for at logge ind.'} Linket virker i ${LOGIN_TOKEN_MINUTES} minutter og kan kun bruges én gang.</p>
         <a href="${link}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#FF8500;color:#fff;
-           border-radius:6px;text-decoration:none;font-weight:600">Log ind →</a>
+           border-radius:6px;text-decoration:none;font-weight:600">${boat ? 'Bekræft og gem båden →' : 'Log ind →'}</a>
         <p style="font-size:12px;color:#888">Har du ikke bedt om at logge ind, kan du se bort fra denne mail.</p>
       </div>`).catch(() => false)
   }
@@ -82,7 +86,9 @@ export async function POST(request: Request) {
     ok: true,
     message: id.kind === 'phone'
       ? PHONE_MSG
-      : `Vi har sendt et login-link til ${id.value}. Linket virker i ${LOGIN_TOKEN_MINUTES} minutter.`,
+      : boat
+        ? `Tjek din e-mail (${id.value}) og klik på linket — så gemmer vi din båd.`
+        : `Vi har sendt et login-link til ${id.value}. Linket virker i ${LOGIN_TOKEN_MINUTES} minutter.`,
     // Lokalt uden Resend: vis linket, så login kan testes. Aldrig i produktion.
     ...(process.env.NODE_ENV !== 'production' && !emailConfigured() ? { dev_link: link } : {}),
   })
