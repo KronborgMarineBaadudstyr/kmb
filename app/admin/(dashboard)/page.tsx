@@ -47,7 +47,7 @@ const STEPS: Step[] = [
   { label: 'Kundekonto med login via e-mail-link, ordrehistorik og vedligehold',                            status: 'done' },
   { label: 'Checkout med betal ved afhentning for kendte kunder',                                           status: 'done' },
   { label: 'Online betaling',                                                                                status: 'waiting', note: 'valg af betalingsudbyder' },
-  { label: 'Handelsbetingelser-side',                                                                        status: 'waiting', note: 'firmaoplysninger og retur-/reklamationsregler' },
+  { label: 'Handelsbetingelser-side (firmaoplysninger udfyldes under Butiksoplysninger)',                   status: 'done' },
   { label: 'Login med telefonnummer (SMS)',                                                                  status: 'waiting', note: 'valg af SMS-udbyder' },
 
   // ── Kunder & ordrer ──

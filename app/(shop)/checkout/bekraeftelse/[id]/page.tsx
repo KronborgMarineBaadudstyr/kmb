@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { SHIPPING_METHODS, isShippingMethod } from '@/lib/shop/shipping'
 import { fmtKr } from '@/lib/shop/email'
-import { STORE } from '@/lib/shop/store'
+import { getStore } from '@/lib/shop/store'
 import { ClearCart } from './_clear-cart'
 
 export const dynamic = 'force-dynamic'
@@ -20,6 +20,7 @@ export default async function ConfirmationPage({
   searchParams: Promise<{ t?: string }>
 }) {
   const { id } = await params
+  const STORE = await getStore()
   const { t }  = await searchParams
   if (!t || !/^[0-9a-f-]{36}$/i.test(id)) notFound()
 

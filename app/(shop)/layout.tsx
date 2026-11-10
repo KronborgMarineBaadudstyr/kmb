@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Source_Sans_3, Playfair_Display } from 'next/font/google'
 import { CartProvider } from './_cart'
 import { ShopHeader, BottomNav } from './_shell'
+import { ShopFooter } from './_footer'
 import './shop.css'
 
 const sourceSans = Source_Sans_3({
@@ -30,6 +31,7 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
         <ShopHeader />
         <main className="ls-main">
           {children}
+          <ShopFooter />
         </main>
         <BottomNav />
       </CartProvider>

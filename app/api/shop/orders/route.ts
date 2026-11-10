@@ -5,7 +5,7 @@ import { isShippingMethod, shippingCost, SHIPPING_METHODS } from '@/lib/shop/shi
 import { startPayment, confirmationPath, isPaymentMethod, onlinePaymentAvailable, type PaymentMethod } from '@/lib/shop/payment'
 import { getShopUser } from '@/lib/shop/auth'
 import { payAtPickupEligible } from '@/lib/shop/customers'
-import { STORE } from '@/lib/shop/store'
+import { getStore, type StoreInfo } from '@/lib/shop/store'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 
 export const dynamic = 'force-dynamic'
@@ -191,7 +191,7 @@ export async function POST(request: Request) {
     customer.email,
     `Ordrebekræftelse ${order.order_number} — LoveSailing`,
     orderEmailHtml(order.order_number, lines, subtotal, shipping, total, method, payment,
-      `${await siteUrl()}${confirmationPath(order)}`),
+      `${await siteUrl()}${confirmationPath(order)}`, await getStore()),
   ).catch(() => false)
 
   const { redirectUrl } = payment === 'pickup'
@@ -202,7 +202,7 @@ export async function POST(request: Request) {
 
 function orderEmailHtml(
   orderNumber: string, lines: Line[], subtotal: number, shipping: number, total: number,
-  method: 'delivery' | 'pickup', payment: PaymentMethod, link: string,
+  method: 'delivery' | 'pickup', payment: PaymentMethod, link: string, store: StoreInfo,
 ) {
   const rows = lines.map(l => `
     <tr>
@@ -222,9 +222,9 @@ function orderEmailHtml(
             <td style="font-weight:700;padding-top:6px;text-align:right">${fmtKr(total)}</td></tr>
       </table>
       ${payment === 'pickup'
-        ? `<p>Du betaler ved afhentning hos ${escapeHtml(STORE.name)}. Vi sender en mail, når varerne er klar til afhentning.</p>`
+        ? `<p>Du betaler ved afhentning hos ${escapeHtml(store.name)}${store.address ? `, ${escapeHtml(store.address)}` : ''}. Vi sender en mail, når varerne er klar til afhentning.</p>`
         : ''}
       <p><a href="${link}" style="color:#FF8500">Se din ordre</a></p>
-      <p style="font-size:11px;color:#888">LoveSailing.dk</p>
+      <p style="font-size:11px;color:#888">LoveSailing.dk · <a href="${new URL(link).origin}/handelsbetingelser" style="color:#888">Handelsbetingelser</a>${store.cvr ? ` · ${escapeHtml(store.legalName ?? store.name)} · CVR ${escapeHtml(store.cvr)}` : ''}</p>
     </div>`
 }

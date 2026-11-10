@@ -1568,3 +1568,19 @@
 }
 @keyframes ls-skel { from { background-position: 200% 0 } to { background-position: -200% 0 } }
 @media (prefers-reduced-motion: reduce) { .ls-skel { animation: none; } }
+
+/* ── HANDELSBETINGELSER ──────────────────────────────────────── */
+.ls-legal { max-width: 760px; margin: 32px auto 48px; color: var(--ink-2); line-height: 1.6; font-size: 15px; }
+.ls-legal h1 { font-family: var(--font-serif), serif; color: var(--ink); font-size: 32px; margin: 0 0 12px; }
+.ls-legal h2 { color: var(--ink); font-size: 18px; margin: 28px 0 8px; }
+.ls-legal p { margin: 0 0 10px; }
+.ls-legal a { color: var(--red-deep); }
+.ls-legal-lead { font-size: 16px; color: var(--ink); }
+.ls-legal-form { border: 1px dashed var(--line, #dde2ef); border-radius: 8px; padding: 14px 16px; background: var(--bone); font-size: 14px; }
+.ls-legal-updated { margin-top: 28px; font-size: 13px; color: var(--ink-3); }
+.ls-legal-admin { background: #fff7e6; border: 1px solid #ffd591; color: #874d00; border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+
+/* ── SIDEFOD ─────────────────────────────────────────────────── */
+.ls-footer { border-top: 1px solid var(--line, #dde2ef); margin-top: 48px; padding: 20px 0 28px; font-size: 13px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
+.ls-footer a { color: var(--ink-2); }
+.ls-footer nav { display: flex; gap: 16px; }
