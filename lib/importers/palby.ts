@@ -6,6 +6,7 @@ import { Writable } from 'stream'
 import { syncImagesToProduct } from './image-sync'
 import { enrichMatchedProduct } from './product-enrichment'
 import { batchEanLookup, type EanMatch } from './ean-lookup'
+import { mergeSyncState, remainingAfterCursor, NO_CHUNKING, type ImportCursor, type RunContext } from '@/lib/import-run'
 
 // Palby FTP fil-stier
 const FILES = {
@@ -54,7 +55,7 @@ type StockRow = {
 }
 
 export type PalbyImportProgress = {
-  stage:    'connecting' | 'downloading' | 'parsing' | 'importing' | 'done' | 'error'
+  stage:    'connecting' | 'downloading' | 'parsing' | 'importing' | 'partial' | 'done' | 'error'
   total:    number
   processed: number
   matched:  number
@@ -63,6 +64,7 @@ export type PalbyImportProgress = {
   skipped:  number
   errors:   number
   message:  string
+  cursor?:  ImportCursor     // kun ved 'partial': hvor næste del skal fortsætte
 }
 
 type ProgressCallback = (p: PalbyImportProgress) => void
@@ -232,8 +234,9 @@ function parseStockXml(buf: Buffer): StockRow[] {
 
 export async function importPalby(
   onProgress: ProgressCallback,
-  options: { limit?: number; delta?: boolean } = {}
+  options: { limit?: number; delta?: boolean } & Partial<RunContext> = {}
 ): Promise<void> {
+  const { resume, deadline } = { ...NO_CHUNKING, ...options }
   const supabase = createServiceClient()
 
   const { data: supplier, error: supErr } = await supabase
@@ -272,17 +275,21 @@ export async function importPalby(
     })
 
     // Filtrer: kun Single-produkter (ikke Master/variant-grupperinger)
-    let products = parsePalbyProductCsv(csvBuf)
+    let all = parsePalbyProductCsv(csvBuf)
       .filter(p => p.CatalogElementType === 'Single')
 
-    if (options.limit) products = products.slice(0, options.limit)
+    if (options.limit) all = all.slice(0, options.limit)
 
-    const total = products.length
+    // Sorteret efter varenummer — en fortsat kørsel springer dem over, der allerede er behandlet
+    const total    = all.length
+    const products = remainingAfterCursor(all, p => p.ItemId, resume)
 
     onProgress({
-      stage: 'importing', total, processed: 0, matched: 0,
-      staged: 0, updated: 0, skipped: 0, errors: 0,
-      message: `${total.toLocaleString('da-DK')} Single-produkter — starter matching...`,
+      stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,
+      staged: resume?.staged ?? 0, updated: resume?.updated ?? 0, skipped: resume?.skipped ?? 0, errors: resume?.errors ?? 0,
+      message: resume
+        ? `Fortsætter (del ${resume.chunk + 1}) — ${products.length.toLocaleString('da-DK')} af ${total.toLocaleString('da-DK')} produkter tilbage...`
+        : `${total.toLocaleString('da-DK')} Single-produkter — starter matching...`,
     })
 
     // Hent eksisterende product_suppliers og staging
@@ -311,11 +318,21 @@ export async function importPalby(
     const existingStaging = Object.fromEntries(existingStagingRows.map(r => [r.normalized_sku, r]))
 
     const BATCH = 100
-    const importStart = new Date()
-    let processed = 0, matched = 0, staged = 0, updated = 0, skipped = 0, errors = 0
-    const errorLog: string[] = []
+    const importStart = resume ? new Date(resume.started_at) : new Date()
+    let processed = resume?.processed ?? 0, matched = resume?.matched ?? 0, staged  = resume?.staged ?? 0
+    let updated   = resume?.updated   ?? 0, skipped = resume?.skipped ?? 0, errors  = resume?.errors ?? 0
+    const errorLog: string[] = [...(resume?.error_log ?? [])]
 
     for (let i = 0; i < products.length; i += BATCH) {
+      // Tiden er ved at løbe ud — gem hvor vi er nået til, så næste del fortsætter herfra
+      if (deadline && i > 0 && Date.now() > deadline) {
+        onProgress({
+          stage: 'partial', total, processed, matched, staged, updated, skipped, errors,
+          message: `${processed.toLocaleString('da-DK')} / ${total.toLocaleString('da-DK')} behandlet — fortsætter i næste del...`,
+          cursor: { after_sku: products[i - 1].ItemId, processed, matched, updated, staged, skipped, errors, error_log: errorLog, started_at: '', chunk: 0 },
+        })
+        return
+      }
       const batch = products.slice(i, i + BATCH)
 
       const eans = batch.map(p => p.Barcode).filter(Boolean)
@@ -478,14 +495,15 @@ export async function importPalby(
       })
     }
 
-    const newSyncState = {
-      ...(s.sync_state ?? {}),
-      last_full_product_sync: new Date().toISOString(),
-      last_import_errors: errorLog.slice(0, 500),
-    }
-    await supabase.from('suppliers')
-      .update({ last_synced_at: new Date().toISOString(), sync_state: newSyncState })
+    // sync_state flettes med den nyeste version (import-run har skrevet i den undervejs)
+    const { error: syncErr } = await supabase.from('suppliers')
+      .update({ last_synced_at: new Date().toISOString() })
       .eq('id', SUPPLIER_ID)
+    if (syncErr) {
+      console.error('[palby] kunne ikke gemme sync-tidspunkt:', syncErr.message)
+      errorLog.push(`Kunne ikke gemme "Sidst synkret": ${syncErr.message}`)
+    }
+    await mergeSyncState(SUPPLIER_ID, { last_full_product_sync: new Date().toISOString(), last_import_errors: errorLog.slice(0, 500) })
 
     await flagRecentlyImportedForReview(SUPPLIER_ID, importStart, supabase)
 

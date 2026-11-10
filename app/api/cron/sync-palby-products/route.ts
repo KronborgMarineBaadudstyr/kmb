@@ -1,29 +1,11 @@
 import { importPalby } from '@/lib/importers/palby'
-import { trackImport } from '@/lib/import-run'
-import { verifyCronRequest } from '@/lib/cron-auth'
-import { NextResponse } from 'next/server'
+import { chainedCronImport } from '@/lib/import-chain'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
 
-// Kører dagligt kl. 23 — efter Palby opdaterer fuld produktfil kl. 22
+// Kører efter Palby har opdateret den fulde produktfil — fuld fil, da Palby ikke har en stabil delta-produktfil.
+// Kører i dele á ca. 3½ min — hver del fortsætter, hvor den forrige slap (lib/import-chain.ts)
 export async function GET(request: Request) {
-  if (!verifyCronRequest(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
-
-  let matched = 0, updated = 0, staged = 0, errors = 0
-
-  try {
-    await trackImport({ supplier: 'Palby', source: 'cron', kind: 'products' }, onP => importPalby(onP, { delta: false }), p => {
-      matched = p.matched ?? 0; updated = p.updated ?? 0; staged = p.staged ?? 0; errors = p.errors ?? 0
-    })  // fuld fil — Palby har ikke en stabil delta-produktfil endnu
-
-    console.log(`[cron] Palby produktsync done — matched:${matched} updated:${updated} staged:${staged} errors:${errors}`)
-    return NextResponse.json({ ok: true, matched, updated, staged, errors })
-  } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e)
-    console.error('[cron] Palby produktsync fejl:', msg)
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 })
-  }
+  return chainedCronImport(request, 'Palby', (onP, ctx) => importPalby(onP, { delta: false, ...ctx }))
 }
