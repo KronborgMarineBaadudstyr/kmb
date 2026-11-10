@@ -4,7 +4,7 @@ import { getCurrentAdmin } from '@/lib/admin-auth'
 import { SHIPPING_METHODS, isShippingMethod } from '@/lib/shop/shipping'
 import { confirmationPath } from '@/lib/shop/payment'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
-import { STORE, pickupPlaceHtml } from '@/lib/shop/store'
+import { getStore, pickupPlaceHtml, type StoreInfo } from '@/lib/shop/store'
 import { orderedQty, type OrderedEntry } from '@/lib/purchasing'
 
 export const dynamic = 'force-dynamic'
@@ -64,7 +64,7 @@ async function markReady(formData: FormData) {
     await supabase.from('orders').update({ status: 'ready', updated_at: new Date().toISOString() }).eq('id', id)
   } else {
     const to = o.email ?? (o.customer_info as Customer)?.email
-    if (to) await sendEmail(to, `Din ordre ${o.order_number} er klar til afhentning`, readyEmailHtml(o, await siteUrl())).catch(() => false)
+    if (to) await sendEmail(to, `Din ordre ${o.order_number} er klar til afhentning`, readyEmailHtml(o, await siteUrl(), await getStore())).catch(() => false)
   }
   revalidatePath('/admin/orders')
 }
@@ -85,7 +85,7 @@ async function markPickedUpPaid(formData: FormData) {
 function readyEmailHtml(o: {
   id: string; order_number: string; customer_info: unknown; line_items: unknown; order_total: number
   payment_method: string | null; payment_status: string; access_token: string | null
-}, site: string) {
+}, site: string, store: StoreInfo) {
   const c     = (o.customer_info ?? {}) as Customer
   const lines = (Array.isArray(o.line_items) ? o.line_items : []) as Line[]
   const pay   = o.payment_method === 'pickup' && o.payment_status !== 'paid'
@@ -94,13 +94,13 @@ function readyEmailHtml(o: {
     <div style="font-family:sans-serif;max-width:520px;margin:auto;color:#1a2543">
       <h2>${c.name ? `Hej ${escapeHtml(c.name.split(' ')[0])}` : 'Hej'} — dine varer er klar</h2>
       <p>Ordre <strong>${escapeHtml(o.order_number)}</strong> ligger klar til afhentning hos:</p>
-      <p style="background:#f0f2f8;border-radius:8px;padding:12px 14px">${pickupPlaceHtml()}</p>
+      <p style="background:#f0f2f8;border-radius:8px;padding:12px 14px">${pickupPlaceHtml(store)}</p>
       <ul style="padding-left:18px;font-size:14px">
         ${lines.map(l => `<li>${l.qty} × ${escapeHtml(l.name)}</li>`).join('')}
       </ul>
       ${pay ? `<p>Du betaler <strong>${fmtKr(Number(o.order_total))}</strong> i butikken, når du henter varerne.</p>` : ''}
       ${link ? `<p><a href="${link}" style="color:#FF8500">Se din ordre</a></p>` : ''}
-      <p style="font-size:11px;color:#888">${escapeHtml(STORE.name)} · LoveSailing.dk</p>
+      <p style="font-size:11px;color:#888">${escapeHtml(store.name)} · LoveSailing.dk</p>
     </div>`
 }
 

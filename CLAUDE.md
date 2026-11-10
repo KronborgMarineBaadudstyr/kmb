@@ -101,6 +101,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `064_match_group_variants.sql` — `staging_match_groups.create_as` ('same'/'variants') + `member_attributes` (egenskaber pr. vare) — admins valg i Saml ens varer ✅ kørt
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
 - `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ✅ kørt
+- `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ⏳ skal køres
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -183,7 +184,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
 - [x] **Checkout uden betaling** — `/checkout` → `POST /api/shop/orders` → `/checkout/bekraeftelse/[id]?t=` + admin `/admin/orders`
 - [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
-- [ ] **Handelsbetingelser-side** — checkout kræver accept, men siden findes ikke endnu
+- [x] **Handelsbetingelser-side** — `/handelsbetingelser` (forbrugeraftaleloven/købeloven: fortrydelse 14 dage inkl. standardformular og undtagelse for varer skåret i længde, reklamation 24 mdr., klage via Nævnenes Hus, persondata). Firmaoplysninger fra Butiksoplysninger; mangler CVR/adresse/e-mail, ser admin en advarsel på siden
 - [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
 - [x] **Verificér lovesailing.dk i Resend** — afsender er `no-reply@lovesailing.dk` (`lib/shop/email.ts`)
 - [x] **Salgsindsigt + AI-assistent** — `/admin/insights` og `/admin/ai` (se afsnit nedenfor)
@@ -207,7 +208,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - Uden online betaling kan ukendte kunder ikke bestille (knappen er låst)
 - Afhentningsflow i `/admin/orders`: Ny → Klar til afhentning (mail til kunden, én gang) → Afhentet og betalt
 - Lager: ny ordre reserverer min(antal, ledigt) pr. linje (`line_items[].reserved_qty`); resten skal bestilles hos leverandør (vises i admin). Afsluttet → træk fra beholdning, annulleret → frigiv, genåbnet → reservér igen. Én transaktion pr. ordre med rækkelåse, idempotent via `orders.stock_state`
-- Butikkens adresse/åbningstider til mails: `lib/shop/store.ts`
+- Butiksoplysninger (navn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt): `getStore()` / `getStoreSettings()` i `lib/shop/store.ts` (tabel `store_settings`, redigeres på `/admin/butik`, falder tilbage til standardværdier). Bruges af handelsbetingelser, sidefoden (`app/(shop)/_footer.tsx`), kvittering og ordremails
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
 - E-mails via Resend (`lib/shop/email.ts`) — sendes kun hvis `RESEND_API_KEY` er sat
 - **Admin-login:** `/login` → e-mail → magic link `/login/bekraeft?token=` → knap → cookie `kmb_admin` (session i `admin_sessions`, 14 dage). Ejere opretter/deaktiverer admins på `/admin/admins`. Kan mailen ikke sendes, logges linket i serverloggen (Vercel) som nødadgang

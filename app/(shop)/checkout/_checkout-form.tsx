@@ -184,7 +184,7 @@ export function CheckoutForm({ account, onlineAvailable }: { account: Account; o
           </label>
           <label className="ls-check">
             <input type="checkbox" required checked={terms} onChange={e => setTerms(e.target.checked)} />
-            <span>Jeg accepterer handelsbetingelserne</span>
+            <span>Jeg accepterer <a href="/handelsbetingelser" target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>handelsbetingelserne</a></span>
           </label>
         </div>
 
