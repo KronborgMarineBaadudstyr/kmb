@@ -23,23 +23,32 @@ export async function GET(request: Request) {
 
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
 
-  let q = supabase
-    .from('import_change_log')
-    .select(`
+  const BASE = `
       id, change_type, supplier_sku, product_name, seen_at,
       old_purchase_price, new_purchase_price,
       old_recommended_price, new_recommended_price,
       notes, product_id, staging_id,
-      suppliers ( id, name )
-    `, { count: 'exact' })
-    .gte('seen_at', since)
-    .order('seen_at', { ascending: false })
-    .range(offset, offset + perPage - 1)
+      suppliers ( id, name ),
+      products ( sales_price )`
+  // Migration 066: hvad prisændringen gjorde ved vores salgspris
+  const WITH_ACTION = `${BASE}, variant_id, our_price_old, our_price_new, price_action`
 
-  if (supplierId)  q = q.eq('supplier_id', supplierId)
-  if (changeType)  q = q.eq('change_type', changeType)
+  const query = (select: string) => {
+    let q = supabase
+      .from('import_change_log')
+      .select(select, { count: 'exact' })
+      .gte('seen_at', since)
+      .order('seen_at', { ascending: false })
+      .range(offset, offset + perPage - 1)
+    if (supplierId)  q = q.eq('supplier_id', supplierId)
+    if (changeType)  q = q.eq('change_type', changeType)
+    return q
+  }
 
-  const { data, count, error } = await q
+  let { data, count, error } = await query(WITH_ACTION)
+  if (error && /price_action|our_price|variant_id/.test(error.message)) {
+    ;({ data, count, error } = await query(BASE))   // migration 066 ikke kørt endnu
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

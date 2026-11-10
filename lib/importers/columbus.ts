@@ -153,7 +153,7 @@ export async function importColumbus(
     if (options.limit) all = all.slice(0, options.limit)
 
     // Sorteret efter varenummer — en fortsat kørsel springer dem over, der allerede er behandlet
-    const total    = all.length
+    const total    = new Set(all.map(p => String(p.ItemId))).size
     const products = remainingAfterCursor(all, p => String(p.ItemId), resume)
 
     onProgress({

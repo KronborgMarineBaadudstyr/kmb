@@ -81,10 +81,16 @@ export async function mergeSyncState(supplierId: string, patch: Record<string, u
   return error?.message ?? null
 }
 
-// Sorterer varerne efter varenummer og springer dem over, som en tidligere del allerede har behandlet
+// Sorterer varerne efter varenummer, beholder kun første forekomst af hvert varenummer og springer dem over,
+// som en tidligere del allerede har behandlet.
+// Står samme varenummer flere gange i leverandørens fil (med forskellig pris), ville hver import ellers
+// skifte prisen frem og tilbage — og logge to modsatrettede prisændringer hver nat.
 export function remainingAfterCursor<T>(items: T[], skuOf: (t: T) => string, resume: ImportCursor | null): T[] {
   const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
-  const sorted = [...items].sort((a, b) => cmp(skuOf(a), skuOf(b)))
+  const seen = new Set<string>()
+  const unique = items.filter(t => { const k = skuOf(t); if (seen.has(k)) return false; seen.add(k); return true })
+  if (unique.length < items.length) console.warn(`[import] ${items.length - unique.length} dubletter af varenumre i leverandørens fil sprunget over`)
+  const sorted = unique.sort((a, b) => cmp(skuOf(a), skuOf(b)))
   return resume ? sorted.filter(t => cmp(skuOf(t), resume.after_sku) > 0) : sorted
 }
 
