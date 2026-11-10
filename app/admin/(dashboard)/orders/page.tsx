@@ -6,6 +6,7 @@ import { confirmationPath } from '@/lib/shop/payment'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 import { getStore, pickupPlaceHtml, type StoreInfo } from '@/lib/shop/store'
 import { orderedQty, type OrderedEntry } from '@/lib/purchasing'
+import { parseCardInput, rememberCard, maskCard } from '@/lib/payment-refs'
 
 export const dynamic = 'force-dynamic'
 
@@ -75,10 +76,13 @@ async function markPickedUpPaid(formData: FormData) {
   if (!me) return
   const id  = String(formData.get('id') ?? '')
   const now = new Date().toISOString()
-  await createServiceClient().from('orders')
+  const { data: o } = await createServiceClient().from('orders')
     .update({ status: 'completed', payment_status: 'paid', paid_at: now, updated_at: now })
-    .eq('id', id)
+    .eq('id', id).select('shop_user_id').maybeSingle()
   await applyStock(id, 'completed', me.email)
+  // Betalt med kort i butikken: sidste 4 cifre (fra kvitteringen) gemmes som reference til kunden — aldrig hele nummeret
+  const card = parseCardInput(String(formData.get('card') ?? ''))
+  if (card) await rememberCard({ shopUserId: o?.shop_user_id ?? null, orderId: id, card, source: 'manual' })
   revalidatePath('/admin/orders')
 }
 
@@ -109,17 +113,29 @@ const kr = (n: number | string | null) =>
 
 const btn = 'px-3 py-1.5 text-sm rounded-md font-medium'
 
+type OrderListRow = {
+  id: string; order_number: string | null; source: string; status: string; payment_status: string; payment_method: string | null
+  email: string | null; customer_info: unknown; line_items: unknown; shipping_method: string; order_total: number
+  customer_note: string | null; ordered_at: string; ready_at: string | null; stock_state: string | null; payment_card?: unknown
+}
+
 export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string }> }) {
   const { status, q } = await searchParams
   const orderNo = q?.trim() || null     // fra Indkøb: vis én ordre, foldet ud
-  let query = createServiceClient()
-    .from('orders')
-    .select('id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state')
-    .order('ordered_at', { ascending: false })
-    .limit(200)
-  if (status && status in STATUSES) query = query.eq('status', status)
-  if (orderNo) query = query.eq('order_number', orderNo)
-  const { data: orders, error } = await query
+  const COLS = 'id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state'
+  const load = (cols: string) => {
+    let query = createServiceClient().from('orders').select(cols)
+      .order('ordered_at', { ascending: false })
+      .limit(200)
+    if (status && status in STATUSES) query = query.eq('status', status)
+    if (orderNo) query = query.eq('order_number', orderNo)
+    return query
+  }
+  // payment_card kommer med migration 068 — uden den vises ordrerne stadig
+  let res = await load(`${COLS}, payment_card`)
+  if (res.error && /payment_card/.test(res.error.message)) res = await load(COLS)
+  const { error } = res
+  const orders = res.data as unknown as OrderListRow[] | null
 
   return (
     <div className="p-8 max-w-6xl">
@@ -209,6 +225,9 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                     {c.phone && <a href={`tel:${c.phone}`} className="text-blue-600">{c.phone}</a>}<br />
                     {c.email && <a href={`mailto:${c.email}`} className="text-blue-600">{c.email}</a>}
                   </div>
+                  {!!o.payment_card && (
+                    <p className="text-xs text-gray-500">Betalt med kort {maskCard(o.payment_card as { last4: string; bin?: string | null })}</p>
+                  )}
                   {o.customer_note && (
                     <p className="text-xs bg-yellow-50 border border-yellow-200 rounded p-2 text-yellow-900 whitespace-pre-wrap">{o.customer_note}</p>
                   )}
@@ -223,8 +242,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                           </button>
                         </form>
                       )}
-                      <form action={markPickedUpPaid}>
+                      <form action={markPickedUpPaid} className="flex flex-col gap-1.5">
                         <input type="hidden" name="id" value={o.id} />
+                        {payAtPickup && (
+                          <label className="text-xs text-gray-500">
+                            Betalt med kort? Sidste 4 cifre fra kvitteringen <span className="text-gray-400">(valgfrit — genkender kunden næste gang)</span>
+                            <input name="card" inputMode="numeric" maxLength={24} placeholder="fx 1234"
+                              className="mt-1 w-full px-2 py-1 text-sm border border-gray-300 rounded-md font-mono" />
+                          </label>
+                        )}
                         <button className={`${btn} w-full bg-green-600 text-white hover:bg-green-700`}>
                           {payAtPickup ? `Afhentet og betalt (${kr(o.order_total)})` : 'Afhentet'}
                         </button>

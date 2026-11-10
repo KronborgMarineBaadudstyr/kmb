@@ -135,6 +135,8 @@ export default async function TermsPage() {
       <p>
         Vi bruger dine oplysninger (navn, adresse, e-mail, telefon og ordrer) til at behandle din ordre, levere varerne og give dig service.
         Har du sagt ja til nyheder eller vedligeholdspåmindelser, bruger vi også din e-mail til det — du kan til enhver tid afmelde dig via linket i mailen.
+        Betaler du med kort, gemmer vi kun kortets sidste 4 cifre (og evt. de første 6, der viser kortudstederen) — aldrig hele
+        kortnummeret — så vi kan genkende dig som kunde i butikken og på webshoppen.
         Ordrer gemmes i 5 år af hensyn til bogføringsloven. Vi sælger aldrig dine oplysninger. De deles kun med dem, der hjælper os med at drive shoppen
         (fx hosting, e-mail og fragtfirma), og kun i det omfang, det er nødvendigt.
       </p>

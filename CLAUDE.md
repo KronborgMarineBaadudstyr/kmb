@@ -102,6 +102,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
 - `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ✅ kørt
 - `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ✅ kørt
+- `068_customer_payment_refs.sql` — `customer_payment_refs` (kunde ↔ delvist kortnummer: sidste 4 + evt. første 6, type, udløb, kilde pos/online/manual) + `orders.payment_card` ⏳ skal køres
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -208,6 +209,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - Betal ved afhentning kræver login + kendt kunde (`payAtPickupEligible`: afsluttet eller gammel/importeret ordre, eller admin-overstyring i `/admin/customers`) + afhentning i butik — tjekkes på serveren
 - Uden online betaling kan ukendte kunder ikke bestille (knappen er låst)
 - Afhentningsflow i `/admin/orders`: Ny → Klar til afhentning (mail til kunden, én gang) → Afhentet og betalt
+- **Kortreference** (`lib/payment-refs.ts`, migration 068): ved "Afhentet og betalt" kan kortets sidste 4 cifre (fra terminalens kvittering) indtastes → `orders.payment_card` + `customer_payment_refs`. Kunder → "Find kunde via kort" (sidste 4, evt. første 6) viser "Er det en af disse?". Hele kortnummeret gemmes/accepteres aldrig (`parseCardInput()` afviser det). `rememberCard()`/`fromMaskedPan()` er klar til admind POS og Swedbank Pay (maskedPan)
 - Lager: ny ordre reserverer min(antal, ledigt) pr. linje (`line_items[].reserved_qty`); resten skal bestilles hos leverandør (vises i admin). Afsluttet → træk fra beholdning, annulleret → frigiv, genåbnet → reservér igen. Én transaktion pr. ordre med rækkelåse, idempotent via `orders.stock_state`
 - Butiksoplysninger (navn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt): `getStore()` / `getStoreSettings()` i `lib/shop/store.ts` (tabel `store_settings`, redigeres på `/admin/butik`, falder tilbage til standardværdier). Bruges af handelsbetingelser, sidefoden (`app/(shop)/_footer.tsx`), kvittering og ordremails
 - Kvittering kræver `orders.access_token` i URL (kunden er ikke logget ind)
