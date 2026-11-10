@@ -1,38 +1,10 @@
 import Link from 'next/link'
 import { createServiceClient } from '@/lib/supabase/server'
 import { ProductCard } from './_product-card'
+import { BOATS, getBoatCategories, type BoatSlug } from '@/lib/shop/boat-types'
+import { FREE_SHIPPING_THRESHOLD } from '@/lib/shop/shipping'
 
 export const dynamic = 'force-dynamic'
-
-const CATEGORY_ICONS: Record<string, string> = {
-  'Sikkerhed':             '🛡️',
-  'Tovværk & anker':       '⚓',
-  'Elektronik':            '📡',
-  'Rig & dæk':             '⛵',
-  'Bådpleje':              '🪣',
-  'Motor & olie':          '⚙️',
-  'El & installationer':   '💡',
-  'Vand & sanitet':        '💧',
-  'Komfort ombord':        '☕',
-  'Sejlertøj':             '🧥',
-  'Vandsport':             '🏄',
-  'Gaveartikler':          '🎁',
-  'Navigation':            '🧭',
-  'Anker':                 '⚓',
-}
-
-function catIcon(name: string) {
-  for (const [key, icon] of Object.entries(CATEGORY_ICONS)) {
-    if (name.toLowerCase().includes(key.toLowerCase())) return icon
-  }
-  return '📦'
-}
-
-function slugify(s: string) {
-  return s.toLowerCase()
-    .replace(/æ/g, 'ae').replace(/ø/g, 'oe').replace(/å/g, 'aa')
-    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-}
 
 async function getHomeData() {
   const supabase = createServiceClient()
@@ -44,24 +16,11 @@ async function getHomeData() {
     .not('status', 'eq', 'archived')
     .not('status', 'eq', 'rejected')
 
-  // Top categories by product count
-  const { data: allProds } = await supabase
-    .from('products')
-    .select('categories')
-    .not('status', 'eq', 'archived')
-    .not('status', 'eq', 'rejected')
-    .not('categories', 'is', null)
-
-  const counts = new Map<string, number>()
-  for (const row of allProds ?? []) {
-    for (const cat of (row.categories as string[] ?? [])) {
-      if (cat) counts.set(cat, (counts.get(cat) ?? 0) + 1)
-    }
-  }
-  const topCategories = [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 12)
-    .map(([name, count]) => ({ name, count, slug: slugify(name), icon: catIcon(name) }))
+  // Indgange: Sejlbåd / Motorbåd med antal kategorier
+  const boats = await Promise.all((Object.keys(BOATS) as BoatSlug[]).map(async slug => {
+    const cats = await getBoatCategories(slug)
+    return { slug, ...BOATS[slug], categories: cats.length, top: cats.slice(0, 4).map(c => c.name) }
+  }))
 
   // Newest products
   const { data: newest } = await supabase
@@ -84,11 +43,11 @@ async function getHomeData() {
 
   const total = totalCount ?? 0
 
-  return { topCategories, newest: newest ?? [], priced: priced ?? [], total }
+  return { boats, newest: newest ?? [], priced: priced ?? [], total }
 }
 
 export default async function HomePage() {
-  const { topCategories, newest, priced, total } = await getHomeData()
+  const { boats, newest, priced, total } = await getHomeData()
 
   return (
     <>
@@ -116,24 +75,28 @@ export default async function HomePage() {
             <Link href="/soeg" className="ls-btn-ghost">Søg i kataloget</Link>
           </div>
           <div className="ls-hero-usps">
-            <span>✓ Gratis fragt over 500 kr</span>
+            <span>✓ Gratis fragt fra {FREE_SHIPPING_THRESHOLD} kr</span>
             <span>✓ Hurtig levering</span>
-            <span>✓ 30 dages returret</span>
+            <span>✓ 14 dages fortrydelsesret</span>
           </div>
         </div>
       </div>
 
-      {/* Categories */}
+      {/* Vælg bådtype — derunder kategorierne */}
       <div className="ls-section-header">
-        <h2>Kategorier</h2>
-        <Link href="/kategorier">Se alle</Link>
+        <h2>Hvilken båd har du?</h2>
+        <Link href="/kategorier">Alle kategorier</Link>
       </div>
-      <div className="ls-catgrid">
-        {topCategories.map(c => (
-          <Link key={c.slug} href={`/kategorier/${c.slug}`} className="ls-cattile">
-            <div className="ls-cattile-icon">{c.icon}</div>
-            <div className="ls-cattile-name">{c.name}</div>
-            <div className="ls-cattile-count">{c.count.toLocaleString('da-DK')} varer</div>
+      <div className="ls-boatgrid">
+        {boats.map(b => (
+          <Link key={b.slug} href={`/${b.slug}`} className={`ls-boattile ls-boattile--${b.slug}`}>
+            <div className="ls-boattile-icon" aria-hidden="true">{b.icon}</div>
+            <div className="ls-boattile-body">
+              <div className="ls-boattile-name">{b.label}</div>
+              <div className="ls-boattile-tagline">{b.tagline}</div>
+              {b.top.length > 0 && <div className="ls-boattile-cats">{b.top.join(' · ')}{b.categories > b.top.length ? ' …' : ''}</div>}
+              <div className="ls-boattile-count">{b.categories} kategorier →</div>
+            </div>
           </Link>
         ))}
       </div>

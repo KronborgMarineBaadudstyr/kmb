@@ -1584,3 +1584,21 @@
 .ls-footer { border-top: 1px solid var(--line, #dde2ef); margin-top: 48px; padding: 20px 0 28px; font-size: 13px; color: var(--ink-3); display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: space-between; }
 .ls-footer a { color: var(--ink-2); }
 .ls-footer nav { display: flex; gap: 16px; }
+
+/* ── BÅDTYPER (forside) ──────────────────────────────────────── */
+.ls-boatgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 8px; }
+@media (max-width: 640px) { .ls-boatgrid { grid-template-columns: 1fr; gap: 10px; } }
+.ls-boattile {
+  display: flex; align-items: center; gap: 18px; padding: 24px 22px; border-radius: var(--r-xl);
+  text-decoration: none; color: #fff; background: var(--navy); box-shadow: var(--sh-card);
+  transition: transform .15s ease, box-shadow .15s ease; min-height: 150px;
+}
+.ls-boattile--motorbaad { background: var(--navy-soft); }
+.ls-boattile:hover { transform: translateY(-2px); }
+.ls-boattile-icon { font-size: 56px; line-height: 1; flex-shrink: 0; }
+.ls-boattile-body { min-width: 0; }
+.ls-boattile-name { font-family: var(--font-serif), serif; font-size: 28px; font-weight: 700; line-height: 1.1; }
+.ls-boattile-tagline { margin-top: 6px; font-size: 14px; color: rgba(255,255,255,.8); }
+.ls-boattile-cats { margin-top: 8px; font-size: 12px; color: rgba(255,255,255,.6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ls-boattile-count { margin-top: 10px; font-size: 13px; font-weight: 700; color: var(--red); }
+@media (max-width: 640px) { .ls-boattile { padding: 18px 16px; min-height: 0; } .ls-boattile-icon { font-size: 42px; } .ls-boattile-name { font-size: 22px; } }

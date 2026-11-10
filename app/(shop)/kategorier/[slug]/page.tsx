@@ -6,6 +6,7 @@ import { CategoryFilters } from './_filters'
 import { Suspense } from 'react'
 import { getCategoryCounts, slugify } from '@/lib/shop/categories'
 import { GET as getProducts } from '@/app/api/products/route'
+import { BOATS, isBoatSlug, type BoatSlug } from '@/lib/shop/boat-types'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +40,7 @@ async function fetchProducts(opts: {
   inStock?:  boolean
   minPrice?: string
   maxPrice?: string
+  boat?:     BoatSlug | null
 }) {
   const [sortCol, sortDir] = opts.sort === 'price_asc'  ? ['sales_price', 'asc']  :
                              opts.sort === 'price_desc' ? ['sales_price', 'desc'] :
@@ -57,6 +59,7 @@ async function fetchProducts(opts: {
   if (opts.inStock)  params.set('in_stock', '1')
   if (opts.minPrice) params.set('min_price', opts.minPrice)
   if (opts.maxPrice) params.set('max_price', opts.maxPrice)
+  if (opts.boat)     params.set('boat_type', BOATS[opts.boat].type)
 
   // Kalder API'ets handler direkte i samme proces (samme logik, intet ekstra HTTP-hop/koldstart)
   const res = await getProducts(new Request(`http://internal/api/products?${params.toString()}`))
@@ -80,6 +83,7 @@ export default async function CategoryPage({
     in_stock?:  string
     min_price?: string
     max_price?: string
+    baad?:      string
   }>
 }) {
   const { slug } = await params
@@ -90,6 +94,7 @@ export default async function CategoryPage({
   const inStock  = sp.in_stock  === '1'
   const minPrice = sp.min_price ?? ''
   const maxPrice = sp.max_price ?? ''
+  const boat     = isBoatSlug(sp.baad) ? sp.baad : null   // kom fra Sejlbåd / Motorbåd
 
   const supabase = createServiceClient()
 
@@ -115,7 +120,7 @@ export default async function CategoryPage({
       .maybeSingle()
       .then(r => r.data),
 
-    fetchProducts({ category: matchedCat, sort, page, brand: brand || undefined, inStock, minPrice: minPrice || undefined, maxPrice: maxPrice || undefined }),
+    fetchProducts({ category: matchedCat, sort, page, brand: brand || undefined, inStock, minPrice: minPrice || undefined, maxPrice: maxPrice || undefined, boat }),
 
     // Brands til filter-chips (ufiltreret — viser altid alle brands i kategorien)
     supabase
@@ -151,6 +156,7 @@ export default async function CategoryPage({
     if (inStock)  params.set('in_stock', '1')
     if (minPrice) params.set('min_price', minPrice)
     if (maxPrice) params.set('max_price', maxPrice)
+    if (boat)     params.set('baad', boat)
     return `/kategorier/${slug}?${params.toString()}`
   }
 
@@ -168,7 +174,9 @@ export default async function CategoryPage({
       <nav className="ls-breadcrumb">
         <Link href="/">Hjem</Link>
         <span>/</span>
-        <Link href="/kategorier">Kategorier</Link>
+        {boat
+          ? <Link href={`/${boat}`}>{BOATS[boat].label}</Link>
+          : <Link href="/kategorier">Kategorier</Link>}
         <span>/</span>
         <span style={{ color: 'var(--ink)' }}>{matchedCat}</span>
       </nav>
@@ -178,7 +186,7 @@ export default async function CategoryPage({
         <div className="ls-cat-listing-hero-content">
           <div className="ls-hero-kicker">
             <span className="ls-hero-kicker-dot" />
-            Kategori
+            {boat ? `${BOATS[boat].icon} ${BOATS[boat].label}` : 'Kategori'}
           </div>
           <h1>{matchedCat}</h1>
           {catInfo?.description && (
@@ -210,7 +218,7 @@ export default async function CategoryPage({
           <p>Prøv at fjerne filtrene, eller søg i hele kataloget.</p>
           <div className="ls-empty-actions">
             {(brand || inStock || minPrice || maxPrice) && (
-              <Link href={`/kategorier/${slug}`} className="ls-btn-primary">
+              <Link href={`/kategorier/${slug}${boat ? `?baad=${boat}` : ''}`} className="ls-btn-primary">
                 Fjern filtre
               </Link>
             )}
