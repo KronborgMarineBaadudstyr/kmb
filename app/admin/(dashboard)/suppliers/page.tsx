@@ -106,6 +106,87 @@ async function saveImportSummary(supplierId: string, data: ImportProgress, kind:
   }).catch(() => {})
 }
 
+// Varenumre der står flere gange i leverandørens fil (lib/import-run.ts → sync_state.duplicate_skus).
+// Importen bruger kun én linje pr. varenummer; her kan admin se forskellen og vælge hvilken.
+type DuplicateSku = { sku: string; used: number; entries: Record<string, string | number | null>[] }
+type DuplicateReport = { checked_at: string; count: number; items: DuplicateSku[] }
+
+function DuplicatesPanel({ supplier, onSaved }: { supplier: Supplier; onSaved: (syncState: Record<string, unknown>) => void }) {
+  const [open, setOpen]     = useState(false)
+  const [saving, setSaving] = useState<string | null>(null)
+  const report = supplier.sync_state?.duplicate_skus as DuplicateReport | undefined
+  if (!report || report.count === 0) return null
+  const choice = (supplier.sync_state?.duplicate_choice ?? {}) as Record<string, number>
+
+  async function choose(sku: string, idx: number) {
+    setSaving(sku)
+    const nextChoice = { ...choice, [sku]: idx }
+    const nextReport = { ...report!, items: report!.items.map(d => d.sku === sku ? { ...d, used: idx } : d) }
+    const res = await fetch(`/api/suppliers/${supplier.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sync_state: { duplicate_choice: nextChoice, duplicate_skus: nextReport } }),
+    })
+    setSaving(null)
+    if (res.ok) onSaved({ ...(supplier.sync_state ?? {}), duplicate_choice: nextChoice, duplicate_skus: nextReport })
+    else alert('Kunne ikke gemme valget')
+  }
+
+  const fmt = (v: string | number | null) => v == null || v === '' ? '—' : typeof v === 'number' ? v.toLocaleString('da-DK') : v
+
+  return (
+    <div className="mt-3 border-t border-gray-100 pt-3 text-xs rounded px-3 py-2 bg-amber-50 text-amber-900">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span>
+          ⚠ <strong>{report.count.toLocaleString('da-DK')}</strong> {report.count === 1 ? 'varenummer står' : 'varenumre står'} flere gange i leverandørens fil
+          — importen bruger kun én linje pr. varenummer
+          <span className="text-amber-700/70"> · tjekket {fmtTime(report.checked_at)}</span>
+        </span>
+        <button onClick={() => setOpen(v => !v)} className="underline hover:text-amber-700">{open ? 'Skjul' : 'Vis og vælg'}</button>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-3 max-h-[28rem] overflow-y-auto">
+          <p className="text-amber-800">
+            Vælg hvilken linje der skal bruges for hvert varenummer. Valget gælder fra næste import. Felter der er forskellige, er fremhævet.
+            {report.items.length < report.count && ` Viser de første ${report.items.length}.`}
+          </p>
+          {report.items.map(d => {
+            const fields = [...new Set(d.entries.flatMap(e => Object.keys(e)))]
+            const differs = (f: string) => new Set(d.entries.map(e => String(e[f] ?? ''))).size > 1
+            return (
+              <div key={d.sku} className="bg-white border border-amber-200 rounded overflow-x-auto">
+                <table className="w-full text-xs tabular-nums">
+                  <thead className="bg-amber-100/60 text-amber-900">
+                    <tr>
+                      <th className="px-2 py-1 text-left font-mono font-semibold whitespace-nowrap">{d.sku}</th>
+                      {fields.map(f => <th key={f} className={`px-2 py-1 text-left font-medium whitespace-nowrap ${differs(f) ? 'text-amber-900' : 'text-amber-900/50'}`}>{f}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {d.entries.map((e, i) => (
+                      <tr key={i} className={`border-t border-amber-100 ${d.used === i ? 'bg-green-50' : ''}`}>
+                        <td className="px-2 py-1 whitespace-nowrap">
+                          <label className="flex items-center gap-1.5 cursor-pointer text-gray-700">
+                            <input type="radio" name={`dup-${supplier.id}-${d.sku}`} checked={d.used === i}
+                              disabled={saving === d.sku} onChange={() => choose(d.sku, i)} className="accent-green-600" />
+                            {d.used === i ? 'Bruges' : `Linje ${i + 1}`}
+                          </label>
+                        </td>
+                        {fields.map(f => (
+                          <td key={f} className={`px-2 py-1 ${differs(f) ? 'font-semibold text-gray-900' : 'text-gray-500'}`}>{fmt(e[f] ?? null)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ErrorLogPopover({ errors }: { errors: string[] }) {
   const [open, setOpen] = useState(false)
   return (
@@ -556,6 +637,9 @@ export default function SuppliersPage() {
                     ✗ Fejl: {progress.message}
                   </div>
                 )}
+
+                <DuplicatesPanel supplier={s}
+                  onSaved={st => setSuppliers(prev => prev.map(x => x.id === s.id ? { ...x, sync_state: st } : x))} />
 
                 {/* Seneste kørsler — fra DB (produkter og lager hver for sig), når ingen aktiv import i denne session */}
                 {lastImported !== s.id && importing !== s.id && getSummaries(s).map(sum => (

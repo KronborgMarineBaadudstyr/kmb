@@ -4,7 +4,7 @@ import { flagRecentlyImportedForReview } from '@/lib/review-checker'
 import { syncImagesToProduct } from './image-sync'
 import { enrichMatchedProduct } from './product-enrichment'
 import { batchEanLookup, type EanMatch } from './ean-lookup'
-import { mergeSyncState, remainingAfterCursor, NO_CHUNKING, type ImportCursor, type RunContext } from '@/lib/import-run'
+import { mergeSyncState, prepareImportItems, NO_CHUNKING, type ImportCursor, type RunContext } from '@/lib/import-run'
 
 const SUPPLIER_ID = '37d879e5-c0f7-48ae-b514-168264c80f9f'
 const API_URL     = 'https://www.engholm.dk/api/products'
@@ -128,8 +128,15 @@ export async function importEngholm(
   if (options.limit) all = all.slice(0, options.limit)
 
   // Sorteret efter varenummer, hvert varenummer én gang — en fortsat kørsel springer de behandlede over
-  const total    = new Set(all.map(p => p.sku)).size
-  const products = remainingAfterCursor(all, p => p.sku, resume)
+  const { products, total } = await prepareImportItems(SUPPLIER_ID, all, p => p.sku, p => ({
+    'Navn':         decode(p.title),
+    'Indkøbspris':  p.price  > 0 ? p.price  : null,
+    'Vejl. pris':   p.retail > 0 ? p.retail : null,
+    'EAN':          p.gtin || null,
+    'Enhed':        p.unit || null,
+    'Lager':        p.stock ?? null,
+    'Sidst ændret': p.lastUpdate || null,
+  }), { resume, test: !!options.limit })
   onProgress({
     stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,
     staged: resume?.staged ?? 0, updated: resume?.updated ?? 0, errors: resume?.errors ?? 0,
