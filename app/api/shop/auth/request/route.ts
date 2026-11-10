@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { parseIdentifier, LOGIN_TOKEN_MINUTES } from '@/lib/shop/auth'
 import { newToken, hashToken, safeNext } from '@/lib/tokens'
 import { sendEmail, emailConfigured, siteUrl } from '@/lib/shop/email'
-import { sendSms } from '@/lib/shop/sms'
+import { sendSms, smsConfigured } from '@/lib/shop/sms'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,17 +46,28 @@ export async function POST(request: Request) {
   const token = newToken()
   const next  = safeNext(body.next)
   const link  = `${await siteUrl()}/konto/login?token=${token}${next ? `&next=${encodeURIComponent(next)}` : ''}`
-  const sms   = id.kind === 'phone' && await sendSms(id.value, `Log ind på LoveSailing: ${link}`)
-  const channel: 'email' | 'sms' = sms ? 'sms' : 'email'
-  if (!sms && !user.email) return NextResponse.json({ ok: true, message: PHONE_MSG })
+  // SMS bruges ved telefon-login, når GatewayAPI er sat op (Indstillinger → SMS); ellers e-mail, hvis den kendes
+  const useSms = id.kind === 'phone' && !!user.phone && await smsConfigured()
+  if (!useSms && !user.email) return NextResponse.json({ ok: true, message: PHONE_MSG })
 
+  // Tokenet gemmes før det sendes, så kunden aldrig får et link, der ikke virker
   const ins = await supabase.from('shop_login_tokens').insert({
-    shop_user_id: user.id, channel, token_hash: hashToken(token),
+    shop_user_id: user.id, channel: useSms ? 'sms' : 'email', token_hash: hashToken(token),
     expires_at: new Date(Date.now() + LOGIN_TOKEN_MINUTES * 60_000).toISOString(),
-  })
+  }).select('id').single()
   if (ins.error) return unavailable()
 
-  if (!sms) {
+  let sentBySms = false
+  if (useSms) {
+    sentBySms = await sendSms(user.phone!, `Log ind på LoveSailing: ${link}\nLinket virker i ${LOGIN_TOKEN_MINUTES} min.`)
+    if (!sentBySms) {
+      // SMS fejlede — send til e-mail i stedet (og registrér kanalen, så kun den bekræftede kanal knytter ordrer)
+      if (!user.email) return NextResponse.json({ ok: true, message: PHONE_MSG })
+      await supabase.from('shop_login_tokens').update({ channel: 'email' }).eq('id', ins.data.id)
+    }
+  }
+
+  if (!sentBySms) {
     await sendEmail(user.email!, 'Dit login-link til LoveSailing', `
       <div style="font-family:sans-serif;max-width:480px;margin:auto;color:#1a2543">
         <h2>Log ind på LoveSailing</h2>
