@@ -18,6 +18,7 @@ const navEntries: NavEntry[] = [
   { group: 'Kunder', icon: '👥', items: [
     { href: '/admin/orders',         label: 'Ordrer',              icon: '🧾' },
     { href: '/admin/customers',      label: 'Kundeliste',          icon: '👤' },
+    { href: '/admin/gamle-ordrer',  label: 'Importér gamle ordrer', icon: '📥' },
     { href: '/admin/lifecycle',      label: 'Vedligehold',         icon: '⏳' },
   ]},
 

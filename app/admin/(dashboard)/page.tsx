@@ -54,7 +54,7 @@ const STEPS: Step[] = [
   { group: 'Kunder & ordrer',  label: 'Ordreflow: Ny → Klar til afhentning (mail) → Afhentet og betalt',   status: 'done' },
   { label: 'Kundeliste med styring af betal ved afhentning',                                                status: 'done' },
   { label: 'Vedligeholdspåmindelser på e-mail ud fra levetid',                                              status: 'done' },
-  { label: 'Import af gamle ordrer (e-mail/telefon som kunde-id)',                                          status: 'waiting', note: 'eksempel på eksportfil' },
+  { label: 'Import af gamle ordrer (PDF med salgsbilag — Ordrer → Importér gamle ordrer)',               status: 'done' },
 
   // ── Lager & indkøb ──
   { group: 'Lager & indkøb',   label: 'Eget lager-justering med årsagskode og log',                         status: 'done' },
