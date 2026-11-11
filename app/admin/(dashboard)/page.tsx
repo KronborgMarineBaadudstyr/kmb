@@ -46,7 +46,7 @@ const STEPS: Step[] = [
   { label: 'Kurv + "Gem kurv" med e-mail-link',                                                              status: 'done' },
   { label: 'Kundekonto med login via e-mail-link, ordrehistorik og vedligehold',                            status: 'done' },
   { label: 'Checkout med betal ved afhentning for kendte kunder',                                           status: 'done' },
-  { label: 'Online betaling',                                                                                status: 'waiting', note: 'valg af betalingsudbyder' },
+  { label: 'Online betaling (Swedbank Pay — kort/MobilePay)',                                               status: 'waiting', note: 'Payee ID + access token under Indstillinger → Betaling' },
   { label: 'Handelsbetingelser-side (firmaoplysninger udfyldes under Butiksoplysninger)',                   status: 'done' },
   { label: 'Login med telefonnummer (SMS via GatewayAPI — token sættes under Indstillinger → SMS)',         status: 'done' },
 

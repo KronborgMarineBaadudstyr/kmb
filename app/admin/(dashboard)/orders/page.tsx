@@ -1,8 +1,9 @@
 import { revalidatePath } from 'next/cache'
+import { redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getCurrentAdmin } from '@/lib/admin-auth'
 import { SHIPPING_METHODS, isShippingMethod } from '@/lib/shop/shipping'
-import { confirmationPath } from '@/lib/shop/payment'
+import { confirmationPath, captureOrderPayment, cancelOrderPayment } from '@/lib/shop/payment'
 import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 import { getStore, pickupPlaceHtml, type StoreInfo } from '@/lib/shop/store'
 import { orderedQty, type OrderedEntry } from '@/lib/purchasing'
@@ -19,7 +20,9 @@ const STATUSES: Record<string, { label: string; cls: string }> = {
 }
 const PAYMENT: Record<string, { label: string; cls: string }> = {
   unpaid:   { label: 'Ikke betalt', cls: 'bg-orange-50 text-orange-700 border-orange-200' },
+  authorized: { label: 'Reserveret — trækkes ved levering', cls: 'bg-sky-50 text-sky-700 border-sky-200' },
   paid:     { label: 'Betalt',      cls: 'bg-green-50 text-green-700 border-green-200' },
+  cancelled: { label: 'Reservation frigivet', cls: 'bg-gray-50 text-gray-600 border-gray-200' },
   failed:   { label: 'Fejlet',      cls: 'bg-red-50 text-red-700 border-red-200' },
   refunded: { label: 'Refunderet',  cls: 'bg-gray-50 text-gray-600 border-gray-200' },
 }
@@ -42,10 +45,28 @@ async function updateStatus(formData: FormData) {
   const id     = String(formData.get('id') ?? '')
   const status = String(formData.get('status') ?? '')
   if (!id || !(status in STATUSES)) return
+  // Online betaling (Swedbank Pay): afsluttet = varen er leveret → træk beløbet; annulleret → frigiv reservationen.
+  // Fejler det, ændres status ikke, så betaling og ordre ikke kommer ud af trit.
+  const payErr = status === 'completed' ? await captureOrderPayment(id, me.email)
+               : status === 'cancelled' ? await cancelOrderPayment(id, me.email) : null
+  if (payErr) redirect(`/admin/orders?err=${encodeURIComponent(payErr)}`)
   await createServiceClient().from('orders')
     .update({ status, updated_at: new Date().toISOString() })
     .eq('id', id)
   await applyStock(id, status, me.email)
+  revalidatePath('/admin/orders')
+}
+
+// Sendt til kunden (levering): træk betalingen (hvis reserveret online) og afslut ordren
+async function markShipped(formData: FormData) {
+  'use server'
+  const me = await getCurrentAdmin()
+  if (!me) return
+  const id = String(formData.get('id') ?? '')
+  const payErr = await captureOrderPayment(id, me.email)
+  if (payErr) redirect(`/admin/orders?err=${encodeURIComponent(payErr)}`)
+  await createServiceClient().from('orders').update({ status: 'completed', updated_at: new Date().toISOString() }).eq('id', id)
+  await applyStock(id, 'completed', me.email)
   revalidatePath('/admin/orders')
 }
 
@@ -76,7 +97,18 @@ async function markPickedUpPaid(formData: FormData) {
   if (!me) return
   const id  = String(formData.get('id') ?? '')
   const now = new Date().toISOString()
-  const { data: o } = await createServiceClient().from('orders')
+  const supabase = createServiceClient()
+  const { data: cur } = await supabase.from('orders').select('payment_provider').eq('id', id).maybeSingle()
+  // Betalt online og reserveret: træk beløbet nu, hvor varen udleveres
+  if (cur?.payment_provider === 'swedbankpay') {
+    const payErr = await captureOrderPayment(id, me.email)
+    if (payErr) redirect(`/admin/orders?err=${encodeURIComponent(payErr)}`)
+    await supabase.from('orders').update({ status: 'completed', updated_at: now }).eq('id', id)
+    await applyStock(id, 'completed', me.email)
+    revalidatePath('/admin/orders')
+    return
+  }
+  const { data: o } = await supabase.from('orders')
     .update({ status: 'completed', payment_status: 'paid', paid_at: now, updated_at: now })
     .eq('id', id).select('shop_user_id').maybeSingle()
   await applyStock(id, 'completed', me.email)
@@ -119,8 +151,8 @@ type OrderListRow = {
   customer_note: string | null; ordered_at: string; ready_at: string | null; stock_state: string | null; payment_card?: unknown
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string }> }) {
-  const { status, q } = await searchParams
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; err?: string }> }) {
+  const { status, q, err } = await searchParams
   const orderNo = q?.trim() || null     // fra Indkøb: vis én ordre, foldet ud
   const COLS = 'id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state'
   const load = (cols: string) => {
@@ -159,6 +191,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
         </nav>
       </div>
 
+      {err && <p className="mb-4 text-sm bg-red-50 border border-red-200 text-red-800 rounded-lg px-4 py-2">Betalingen: {err}. Ordrens status er ikke ændret.</p>}
       {error && <p className="text-sm text-red-600 mb-4">Kunne ikke hente ordrer: {error.message}</p>}
       {!error && (orders ?? []).length === 0 && (
         <div className="bg-white rounded-lg border border-dashed border-gray-300 p-10 text-center text-sm text-gray-400">
@@ -256,6 +289,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                         </button>
                       </form>
                     </div>
+                  )}
+
+                  {!isPickup && open && (
+                    <form action={markShipped}>
+                      <input type="hidden" name="id" value={o.id} />
+                      <button className={`${btn} w-full bg-green-600 text-white hover:bg-green-700`}>
+                        {o.payment_status === 'authorized' ? `Sendt til kunden — træk ${kr(o.order_total)}` : 'Sendt til kunden'}
+                      </button>
+                    </form>
                   )}
 
                   <form action={updateStatus} className="flex gap-2">

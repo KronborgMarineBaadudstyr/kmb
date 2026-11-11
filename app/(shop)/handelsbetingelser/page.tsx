@@ -61,8 +61,9 @@ export default async function TermsPage() {
 
       <h2>4. Betaling</h2>
       <p>
-        De mulige betalingsformer vises i kassen. Vælger du <strong>betal ved afhentning</strong>, betaler du i butikken,
-        når du henter varerne. Ved online betaling trækkes beløbet først, når varerne afsendes eller udleveres.
+        De mulige betalingsformer vises i kassen. Online betaling (kort og MobilePay) sker via Swedbank Pay — vi ser aldrig dit fulde kortnummer.
+        Beløbet reserveres, når du bestiller, og trækkes først, når varerne afsendes eller udleveres. Vælger du <strong>betal ved afhentning</strong>,
+        betaler du i butikken, når du henter varerne.
       </p>
 
       <h2>5. Levering og afhentning</h2>
@@ -138,7 +139,7 @@ export default async function TermsPage() {
         Betaler du med kort, gemmer vi kun kortets sidste 4 cifre (og evt. de første 6, der viser kortudstederen) — aldrig hele
         kortnummeret — så vi kan genkende dig som kunde i butikken og på webshoppen.
         Ordrer gemmes i 5 år af hensyn til bogføringsloven. Vi sælger aldrig dine oplysninger. De deles kun med dem, der hjælper os med at drive shoppen
-        (fx hosting, e-mail og fragtfirma), og kun i det omfang, det er nødvendigt.
+        (fx hosting, e-mail, betalingsudbyderen Swedbank Pay og fragtfirma), og kun i det omfang, det er nødvendigt.
       </p>
       <p>
         Du har ret til at få indsigt i, rettet og slettet dine oplysninger. Skriv til {contactLine}. Du kan klage til

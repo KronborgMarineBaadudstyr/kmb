@@ -102,8 +102,9 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `065_variant_attributes.sql` — `variant_attributes` (fælles variant-egenskaber: navn, enhed, værdier med synonymer og rækkefølge), forudfyldt med Størrelse, Farve og varetypernes egenskaber ✅ kørt
 - `066_follow_supplier_price.sql` — prisændringer slår igennem: følger vores salgspris leverandørens gamle vejl. pris (og leverandøren er foretrukken), sættes den til den nye; ellers beholdes vores egen pris. `import_change_log.price_action/our_price_old/our_price_new/variant_id` ✅ kørt
 - `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ✅ kørt
-- `068_customer_payment_refs.sql` — `customer_payment_refs` (kunde ↔ delvist kortnummer: sidste 4 + evt. første 6, type, udløb, kilde pos/online/manual) + `orders.payment_card` ⏳ skal køres
-- `069_shop_user_boats.sql` — `shop_user_boats` (kundens båd: navn, sejlbåd/motorbåd, længde i fod — én pr. kunde) ⏳ skal køres
+- `068_customer_payment_refs.sql` — `customer_payment_refs` (kunde ↔ delvist kortnummer: sidste 4 + evt. første 6, type, udløb, kilde pos/online/manual) + `orders.payment_card` ✅ kørt
+- `069_shop_user_boats.sql` — `shop_user_boats` (kundens båd: navn, sejlbåd/motorbåd, længde i fod — én pr. kunde) ✅ kørt
+- `070_payment_events.sql` — `payment_events` (log pr. ordre: oprettet, reserveret, trukket, annulleret, fejl) + index på `orders.payment_reference` ⏳ skal køres
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -186,7 +187,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 ### Fremtidige features
 - [x] **Produktredigering** — `/products/[id]` inline-redigering (navn, beskrivelse, pris, billeder inkl. overtag leverandørbilleder, varianter, SEO)
 - [x] **Checkout uden betaling** — `/checkout` → `POST /api/shop/orders` → `/checkout/bekraeftelse/[id]?t=` + admin `/admin/orders`
-- [ ] **Betalingsudbyder** — afventer valg (Stripe / Quickpay / Nets Easy / MobilePay); kobles på i `lib/shop/payment.ts`
+- [ ] **Betalingsudbyder** — Swedbank Pay bygget (`lib/shop/swedbankpay.ts` + `lib/shop/payment.ts`); afventer testadgang (Payee ID + access token) → testkøb → skift til produktion på `/admin/betaling`
 - [x] **Handelsbetingelser-side** — `/handelsbetingelser` (forbrugeraftaleloven/købeloven: fortrydelse 14 dage inkl. standardformular og undtagelse for varer skåret i længde, reklamation 24 mdr., klage via Nævnenes Hus, persondata). Firmaoplysninger fra Butiksoplysninger; mangler CVR/adresse/e-mail, ser admin en advarsel på siden
 - [x] **Kundelogin + levetid + påmindelser** — `/konto`, `/admin/lifecycle`, levetid på produkter
 - [x] **Verificér lovesailing.dk i Resend** — afsender er `no-reply@lovesailing.dk` (`lib/shop/email.ts`)
@@ -206,7 +207,9 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 ## Checkout-flow
 - Kurv ligger i `localStorage` (`ls_cart`); linje-id er `produktId` eller `produktId__variantId`
 - `POST /api/shop/orders` genberegner pris (variant `sales_price` ?? produkt `sales_price`) og fragt (`lib/shop/shipping.ts`) — stol aldrig på klientens pris. 409 = priser ændret / vare utilgængelig (klienten retter kurven), 503 = databasefejl
-- Betaling: `online` (slås til i `onlinePaymentAvailable()` når udbyder er koblet på `startPayment()`) eller `pickup` = betal ved afhentning
+- Betaling: `online` = **Swedbank Pay** (Checkout v3.1, redirect; kort/MobilePay) eller `pickup` = betal ved afhentning. Opsætning på `/admin/betaling` (kun ejere; token + Payee ID krypteret i `app_settings` 'swedbankpay', fallback env `SWEDBANK_PAY_TOKEN`/`SWEDBANK_PAY_PAYEE_ID`/`SWEDBANK_PAY_ENV`). **Testmiljø: online betaling vises kun for admins** (`onlinePaymentAvailable(forAdmin)`), produktion: for alle
+  - Flow: ordre oprettes → `startPayment()` (POST /psp/paymentorders, `payment_reference` = paymentOrder-id) → Swedbanks betalingsside → `completeUrl`/`cancelUrl` = `/checkout/betaling/[id]?t=` → `syncPayment()` (GET ?$expand=paid) → `payment_status` unpaid → **authorized** (reserveret) / paid (Sale) / failed / cancelled. Kortets maskedPan gemmes via `rememberCard(source 'online')`. Ordrebekræftelse sendes først ved reservation (`lib/shop/order-email.ts`). Callback `POST /api/shop/payments/swedbank` stoler ikke på indholdet — slår op og kalder `syncPayment()`
+  - **Træk ved levering:** admin "Sendt til kunden" / "Afhentet" / status Afsluttet → `captureOrderPayment()` (capture-operationen); Annulleret → `cancelOrderPayment()`. Fejler Swedbank, ændres ordrens status ikke (fejlen vises øverst). Hændelser logges i `payment_events` (migration 070)
 - Betal ved afhentning kræver login + kendt kunde (`payAtPickupEligible`: afsluttet eller gammel/importeret ordre, eller admin-overstyring i `/admin/customers`) + afhentning i butik — tjekkes på serveren
 - Uden online betaling kan ukendte kunder ikke bestille (knappen er låst)
 - Afhentningsflow i `/admin/orders`: Ny → Klar til afhentning (mail til kunden, én gang) → Afhentet og betalt
