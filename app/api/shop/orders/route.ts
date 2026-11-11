@@ -1,12 +1,12 @@
 import { randomBytes } from 'crypto'
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
-import { isShippingMethod, shippingCost, SHIPPING_METHODS } from '@/lib/shop/shipping'
+import { isShippingMethod, shippingCost } from '@/lib/shop/shipping'
 import { startPayment, confirmationPath, isPaymentMethod, onlinePaymentAvailable, type PaymentMethod } from '@/lib/shop/payment'
 import { getShopUser } from '@/lib/shop/auth'
 import { payAtPickupEligible } from '@/lib/shop/customers'
-import { getStore, type StoreInfo } from '@/lib/shop/store'
-import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
+import { sendOrderConfirmation } from '@/lib/shop/order-email'
+import { getCurrentAdmin } from '@/lib/admin-auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   const payment = body.payment_method
   if (!isPaymentMethod(payment))
     return NextResponse.json({ error: 'Vælg en betalingsmetode' }, { status: 400 })
-  if (payment === 'online' && !onlinePaymentAvailable())
+  if (payment === 'online' && !(await onlinePaymentAvailable(!!(await getCurrentAdmin()))))
     return NextResponse.json({ error: 'Online betaling er ikke åbnet endnu' }, { status: 400 })
 
   const sessionUser = await getShopUser()
@@ -187,44 +187,19 @@ export async function POST(request: Request) {
   const { error: stockErr } = await supabase.rpc('order_stock_apply', { p_order: order.id, p_action: 'reserve', p_actor: 'webshop' })
   if (stockErr) console.error(`[ordre ${order.order_number}] lagerreservation fejlede: ${stockErr.message}`)
 
-  await sendEmail(
-    customer.email,
-    `Ordrebekræftelse ${order.order_number} — LoveSailing`,
-    orderEmailHtml(order.order_number, lines, subtotal, shipping, total, method, payment,
-      `${await siteUrl()}${confirmationPath(order)}`, await getStore()),
-  ).catch(() => false)
-
-  const { redirectUrl } = payment === 'pickup'
-    ? { redirectUrl: confirmationPath(order) }
-    : await startPayment({ ...order, order_total: total, email: customer.email })
-  return NextResponse.json({ ok: true, order_number: order.order_number, redirect: redirectUrl })
-}
-
-function orderEmailHtml(
-  orderNumber: string, lines: Line[], subtotal: number, shipping: number, total: number,
-  method: 'delivery' | 'pickup', payment: PaymentMethod, link: string, store: StoreInfo,
-) {
-  const rows = lines.map(l => `
-    <tr>
-      <td style="padding:6px 0">${l.qty} × ${escapeHtml(l.name)}</td>
-      <td style="padding:6px 0;text-align:right;white-space:nowrap">${fmtKr(l.line_total)}</td>
-    </tr>`).join('')
-  return `
-    <div style="font-family:sans-serif;max-width:520px;margin:auto;color:#1a2543">
-      <h2>Tak for din ordre</h2>
-      <p>Ordrenummer: <strong>${escapeHtml(orderNumber)}</strong></p>
-      <table style="width:100%;border-collapse:collapse;font-size:14px">${rows}
-        <tr><td style="padding-top:12px;border-top:1px solid #dde2ef">Subtotal</td>
-            <td style="padding-top:12px;border-top:1px solid #dde2ef;text-align:right">${fmtKr(subtotal)}</td></tr>
-        <tr><td>${escapeHtml(SHIPPING_METHODS[method].label)}</td>
-            <td style="text-align:right">${shipping === 0 ? 'Gratis' : fmtKr(shipping)}</td></tr>
-        <tr><td style="font-weight:700;padding-top:6px">I alt</td>
-            <td style="font-weight:700;padding-top:6px;text-align:right">${fmtKr(total)}</td></tr>
-      </table>
-      ${payment === 'pickup'
-        ? `<p>Du betaler ved afhentning hos ${escapeHtml(store.name)}${store.address ? `, ${escapeHtml(store.address)}` : ''}. Vi sender en mail, når varerne er klar til afhentning.</p>`
-        : ''}
-      <p><a href="${link}" style="color:#FF8500">Se din ordre</a></p>
-      <p style="font-size:11px;color:#888">LoveSailing.dk · <a href="${new URL(link).origin}/handelsbetingelser" style="color:#888">Handelsbetingelser</a>${store.cvr ? ` · ${escapeHtml(store.legalName ?? store.name)} · CVR ${escapeHtml(store.cvr)}` : ''}</p>
-    </div>`
+  // Betal ved afhentning: bekræftelse nu. Online: først når betalingen er reserveret (syncPayment)
+  if (payment === 'pickup') {
+    await sendOrderConfirmation(order.id)
+    return NextResponse.json({ ok: true, order_number: order.order_number, redirect: confirmationPath(order) })
+  }
+  try {
+    const { redirectUrl } = await startPayment(
+      { ...order, order_total: total, email: customer.email },
+      { userAgent: request.headers.get('user-agent') ?? '' },
+    )
+    return NextResponse.json({ ok: true, order_number: order.order_number, redirect: redirectUrl })
+  } catch (e) {
+    console.error(`[ordre ${order.order_number}] betaling kunne ikke startes:`, e instanceof Error ? e.message : e)
+    return NextResponse.json({ error: 'Betalingen kunne ikke startes. Prøv igen om lidt — din ordre er gemt.', order_number: order.order_number }, { status: 502 })
+  }
 }

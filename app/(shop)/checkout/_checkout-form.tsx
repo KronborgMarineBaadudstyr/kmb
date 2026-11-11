@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useState } from 'react'
 import { useCart, fmtPrice } from '../_cart'
 import { SHIPPING_METHODS, shippingCost, type ShippingMethod } from '@/lib/shop/shipping'
-import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/shop/payment'
+import { PAYMENT_METHODS, type PaymentMethod } from '@/lib/shop/payment-methods'
 import type { ContactDefaults } from '@/lib/shop/customers'
 
 type Form = ContactDefaults & { note: string }

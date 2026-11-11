@@ -27,7 +27,7 @@ export default async function ConfirmationPage({
   const supabase = createServiceClient()
   const { data: order } = await supabase
     .from('orders')
-    .select('id, order_number, created_at, customer_info, line_items, shipping_method, shipping_total, subtotal, order_total, payment_status, payment_method, status, customer_note')
+    .select('id, order_number, created_at, customer_info, line_items, shipping_method, shipping_total, subtotal, order_total, payment_status, payment_method, payment_provider, status, customer_note')
     .eq('id', id)
     .eq('access_token', t)
     .maybeSingle()
@@ -56,9 +56,15 @@ export default async function ConfirmationPage({
           {STORE.address && <><br />{STORE.name}, {STORE.address}</>}
           {STORE.openingHours && <><br />Åbent: {STORE.openingHours}</>}
         </p>
+      ) : order.payment_status === 'authorized' ? (
+        <p className="ls-confirm-note">
+          Betalingen er godkendt. Beløbet er reserveret og trækkes først, når varerne {method === 'pickup' ? 'udleveres' : 'sendes'}.
+        </p>
       ) : order.payment_status !== 'paid' && (
         <p className="ls-confirm-note">
-          Vi har registreret din ordre og kontakter dig om betaling{method === 'pickup' ? ' og afhentning' : ' og levering'}.
+          {order.payment_provider === 'swedbankpay'
+            ? <>Ordren er ikke betalt endnu. <Link href={`/checkout/betaling/${order.id}?t=${encodeURIComponent(t ?? '')}`}>Gå til betaling →</Link></>
+            : <>Vi har registreret din ordre og kontakter dig om betaling{method === 'pickup' ? ' og afhentning' : ' og levering'}.</>}
         </p>
       )}
 

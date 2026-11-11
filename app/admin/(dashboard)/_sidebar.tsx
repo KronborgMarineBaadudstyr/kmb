@@ -54,6 +54,7 @@ const navEntries: NavEntry[] = [
 const OWNER_ITEMS: NavItem[] = [
   { href: '/admin/ai-noegle', label: 'AI-nøgle',        icon: '🗝' },
   { href: '/admin/sms',       label: 'SMS',             icon: '💬' },
+  { href: '/admin/betaling',  label: 'Betaling',        icon: '💳' },
   { href: '/admin/admins',    label: 'Administratorer', icon: '🔑' },
 ]
 
