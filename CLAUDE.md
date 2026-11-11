@@ -104,7 +104,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ✅ kørt
 - `068_customer_payment_refs.sql` — `customer_payment_refs` (kunde ↔ delvist kortnummer: sidste 4 + evt. første 6, type, udløb, kilde pos/online/manual) + `orders.payment_card` ✅ kørt
 - `069_shop_user_boats.sql` — `shop_user_boats` (kundens båd: navn, sejlbåd/motorbåd, længde i fod — én pr. kunde) ✅ kørt
-- `070_payment_events.sql` — `payment_events` (log pr. ordre: oprettet, reserveret, trukket, annulleret, fejl) + index på `orders.payment_reference` ⏳ skal køres
+- `070_payment_events.sql` — `payment_events` (log pr. ordre: oprettet, reserveret, trukket, annulleret, fejl) + index på `orders.payment_reference` ✅ kørt
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
