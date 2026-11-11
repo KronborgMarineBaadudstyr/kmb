@@ -104,7 +104,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `067_store_settings.sql` — `store_settings` (én række, `data` jsonb): firmanavn, CVR, adresse, kontakt, åbningstider, leveringstid, returfragt — redigeres på `/admin/butik` ✅ kørt
 - `068_customer_payment_refs.sql` — `customer_payment_refs` (kunde ↔ delvist kortnummer: sidste 4 + evt. første 6, type, udløb, kilde pos/online/manual) + `orders.payment_card` ✅ kørt
 - `069_shop_user_boats.sql` — `shop_user_boats` (kundens båd: navn, sejlbåd/motorbåd, længde i fod — én pr. kunde) ✅ kørt
-- `070_payment_events.sql` — `payment_events` (log pr. ordre: oprettet, reserveret, trukket, annulleret, fejl) + index på `orders.payment_reference` ⏳ skal køres
+- `070_payment_events.sql` — `payment_events` (log pr. ordre: oprettet, reserveret, trukket, annulleret, fejl) + index på `orders.payment_reference` ✅ kørt
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |
@@ -195,7 +195,7 @@ NEXT_PUBLIC_SITE_URL= # Valgfri. Links i mails peger ellers på det domæne brug
 - [x] **Egen AI-nøgle til butikken** — `/admin/ai-noegle` (kun ejere); krypteret i `app_settings`, fallback til `ANTHROPIC_API_KEY`
 - [x] **Anthropic SDK 1.x** — `@anthropic-ai/sdk` 1.6 (API-version 2026-10-21: ingen `temperature`/`top_p`/`top_k`, nøglen sendes som `Authorization: Bearer`). AI-chat har server-side fallback ved afvisning
 - [x] **SMS-udbyder** — GatewayAPI (`lib/shop/sms.ts`): token, konto (.com/.eu) og afsendernavn sættes af ejere på `/admin/sms` (krypteret i `app_settings` 'gatewayapi', fallback env `GATEWAYAPI_TOKEN`/`GATEWAYAPI_REGION`/`SMS_SENDER`), med test-SMS
-- [ ] **Import af gamle ordrer** (med e-mail eller telefon som kunde-id)
+- [x] **Import af gamle ordrer** — Ordrer → Importér gamle ordrer (`/admin/gamle-ordrer`): PDF med salgsbilag (én faktura pr. side, "Salgsbilag.pdf") læses i browseren med pdf.js (`pdfjs-dist/legacy/build/pdf.min.mjs` — den almindelige ESM-udgave fejler i Next' bundler; typer i `types/pdfjs-legacy.d.ts`). `lib/old-orders/invoice-parser.ts` (ren funktion, kolonner ud fra overskrifternes placering, fragtlinjer uden varenr., flersidede fakturaer, kontrol linjer+fragt = total). `lib/old-orders/import.ts`: varer kobles via EAN/varenr./leverandørens varenr.; mulige dubletter (samme total ±1 dag, fx gamle Woo-ordrer) fravælges; ordrer gemmes som `source 'import'`, `order_number` = fakturanr. (kan ikke importeres to gange), betalt/afsluttet, `ordered_at` = bilagsdato, `customer_info.phone` fra Kundenr. hvis det er et telefonnummer (ellers ingen kobling til kundekonto). Fakturaerne har hverken e-mail eller telefon — kun Kundenr.
 - [x] **Lagertræk ved salg (webshop)** — reservation ved ordre, træk ved afhentning, frigivelse ved annullering (`order_stock_apply`, migration 057). POS afventer admind
 - [x] **Eget lager justering** — lageroptælling med årsagskode og log (`/admin/inventory`). POS-webhook afventer admind
 - [x] **Staging batch-behandling** — opret/afvis mange ad gangen (`/admin/staging`)
