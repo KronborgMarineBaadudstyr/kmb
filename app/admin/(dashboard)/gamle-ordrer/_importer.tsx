@@ -24,6 +24,32 @@ async function readPdf(file: File, onPage: (n: number, total: number) => void): 
   return pages
 }
 
+// Eksisterende ordre med samme beløb ± 1 dag, vist så den kan sammenlignes med fakturaen
+function DuplicateBox({ d }: { d: NonNullable<InvoiceCheck['possibleDuplicate']> }) {
+  const tone = d.verdict === 'same' ? 'border-amber-300 bg-amber-50' : d.verdict === 'different' ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-white'
+  return (
+    <div className={`mt-2 border rounded px-2 py-1.5 ${tone}`}>
+      <div className="font-semibold text-gray-900">
+        Samme beløb som {d.source}-ordre{' '}
+        {d.order_number
+          ? <a href={`/admin/orders?q=${encodeURIComponent(d.order_number)}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>{d.order_number} ↗</a>
+          : '(uden nummer)'}
+        {' '}fra {fmtDate(d.ordered_at)}
+      </div>
+      <div className="text-gray-600">{[d.name, d.email].filter(Boolean).join(' · ') || 'Ingen kundeoplysninger'}{d.shipping_method ? ` · ${d.shipping_method}` : ''}</div>
+      {d.lines.length > 0 && (
+        <ul className="mt-1 text-gray-600">
+          {d.lines.slice(0, 8).map((l, i) => <li key={i}>{l.qty} × {l.name}{l.sku ? <span className="font-mono text-gray-400"> {l.sku}</span> : null}{l.total != null ? ` — ${kr(l.total)}` : ''}</li>)}
+          {d.lines.length > 8 && <li className="text-gray-400">+ {d.lines.length - 8} flere</li>}
+        </ul>
+      )}
+      <div className={`mt-1 font-medium ${d.verdict === 'same' ? 'text-amber-800' : d.verdict === 'different' ? 'text-green-800' : 'text-gray-800'}`}>
+        {d.reason}. {d.verdict === 'different' ? 'Fakturaen er valgt til import.' : 'Sæt flueben, hvis det er en anden handel.'}
+      </div>
+    </div>
+  )
+}
+
 type Row = { inv: ParsedInvoice; check: InvoiceCheck | null; selected: boolean }
 
 export function OldOrdersImporter() {
@@ -51,7 +77,7 @@ export function OldOrdersImporter() {
       const byInv = new Map(checks.map(c => [c.invoice, c]))
       setRows(invoices.map(inv => {
         const check = byInv.get(inv.invoice) ?? null
-        return { inv, check, selected: !check?.exists && !check?.possibleDuplicate && inv.total != null }
+        return { inv, check, selected: !check?.exists && (!check?.possibleDuplicate || check.possibleDuplicate.verdict === 'different') && inv.total != null }
       }))
       setStatus(null)
     } catch (e) {
@@ -83,7 +109,7 @@ export function OldOrdersImporter() {
     return {
       orders: rows.length, selected: rows.filter(r => r.selected).length,
       withPhone: rows.filter(r => r.inv.customer.phone).length,
-      exists: rows.filter(r => r.check?.exists).length, dupes: rows.filter(r => r.check?.possibleDuplicate && !r.check.exists).length,
+      exists: rows.filter(r => r.check?.exists).length, dupes: rows.filter(r => r.check?.possibleDuplicate && r.check.possibleDuplicate.verdict !== 'different' && !r.check.exists).length,
       warnings: rows.filter(r => r.inv.warnings.some(w => !w.startsWith('Intet telefonnummer'))).length,
       lines: lines.length, matched,
       total: rows.filter(r => r.selected).reduce((s, r) => s + (r.inv.total ?? 0), 0),
@@ -161,7 +187,8 @@ export function OldOrdersImporter() {
                       <td className="px-3 py-2 text-right">{kr(inv.total)}</td>
                       <td className="px-3 py-2 text-xs">
                         {check?.exists ? <span className="text-gray-500">Allerede importeret</span>
-                          : check?.possibleDuplicate ? <span className="text-amber-700" title={`${check.possibleDuplicate.source}-ordre ${check.possibleDuplicate.order_number ?? ''} ${check.possibleDuplicate.email ?? ''}`}>Findes måske ({check.possibleDuplicate.order_number ?? check.possibleDuplicate.source})</span>
+                          : check?.possibleDuplicate?.verdict === 'same' ? <span className="text-amber-700">Findes allerede? ({check.possibleDuplicate.order_number ?? check.possibleDuplicate.source})</span>
+                          : check?.possibleDuplicate?.verdict === 'unclear' ? <span className="text-amber-700">Tjek mod {check.possibleDuplicate.order_number ?? check.possibleDuplicate.source}</span>
                           : realWarnings.length ? <span className="text-red-700">⚠ {realWarnings[0]}</span>
                           : <span className="text-green-700">✓ Klar</span>}
                       </td>
@@ -176,12 +203,7 @@ export function OldOrdersImporter() {
                               <div>{inv.customer.company && <>{inv.customer.company}<br /></>}{inv.customer.name}<br />{inv.customer.address}<br />{inv.customer.postcode} {inv.customer.city}</div>
                               <div className="mt-1 text-gray-500">Kundenr. {inv.customer_number ?? '—'} · {inv.order_ref ?? ''}</div>
                               {inv.shipping && <div className="mt-2">Levering: {inv.shipping.name} ({kr(inv.shipping.amount)} kr)</div>}
-                              {check?.possibleDuplicate && (
-                                <p className="mt-2 text-amber-800 bg-amber-50 rounded px-2 py-1">
-                                  Ligner {check.possibleDuplicate.source}-ordre {check.possibleDuplicate.order_number ?? ''} fra {fmtDate(check.possibleDuplicate.ordered_at)} (samme beløb).
-                                  Sæt flueben, hvis det er en anden handel.
-                                </p>
-                              )}
+                              {check?.possibleDuplicate && <DuplicateBox d={check.possibleDuplicate} />}
                               {inv.warnings.length > 0 && <ul className="mt-2 list-disc pl-4 text-red-700">{inv.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>}
                             </div>
                             <table className="w-full">
