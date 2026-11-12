@@ -21,6 +21,8 @@ export function PosImporter() {
   const [parsed, setParsed]   = useState<PosParseResult | null>(null)
   const [files, setFiles]     = useState<string[]>([])
   const [matches, setMatches] = useState<Record<string, PosMatch>>({})
+  const [staged, setStaged]   = useState<Record<string, string>>({})
+  const [update, setUpdate]   = useState(true)
   const [withInvoices, setWithInvoices] = useState(true)
   const [status, setStatus]   = useState<string | null>(null)
   const [progress, setProgress] = useState<number | null>(null)
@@ -29,7 +31,7 @@ export function PosImporter() {
   const [result, setResult]   = useState<string | null>(null)
 
   async function onFiles(list: FileList) {
-    setBusy(true); setError(null); setResult(null); setParsed(null); setMatches({})
+    setBusy(true); setError(null); setResult(null); setParsed(null); setMatches({}); setStaged({})
     try {
       // Filen med overskriftslinjen først (første halvdel), resten i navneorden
       const all = [...list].sort((a, b) => a.name.localeCompare(b.name, 'da', { numeric: true }))
@@ -47,13 +49,14 @@ export function PosImporter() {
       for (const r of res.receipts) for (const l of r.lines) if (!items.has(l.item_no)) items.set(l.item_no, l.group)
       const list2 = [...items].map(([item_no, group]) => ({ item_no, group }))
       const found: Record<string, PosMatch> = {}
+      const inStaging: Record<string, string> = {}
       for (let i = 0; i < list2.length; i += 2000) {
         setStatus(`Finder varer i jeres katalog… ${fmt(Math.min(i + 2000, list2.length))} af ${fmt(list2.length)} varenumre`)
         const r = await matchPosAction(list2.slice(i, i + 2000))
         if ('error' in r) throw new Error(r.error)
-        Object.assign(found, r.matches)
+        Object.assign(found, r.matches); Object.assign(inStaging, r.staged)
       }
-      setMatches(found)
+      setMatches(found); setStaged(inStaging)
       setStatus(null)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e)); setStatus(null)
@@ -69,11 +72,13 @@ export function PosImporter() {
     const matchedLines = lines.filter(l => matches[l.item_no]).length
     const groups = new Map<string, { lines: number; matched: number; revenue: number }>()
     const unmatched = new Map<string, { name: string; group: string | null; lines: number; revenue: number }>()
+    const notCreated = new Map<string, number>()      // leverandør → linjer med varer der ikke er oprettet
     for (const l of lines) {
       const g = l.group ?? '—'
       const s = groups.get(g) ?? { lines: 0, matched: 0, revenue: 0 }
       s.lines++; s.revenue += l.amount; if (matches[l.item_no]) s.matched++
       groups.set(g, s)
+      if (!matches[l.item_no] && staged[l.item_no]) notCreated.set(staged[l.item_no], (notCreated.get(staged[l.item_no]) ?? 0) + 1)
       if (!matches[l.item_no]) {
         const u = unmatched.get(l.item_no) ?? { name: l.name, group: l.group, lines: 0, revenue: 0 }
         u.lines++; u.revenue += l.amount
@@ -87,14 +92,15 @@ export function PosImporter() {
       multi: chosen.filter(r => r.lines.length > 1).length,
       types: { receipt: chosen.filter(r => r.doc_type === 'receipt').length, invoice: chosen.filter(r => r.doc_type === 'invoice').length, credit: chosen.filter(r => r.doc_type === 'credit').length },
       groups: [...groups].sort((a, b) => b[1].lines - a[1].lines).slice(0, 15),
+      notCreated: [...notCreated].sort((a, b) => b[1] - a[1]),
       unmatched: [...unmatched].sort((a, b) => b[1].lines - a[1].lines).slice(0, 20),
     }
-  }, [parsed, chosen, matches])
+  }, [parsed, chosen, matches, staged])
 
   async function doImport() {
     if (!chosen.length || !confirm(`Importér ${fmt(chosen.length)} bonner som kassesalg?`)) return
     setBusy(true); setError(null); setResult(null); setProgress(0)
-    let imported = 0, skipped = 0
+    let imported = 0, updated = 0, skipped = 0
     const errors: string[] = []
     const BATCH = 800
     for (let i = 0; i < chosen.length; i += BATCH) {
@@ -102,14 +108,14 @@ export function PosImporter() {
       const m: Record<string, { product_id: string; variant_id: string | null }> = {}
       for (const r of part) for (const l of r.lines) { const x = matches[l.item_no]; if (x) m[l.item_no] = { product_id: x.product_id, variant_id: x.variant_id } }
       setStatus(`Importerer ${fmt(Math.min(i + BATCH, chosen.length))} af ${fmt(chosen.length)} bonner…`)
-      const r = await importPosAction(part, m)
+      const r = await importPosAction(part, m, update)
       if ('error' in r) { errors.push(r.error); break }
-      imported += r.imported; skipped += r.skipped
+      imported += r.imported; updated += r.updated; skipped += r.skipped
       if (r.errors.length) { errors.push(...r.errors); if (errors.length > 5) break }
       setProgress(Math.round(((i + part.length) / chosen.length) * 100))
     }
     setBusy(false); setStatus(null); setProgress(null)
-    setResult(`✓ ${fmt(imported)} bonner importeret${skipped ? `, ${fmt(skipped)} fandtes allerede` : ''}.${errors.length ? ` Fejl: ${errors.slice(0, 3).join('; ')}` : ''}`)
+    setResult(`✓ ${fmt(imported)} bonner importeret${updated ? `, ${fmt(updated)} opdateret med nye koblinger` : ''}${skipped ? `, ${fmt(skipped)} fandtes allerede` : ''}.${errors.length ? ` Fejl: ${errors.slice(0, 3).join('; ')}` : ''}`)
   }
 
   return (
@@ -140,6 +146,17 @@ export function PosImporter() {
               <strong>{fmt(stats.matchedLines)}</strong> af {fmt(stats.lines)} varelinjer ({stats.lines ? Math.round(stats.matchedLines / stats.lines * 100) : 0} %) er koblet til jeres produkter.
               <span className="text-gray-500"> Kun koblede linjer tæller i salgsanalysen — resten gemmes med navn og beløb.</span>
             </p>
+            {stats.notCreated.length > 0 && (
+              <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                {fmt(stats.notCreated.reduce((s, [, n]) => s + n, 0))} ukoblede varelinjer er varer, der findes hos jeres leverandører, men ikke er oprettet som produkter endnu
+                ({stats.notCreated.map(([sup, n]) => `${sup}: ${fmt(n)}`).join(', ')}). Opret dem under <a href="/admin/staging" className="underline">Nye varer</a>, og importér
+                filerne igen — så bliver bonnerne opdateret med de nye koblinger.
+              </p>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={update} onChange={e => setUpdate(e.target.checked)} />
+              Opdatér koblinger på bonner, der allerede er importeret
+            </label>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={withInvoices} onChange={e => setWithInvoices(e.target.checked)} />
               Medtag kassens fakturaer og kreditnotaer ({fmt(parsed.receipts.filter(r => r.doc_type === 'invoice').length)} FAK / {fmt(parsed.receipts.filter(r => r.doc_type === 'credit').length)} KRE)
@@ -170,7 +187,8 @@ export function PosImporter() {
                   {stats.unmatched.map(([item, u]) => (
                     <tr key={item}>
                       <td className="px-4 py-1.5 font-mono text-xs text-gray-500">{item}</td>
-                      <td className="px-4 py-1.5">{u.name}<span className="text-xs text-gray-400"> · {u.group ?? '—'}</span></td>
+                      <td className="px-4 py-1.5">{u.name}<span className="text-xs text-gray-400"> · {u.group ?? '—'}</span>
+                        {staged[item] && <span className="ml-1.5 text-[11px] text-amber-700">ikke oprettet ({staged[item]})</span>}</td>
                       <td className="px-4 py-1.5 text-right text-gray-500">{fmt(u.lines)}</td>
                     </tr>
                   ))}
@@ -185,7 +203,8 @@ export function PosImporter() {
           </button>
           <p className="text-xs text-gray-500">
             Bonnerne gemmes som afsluttede kassesalg med dato og tid — de påvirker ikke lageret og sender ingen mails.
-            Samme bon importeres aldrig to gange, så du kan trygt importere et nyere udtræk senere.
+            Samme bon importeres aldrig to gange, så du kan trygt importere et nyere udtræk senere — eller de samme filer igen,
+            når flere varer er oprettet som produkter (koblingerne opdateres, hvis fluebenet er sat).
           </p>
         </>
       )}

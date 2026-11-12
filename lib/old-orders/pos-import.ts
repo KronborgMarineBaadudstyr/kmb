@@ -77,6 +77,22 @@ export async function matchPosItems(items: { item_no: string; group: string | nu
   return Object.fromEntries(Object.entries(out).map(([k, { score: _s, ...m }]) => [k, m]))
 }
 
+// Ukoblede varenumre, der findes hos en leverandør men ikke er oprettet som produkt endnu (Nye varer)
+export async function findStagedPosItems(itemNos: string[]): Promise<Record<string, string>> {
+  const supabase = createServiceClient()
+  const byCand = new Map<string, string[]>()
+  for (const item of new Set(itemNos)) for (const c of skuCandidates(item)) byCand.set(c, [...(byCand.get(c) ?? []), item])
+  const out: Record<string, string> = {}
+  for (const part of chunk([...byCand.keys()])) {
+    const { data } = await supabase.from('supplier_product_staging')
+      .select('normalized_sku, status, suppliers ( name )').in('normalized_sku', part).neq('status', 'matched')
+    for (const r of (data ?? []) as unknown as { normalized_sku: string; suppliers: { name: string } | null }[]) {
+      for (const item of byCand.get(r.normalized_sku) ?? []) out[item] ??= r.suppliers?.name ?? 'leverandør'
+    }
+  }
+  return out
+}
+
 // "2024-03-27T09:45" (dansk tid) → ISO i UTC (sommer-/vintertid håndteres)
 export function copenhagenToIso(local: string): string {
   const guess = new Date(`${local}:00Z`)
@@ -93,8 +109,9 @@ export function copenhagenToIso(local: string): string {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export type PosLineMatch = { product_id: string; variant_id: string | null }
 
-// Importér bonner. matches: kassens varenr. → produkt (fra forhåndsvisningen). Allerede importerede springes over.
-export async function importPosReceipts(receipts: PosReceipt[], matches: Record<string, PosLineMatch>): Promise<{ imported: number; skipped: number; errors: string[] }> {
+// Importér bonner. matches: kassens varenr. → produkt (fra forhåndsvisningen). Allerede importerede springes over,
+// medmindre update = true: så opdateres deres varelinjer (nye koblinger), mens id, adgangsnøgle og kundekobling bevares.
+export async function importPosReceipts(receipts: PosReceipt[], matches: Record<string, PosLineMatch>, update = false): Promise<{ imported: number; updated: number; skipped: number; errors: string[] }> {
   const supabase = createServiceClient()
   const rows = receipts.map(r => {
     const at = copenhagenToIso(r.local_time)
@@ -138,7 +155,7 @@ export async function importPosReceipts(receipts: PosReceipt[], matches: Record<
     }
   })
 
-  let imported = 0, skipped = 0
+  let imported = 0, updated = 0, skipped = 0
   const errors: string[] = []
   for (const part of chunk(rows, 250)) {
     const { data, error } = await supabase.from('orders')
@@ -146,7 +163,15 @@ export async function importPosReceipts(receipts: PosReceipt[], matches: Record<
       .select('order_number')
     if (error) { errors.push(error.message); continue }
     imported += data?.length ?? 0
-    skipped  += part.length - (data?.length ?? 0)
+    const inserted = new Set((data ?? []).map(r => r.order_number as string))
+    const existing = part.filter(r => !inserted.has(r.order_number))
+    if (!update || !existing.length) { skipped += existing.length; continue }
+    // Findes allerede → opdatér (uden access_token, så kvitteringslinks og kundekobling bevares)
+    const { data: up, error: upErr } = await supabase.from('orders')
+      .upsert(existing.map(({ access_token: _t, ...r }) => r), { onConflict: 'order_number' })
+      .select('order_number')
+    if (upErr) { errors.push(upErr.message); skipped += existing.length; continue }
+    updated += up?.length ?? 0
   }
-  return { imported, skipped, errors }
+  return { imported, updated, skipped, errors }
 }
