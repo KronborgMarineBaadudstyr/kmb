@@ -22,7 +22,7 @@ export type ContactDefaults = { name: string; email: string; phone: string; addr
 // Udfyld checkout med kontoens oplysninger og adressen fra seneste ordre.
 export async function contactDefaults(user: { id: string; email: string | null; phone: string | null; name: string | null }): Promise<ContactDefaults> {
   const { data: last } = await createServiceClient().from('orders')
-    .select('customer_info').eq('shop_user_id', user.id)
+    .select('customer_info').eq('shop_user_id', user.id).neq('source', 'pos')   // kassebonner har ingen adresse
     .order('ordered_at', { ascending: false }).limit(1).maybeSingle()
   const c = (last?.customer_info ?? {}) as Partial<ContactDefaults>
   return {

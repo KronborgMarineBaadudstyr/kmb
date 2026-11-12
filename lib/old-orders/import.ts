@@ -81,7 +81,7 @@ export async function checkInvoices(invoices: ParsedInvoice[]): Promise<InvoiceC
     for (let p = 0; p < 50; p++) {
       const { data } = await supabase.from('orders')
         .select('order_number, source, email, ordered_at, order_total, customer_info')
-        .neq('source', 'import').gte('ordered_at', from).lte('ordered_at', to)
+        .not('source', 'in', '(import,pos)').gte('ordered_at', from).lte('ordered_at', to)
         .order('ordered_at').range(p * 1000, p * 1000 + 999)
       others.push(...((data ?? []) as Other[]))
       if (!data || data.length < 1000) break

@@ -151,8 +151,9 @@ type OrderListRow = {
   customer_note: string | null; ordered_at: string; ready_at: string | null; stock_state: string | null; payment_card?: unknown
 }
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; err?: string }> }) {
-  const { status, q, err } = await searchParams
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ status?: string; q?: string; err?: string; kilde?: string }> }) {
+  const { status, q, err, kilde } = await searchParams
+  const pos = kilde === 'pos'           // kassesalg (importeret fra kassesystemet) — vises kun når de vælges
   const orderNo = q?.trim() || null     // fra Indkøb: vis én ordre, foldet ud
   const COLS = 'id, order_number, source, status, payment_status, payment_method, email, customer_info, line_items, shipping_method, order_total, customer_note, ordered_at, ready_at, stock_state'
   const load = (cols: string) => {
@@ -161,6 +162,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
       .limit(200)
     if (status && status in STATUSES) query = query.eq('status', status)
     if (orderNo) query = query.eq('order_number', orderNo)
+    else query = pos ? query.eq('source', 'pos') : query.neq('source', 'pos')
     return query
   }
   // payment_card kommer med migration 068 — uden den vises ordrerne stadig
@@ -177,13 +179,15 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <p className="text-sm text-gray-500">
             {orderNo
               ? <>Viser ordre <span className="font-mono">{orderNo}</span> · <a href="/admin/orders" className="text-blue-600 hover:underline">Vis alle ordrer</a></>
-              : 'Seneste 200 ordrer. Klik en ordre for detaljer og handlinger.'}
+              : pos
+                ? <>Seneste 200 kassesalg (importeret fra kassesystemet) · <a href="/admin/orders" className="text-blue-600 hover:underline">Vis webshop-ordrer</a></>
+                : <>Seneste 200 ordrer. Klik en ordre for detaljer og handlinger. · <a href="/admin/orders?kilde=pos" className="text-blue-600 hover:underline">Vis kassesalg</a></>}
           </p>
         </div>
         <nav className="flex gap-1.5 text-sm flex-wrap">
-          <a href="/admin/orders" className={`px-3 py-1.5 rounded-md border ${!status ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>Alle</a>
+          <a href={pos ? '/admin/orders?kilde=pos' : '/admin/orders'} className={`px-3 py-1.5 rounded-md border ${!status ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>Alle</a>
           {Object.entries(STATUSES).map(([k, s]) => (
-            <a key={k} href={`/admin/orders?status=${k}`}
+            <a key={k} href={`/admin/orders?status=${k}${pos ? '&kilde=pos' : ''}`}
               className={`px-3 py-1.5 rounded-md border ${status === k ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-300 text-gray-600 hover:border-gray-400'}`}>
               {s.label}
             </a>
