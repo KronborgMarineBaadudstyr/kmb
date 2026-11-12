@@ -106,7 +106,7 @@ Køres **manuelt** i Supabase SQL Editor i denne rækkefølge:
 - `069_shop_user_boats.sql` — `shop_user_boats` (kundens båd: navn, sejlbåd/motorbåd, længde i fod — én pr. kunde) ✅ kørt
 - `070_payment_events.sql` — `payment_events` (log pr. ordre: oprettet, reserveret, trukket, annulleret, fejl) + index på `orders.payment_reference` ✅ kørt
 - `071_sales_lines_returns.sql` — `sales_lines` læser negative antal (returer) og decimalantal (afrundes) korrekt — før talte en retur som +1 ✅ kørt
-- `072_remove_woo.sql` — fjerner WooCommerce: dropper `woo_product_id`/`woo_sync_status`/`last_synced_woo_at`/`woo_variation_id`/`woo_order_id`/`woo_created_at`, omdøber `woo_bestillingsnummer` → `bestillingsnummer`, `orders.source` 'woo' → 'old_webshop' (ordrerne bevares) ⏳ skal køres
+- `072_remove_woo.sql` — fjerner WooCommerce: dropper `woo_product_id`/`woo_sync_status`/`last_synced_woo_at`/`woo_variation_id`/`woo_order_id`/`woo_created_at`, omdøber `woo_bestillingsnummer` → `bestillingsnummer`, `orders.source` 'woo' → 'old_webshop' (ordrerne bevares) ✅ kørt
 
 ## Cron Jobs (vercel.json — tider i UTC; dansk tid = +1 om vinteren, +2 om sommeren)
 | Endpoint | UTC | Beskrivelse |

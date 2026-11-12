@@ -927,8 +927,7 @@ export function ProductDetail({
       .then(j => {
         if (j.error) setError(j.error)
         else {
-          // bestillingsnummer hed woo_bestillingsnummer før migration 072
-          setProduct(j.data ? { ...j.data, bestillingsnummer: j.data.bestillingsnummer ?? j.data.woo_bestillingsnummer ?? null } : j.data)
+          setProduct(j.data)
           setVariants(j.data?.product_variants ?? [])
           setImages([...(j.data?.product_images ?? [])].sort((a: ProductImage, b: ProductImage) => a.position - b.position))
           setSuppliersState([...(j.data?.product_suppliers ?? [])].sort((a: ProductSupplier, b: ProductSupplier) => a.priority - b.priority))
