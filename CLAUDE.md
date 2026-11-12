@@ -63,8 +63,7 @@ vercel.json             # Cron job schedules
 - Host: `webshop.columbus-marine.dk`, Port: 21
 - Produktfil: `/V30/ColumbusStock.xml` (UTF-8 XML)
 - Felter: ItemId, Text, InStock, SalesPrice, GrossSalesPrice, EAN, Height, Length, Width, NetWeight, PipedItemDetailsText, CatParent, CatChild
-- Credentials: user=`KronborgMarine`, pw=`jn4j8Mk8g5Xy!G` (CASE SENSITIVE)
-- Gemmes i `supabase/local/columbus_credentials.sql` (gitignored — skal oprettes)
+- Login (brugernavn + adgangskode, CASE SENSITIVE) ligger på leverandørrækken i databasen — sættes via `supabase/local/columbus_credentials.sql` (gitignored). Skriv aldrig adgangskoden i repoet
 
 ### Scanmarine
 - CSV download URL: `https://scanmarine.dk/api/produkter`
@@ -172,6 +171,7 @@ NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
 CRON_SECRET=          # Bruges af verifyCronRequest() — sæt også i Vercel dashboard
+ENGHOLM_API_KEY=      # Engholms produkt-API (header ApiKey) — importen fejler med klar besked, hvis den mangler
 RESEND_API_KEY=       # Login-links, ordremails, påmindelser, "Gem kurv"
 EMAIL_FROM=           # Valgfri. Afsender — standard "LoveSailing <no-reply@lovesailing.dk>" (domænet er verificeret i Resend)
 SETTINGS_ENCRYPTION_KEY= # Valgfri. Krypterer app_settings (ellers afledt af SUPABASE_SERVICE_ROLE_KEY — skift = gemte nøgler skal indtastes igen)

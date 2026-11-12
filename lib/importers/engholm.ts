@@ -8,7 +8,12 @@ import { mergeSyncState, prepareImportItems, NO_CHUNKING, type ImportCursor, typ
 
 const SUPPLIER_ID = '37d879e5-c0f7-48ae-b514-168264c80f9f'
 const API_URL     = 'https://www.engholm.dk/api/products'
-const API_KEY     = 'E760EA79-9AD5-4279-881E-C7A033721E13'
+// Nøglen ligger i miljøet (Vercel → Environment Variables), aldrig i koden
+const apiKey = () => {
+  const k = process.env.ENGHOLM_API_KEY?.trim()
+  if (!k) throw new Error('ENGHOLM_API_KEY mangler i miljøet — sæt den i Vercel under Environment Variables')
+  return k
+}
 
 type EngholmProduct = {
   sku:           string
@@ -116,7 +121,7 @@ export async function importEngholm(
 
   // ── 1. Hent alle produkter fra Engholm ──
   const resp = await fetch(API_URL, {
-    headers: { 'ApiKey': API_KEY },
+    headers: { 'ApiKey': apiKey() },
     signal:  AbortSignal.timeout(60_000),
   })
   if (!resp.ok) throw new Error(`Engholm API fejl: ${resp.status}`)
