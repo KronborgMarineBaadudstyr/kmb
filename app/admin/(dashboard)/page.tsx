@@ -7,7 +7,7 @@ async function getStats() {
     supabase.from('products').select('*', { count: 'exact', head: true }).eq('status', 'published'),
     supabase.from('shop_users').select('*', { count: 'exact', head: true }),
     supabase.from('suppliers').select('*', { count: 'exact', head: true }).eq('active', true),
-    supabase.from('orders').select('*', { count: 'exact', head: true }),
+    supabase.from('orders').select('*', { count: 'exact', head: true }).neq('source', 'pos'),
   ])
   return {
     productCount:   products.count  ?? 0,
