@@ -12,10 +12,19 @@ import type { ParsedInvoice } from './invoice-parser'
 
 export type ProductMatch = { product_id: string; variant_id: string | null; name: string; via: string }
 
+// En eksisterende ordre med samme beløb ± 1 dag — vises ved siden af fakturaen, så admin kan sammenligne
+export type DuplicateCandidate = {
+  order_number: string | null; source: string; email: string | null; ordered_at: string
+  name: string | null; order_total: number; shipping_method: string | null
+  lines: { sku: string | null; name: string; qty: number; total: number | null }[]
+  verdict: 'same' | 'different' | 'unclear'   // samme handel / anden handel / kan ikke afgøres
+  reason: string
+}
+
 export type InvoiceCheck = {
   invoice:        string
   exists:         boolean                         // allerede importeret (samme fakturanummer)
-  possibleDuplicate: { order_number: string | null; source: string; email: string | null; ordered_at: string } | null
+  possibleDuplicate: DuplicateCandidate | null
   matches:        Record<string, ProductMatch>     // varenr. → produkt
 }
 
@@ -73,14 +82,15 @@ export async function checkInvoices(invoices: ParsedInvoice[]): Promise<InvoiceC
   const dated = invoices.filter(i => i.date && i.total != null)
   const minDate = dated.map(i => i.date!).sort()[0]
   const maxDate = dated.map(i => i.date!).sort().at(-1)
-  type Other = { order_number: string | null; source: string; email: string | null; ordered_at: string; order_total: number; customer_info: { email?: string } | null }
+  type Other = { order_number: string | null; source: string; email: string | null; ordered_at: string; order_total: number; shipping_method: string | null
+                 customer_info: Record<string, unknown> | null; line_items: unknown }
   const others: Other[] = []
   if (minDate && maxDate) {
     const from = new Date(new Date(minDate).getTime() - 2 * 86400_000).toISOString()
     const to   = new Date(new Date(maxDate).getTime() + 2 * 86400_000).toISOString()
     for (let p = 0; p < 50; p++) {
       const { data } = await supabase.from('orders')
-        .select('order_number, source, email, ordered_at, order_total, customer_info')
+        .select('order_number, source, email, ordered_at, order_total, shipping_method, customer_info, line_items')
         .not('source', 'in', '(import,pos)').gte('ordered_at', from).lte('ordered_at', to)
         .order('ordered_at').range(p * 1000, p * 1000 + 999)
       others.push(...((data ?? []) as Other[]))
@@ -89,20 +99,90 @@ export async function checkInvoices(invoices: ParsedInvoice[]): Promise<InvoiceC
   }
 
   const matches = await matchSkus(invoices.flatMap(i => i.lines.map(l => l.sku ?? '')))
+  const candidatesOf = new Map(invoices.map(inv => [inv.invoice, inv.date && inv.total != null
+    ? others.filter(o => Math.abs(Number(o.order_total) - inv.total!) < 0.01
+        && Math.abs(new Date(o.ordered_at).getTime() - new Date(`${inv.date}T12:00:00Z`).getTime()) <= 36 * 3600_000)
+    : []]))
+
+  // Gamle Woo-ordrer har kun produkt-id/varenr. på linjerne — hent navnene, så de kan sammenlignes
+  const pids = new Set<string>()
+  for (const list of candidatesOf.values()) for (const o of list)
+    for (const l of (Array.isArray(o.line_items) ? o.line_items : []) as Record<string, unknown>[])
+      if (!l.name && typeof l.product_id === 'string') pids.add(l.product_id)
+  const productNames: Record<string, string> = {}
+  for (const part of chunk([...pids])) {
+    const { data } = await supabase.from('products').select('id, name').in('id', part)
+    for (const p of data ?? []) productNames[p.id as string] = p.name as string
+  }
+
+  const rank = { same: 0, unclear: 1, different: 2 } as const
   return invoices.map(inv => {
-    const dup = inv.date && inv.total != null
-      ? others.find(o => Math.abs(Number(o.order_total) - inv.total!) < 0.01
-          && Math.abs(new Date(o.ordered_at).getTime() - new Date(`${inv.date}T12:00:00Z`).getTime()) <= 36 * 3600_000)
-      : undefined
     const own: Record<string, ProductMatch> = {}
     for (const l of inv.lines) if (l.sku && matches[l.sku]) own[l.sku] = matches[l.sku]
+    // Den mest sandsynlige dublet først (samme handel > uafklaret > anden handel)
+    const dup = (candidatesOf.get(inv.invoice) ?? []).map(o => compareWithOrder(inv, own, o, productNames))
+      .sort((a, b) => rank[a.verdict] - rank[b.verdict])[0] ?? null
+    return { invoice: inv.invoice, exists: existing.has(inv.invoice), possibleDuplicate: dup, matches: own }
+  })
+}
+
+const normName = (s: string | null | undefined) => (s ?? '').toLowerCase().replace(/[^a-z0-9æøå]/g, '')
+const str = (v: unknown) => typeof v === 'string' && v.trim() ? v.trim() : null
+
+// Fakturaen sammenlignet med en eksisterende ordre med samme beløb: samme kunde? samme varer?
+export function compareWithOrder(
+  inv: ParsedInvoice, invMatches: Record<string, ProductMatch>,
+  o: { order_number: string | null; source: string; email: string | null; ordered_at: string; order_total: number; shipping_method: string | null; customer_info: Record<string, unknown> | null; line_items: unknown },
+  productNames: Record<string, string> = {},
+): DuplicateCandidate {
+  const c = o.customer_info ?? {}
+  const billing = (c.billing ?? {}) as Record<string, unknown>
+  const name = str(c.name) ?? (([str(c.first_name) ?? str(billing.first_name), str(c.last_name) ?? str(billing.last_name)].filter(Boolean).join(' ')) || null)
+  const raw = (Array.isArray(o.line_items) ? o.line_items : []) as Record<string, unknown>[]
+  const lines = raw.map(l => {
+    const qty = Number(l.qty ?? l.quantity ?? 1) || 1
+    const pid = str(l.product_id)
     return {
-      invoice: inv.invoice,
-      exists: existing.has(inv.invoice),
-      possibleDuplicate: dup ? { order_number: dup.order_number, source: dup.source, email: dup.email ?? dup.customer_info?.email ?? null, ordered_at: dup.ordered_at } : null,
-      matches: own,
+      sku:   str(l.sku),
+      name:  str(l.name) ?? str(l.title) ?? (pid ? productNames[pid] : null) ?? str(l.sku) ?? '—',
+      qty,
+      total: l.line_total != null ? Number(l.line_total) : l.total != null ? Number(l.total) : l.price != null ? Math.round(Number(l.price) * qty * 100) / 100 : null,
+      product_id: pid,
     }
   })
+
+  // Hvor mange af fakturaens varer findes også i ordren (varenr., koblet produkt eller samme navn)?
+  const skus = new Set(lines.map(l => l.sku).filter(Boolean))
+  const pids = new Set(lines.map(l => l.product_id).filter(Boolean))
+  const names = lines.map(l => normName(l.name)).filter(n => n.length >= 4)
+  const overlap = inv.lines.filter(l => {
+    if (l.sku && skus.has(l.sku)) return true
+    const m = l.sku ? invMatches[l.sku] : undefined
+    if (m && pids.has(m.product_id)) return true
+    const n = normName(l.name)
+    return n.length >= 4 && names.some(x => x === n || x.includes(n) || n.includes(x))
+  }).length
+
+  const invName = normName(inv.customer.name), oName = normName(name)
+  const sameName = !!invName && !!oName && (invName === oName || invName.includes(oName) || oName.includes(invName))
+  const bothNames = !!invName && !!oName
+
+  let verdict: DuplicateCandidate['verdict'], reason: string
+  if (lines.length && overlap > 0 && overlap >= Math.ceil(inv.lines.length / 2)) {
+    verdict = 'same'; reason = `${overlap} af ${inv.lines.length} varer går igen${sameName ? ' og samme kunde' : ''} — sandsynligvis samme handel`
+  } else if (sameName) {
+    verdict = 'same'; reason = 'Samme kunde og samme beløb — sandsynligvis samme handel'
+  } else if (lines.length && overlap === 0 && bothNames) {
+    verdict = 'different'; reason = 'Anden kunde og andre varer — sandsynligvis en anden handel'
+  } else {
+    verdict = 'unclear'
+    reason = !lines.length ? 'Ordren har ingen varelinjer at sammenligne med' : !bothNames ? 'Kundens navn mangler på den ene — sammenlign varerne' : `${overlap} af ${inv.lines.length} varer går igen`
+  }
+  return {
+    order_number: o.order_number, source: o.source, email: o.email ?? str(c.email) ?? str(billing.email), ordered_at: o.ordered_at,
+    name, order_total: Number(o.order_total), shipping_method: o.shipping_method,
+    lines: lines.map(({ product_id: _p, ...l }) => l), verdict, reason,
+  }
 }
 
 // Importér fakturaer. Springer over dem, der allerede er importeret (samme fakturanummer).
