@@ -8,6 +8,7 @@ import { sendEmail, escapeHtml, siteUrl, fmtKr } from '@/lib/shop/email'
 import { getStore, pickupPlaceHtml, type StoreInfo } from '@/lib/shop/store'
 import { orderedQty, type OrderedEntry } from '@/lib/purchasing'
 import { parseCardInput, rememberCard, maskCard } from '@/lib/payment-refs'
+import { orderSourceLabel } from '@/lib/order-source'
 
 export const dynamic = 'force-dynamic'
 
@@ -220,7 +221,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
               <summary className="list-none cursor-pointer px-4 py-3 grid grid-cols-[110px_120px_1fr_150px_100px_auto] gap-4 items-center text-sm hover:bg-gray-50">
                 <span className="font-mono font-semibold text-gray-900">
                   {o.order_number ?? '—'}
-                  {o.source !== 'webshop' && <span className="ml-1.5 text-[10px] uppercase text-gray-400">{o.source}</span>}
+                  {o.source !== 'webshop' && <span className="ml-1.5 text-[10px] uppercase text-gray-400">{orderSourceLabel(o.source)}</span>}
                 </span>
                 <span className="text-gray-500 text-xs">{new Date(o.ordered_at).toLocaleString('da-DK', { dateStyle: 'short', timeStyle: 'short' })}</span>
                 <span className="min-w-0">

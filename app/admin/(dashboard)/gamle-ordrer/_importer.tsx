@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import { parseInvoicePages, type ParsedInvoice, type TextItem } from '@/lib/old-orders/invoice-parser'
 import type { InvoiceCheck } from '@/lib/old-orders/import'
 import { checkAction, importAction } from './actions'
+import { orderSourceLabel } from '@/lib/order-source'
 
 const kr = (n: number | null) => n == null ? '—' : n.toLocaleString('da-DK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('da-DK', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'
@@ -30,7 +31,7 @@ function DuplicateBox({ d }: { d: NonNullable<InvoiceCheck['possibleDuplicate']>
   return (
     <div className={`mt-2 border rounded px-2 py-1.5 ${tone}`}>
       <div className="font-semibold text-gray-900">
-        Samme beløb som {d.source}-ordre{' '}
+        Samme beløb som {orderSourceLabel(d.source).toLowerCase()}-ordre{' '}
         {d.order_number
           ? <a href={`/admin/orders?q=${encodeURIComponent(d.order_number)}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline" onClick={e => e.stopPropagation()}>{d.order_number} ↗</a>
           : '(uden nummer)'}
@@ -187,8 +188,8 @@ export function OldOrdersImporter() {
                       <td className="px-3 py-2 text-right">{kr(inv.total)}</td>
                       <td className="px-3 py-2 text-xs">
                         {check?.exists ? <span className="text-gray-500">Allerede importeret</span>
-                          : check?.possibleDuplicate?.verdict === 'same' ? <span className="text-amber-700">Findes allerede? ({check.possibleDuplicate.order_number ?? check.possibleDuplicate.source})</span>
-                          : check?.possibleDuplicate?.verdict === 'unclear' ? <span className="text-amber-700">Tjek mod {check.possibleDuplicate.order_number ?? check.possibleDuplicate.source}</span>
+                          : check?.possibleDuplicate?.verdict === 'same' ? <span className="text-amber-700">Findes allerede? ({check.possibleDuplicate.order_number ?? orderSourceLabel(check.possibleDuplicate.source)})</span>
+                          : check?.possibleDuplicate?.verdict === 'unclear' ? <span className="text-amber-700">Tjek mod {check.possibleDuplicate.order_number ?? orderSourceLabel(check.possibleDuplicate.source)}</span>
                           : realWarnings.length ? <span className="text-red-700">⚠ {realWarnings[0]}</span>
                           : <span className="text-green-700">✓ Klar</span>}
                       </td>
