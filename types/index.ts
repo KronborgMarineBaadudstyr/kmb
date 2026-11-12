@@ -39,14 +39,11 @@ export type Product = {
   slug: string | null
   meta_title: string | null
   meta_description: string | null
-  woo_product_id: number | null
   pos_product_id: string | null
-  woo_bestillingsnummer: string | null
+  bestillingsnummer: string | null
   status: 'draft' | 'validated' | 'published'
-  woo_sync_status: 'synced' | 'pending' | 'error' | null
   created_at: string
   updated_at: string
-  last_synced_woo_at: string | null
   last_synced_pos_at: string | null
 }
 
@@ -66,7 +63,6 @@ export type ProductVariant = {
   sale_price: number | null
   ean: string | null
   weight: number | null
-  woo_variation_id: number | null
   status: 'active' | 'discontinued'
   created_at: string
   updated_at: string
@@ -146,7 +142,7 @@ export type ProductImage = {
   alt_text: string | null
   position: number
   is_primary: boolean
-  source: 'manual' | 'supplier' | 'woo'
+  source: 'manual' | 'supplier'
   created_at: string
 }
 
@@ -159,13 +155,14 @@ export type ProductFile = {
   file_type: 'manual' | 'spec' | 'certificate' | 'other'
   language: string
   position: number
-  source: 'manual' | 'supplier' | 'woo'
+  source: 'manual' | 'supplier'
   created_at: string
 }
 
 export type Order = {
   id: string
-  woo_order_id: number
+  order_number: string | null
+  source: 'webshop' | 'old_webshop' | 'import' | 'pos'
   status: 'pending' | 'processing' | 'completed' | 'cancelled' | 'refunded'
   fulfillment_status: 'unrouted' | 'routed' | 'approved' | 'dispatched' | 'delivered'
   customer_info: OrderCustomerInfo | null
@@ -174,7 +171,7 @@ export type Order = {
   shipping_total: number | null
   order_total: number | null
   currency: string
-  woo_created_at: string | null
+  ordered_at: string
   created_at: string
   updated_at: string
 }
@@ -183,15 +180,13 @@ export type OrderCustomerInfo = {
   first_name: string
   last_name: string
   email: string
-  billing: WooAddress
-  shipping: WooAddress
+  billing: Address
+  shipping: Address
 }
 
 export type OrderLineItem = {
   product_id: string | null        // vores interne ID
   variant_id: string | null        // vores interne variant ID
-  woo_product_id: number
-  woo_variation_id: number | null
   sku: string
   name: string
   quantity: number
@@ -199,7 +194,7 @@ export type OrderLineItem = {
   total: number
 }
 
-export type WooAddress = {
+export type Address = {
   first_name: string
   last_name: string
   company: string
@@ -259,7 +254,7 @@ export type SyncLog = {
   id: string
   product_id: string | null
   variant_id: string | null
-  target: 'woo' | 'pos'
+  target: 'pos'
   action: 'create' | 'update' | 'delete' | 'stock_update'
   status: 'success' | 'failed' | 'pending'
   payload: unknown
@@ -272,7 +267,7 @@ export type InventoryEvent = {
   product_id: string | null
   variant_id: string | null
   product_supplier_id: string | null
-  source: 'woo_order' | 'pos_sale' | 'manual' | 'supplier_sync' | 'reservation'
+  source: 'webshop_order' | 'pos_sale' | 'manual' | 'supplier_sync' | 'reservation'
   event_type: 'sale' | 'restock' | 'adjustment' | 'reservation' | 'reservation_cancel'
   quantity_delta: number
   new_quantity: number | null

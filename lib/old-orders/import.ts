@@ -104,7 +104,7 @@ export async function checkInvoices(invoices: ParsedInvoice[]): Promise<InvoiceC
         && Math.abs(new Date(o.ordered_at).getTime() - new Date(`${inv.date}T12:00:00Z`).getTime()) <= 36 * 3600_000)
     : []]))
 
-  // Gamle Woo-ordrer har kun produkt-id/varenr. på linjerne — hent navnene, så de kan sammenlignes
+  // Den gamle webshops ordrer har kun produkt-id/varenr. på linjerne — hent navnene, så de kan sammenlignes
   const pids = new Set<string>()
   for (const list of candidatesOf.values()) for (const o of list)
     for (const l of (Array.isArray(o.line_items) ? o.line_items : []) as Record<string, unknown>[])

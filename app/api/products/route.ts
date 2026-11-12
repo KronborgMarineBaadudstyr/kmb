@@ -95,6 +95,8 @@ export async function GET(request: Request) {
     }
   }
 
+  // bestillingsnummer hed woo_bestillingsnummer før migration 072 — virker begge veje, så shoppen ikke går ned imens
+  const run = async (bnCol: 'bestillingsnummer' | 'woo_bestillingsnummer') => {
   let query = supabase
     .from('products')
     .select(`
@@ -108,7 +110,7 @@ export async function GET(request: Request) {
       categories,
       brand,
       status,
-      woo_bestillingsnummer,
+      ${bnCol === 'bestillingsnummer' ? 'bestillingsnummer' : 'bestillingsnummer:woo_bestillingsnummer'},
       ean,
       manufacturer_sku,
       weight,
@@ -126,7 +128,7 @@ export async function GET(request: Request) {
 
   if (search) {
     // Direct product-table fields
-    const directOr = `name.ilike.%${search}%,internal_sku.ilike.%${search}%,woo_bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%,manufacturer_sku.ilike.%${search}%,brand.ilike.%${search}%`
+    const directOr = `name.ilike.%${search}%,internal_sku.ilike.%${search}%,${bnCol}.ilike.%${search}%,ean.ilike.%${search}%,manufacturer_sku.ilike.%${search}%,brand.ilike.%${search}%`
     if (crossTableIds && crossTableIds.size > 0) {
       // Combine: product fields OR id in cross-table matches
       const idList = [...crossTableIds].join(',')
@@ -153,8 +155,12 @@ export async function GET(request: Request) {
   if (minPrice)           query = query.gte('sales_price', parseFloat(minPrice))
   if (maxPrice)           query = query.lte('sales_price', parseFloat(maxPrice))
   if (supplierProductIds) query = query.in('id', supplierProductIds)
+  return await query
+  }
 
-  const { data, error, count } = await query
+  let res = await run('bestillingsnummer')
+  if (res.error && /bestillingsnummer/.test(res.error.message)) res = await run('woo_bestillingsnummer')
+  const { data, error, count } = res
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 

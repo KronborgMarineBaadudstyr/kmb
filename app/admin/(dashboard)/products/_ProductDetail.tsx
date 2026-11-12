@@ -63,7 +63,7 @@ export type Product = {
   attributes: { name: string; value: string | string[] }[]
   specifications: Record<string, unknown> | null
   video_url: string | null
-  woo_bestillingsnummer: string | null
+  bestillingsnummer: string | null
   pos_product_id: string | null
   meta_title: string | null
   meta_description: string | null
@@ -305,7 +305,7 @@ function SaveVariantButton({ onSave }: { onSave: () => Promise<void> }) {
 // Shows all available ID fields across product + suppliers + variants.
 // User clicks ☆ on any to designate it as the external "original number".
 function OriginalNumberSelector({ product, suppliers, variants, onSet }: {
-  product:   Pick<Product, 'internal_sku' | 'ean' | 'manufacturer_sku' | 'woo_bestillingsnummer' | 'original_number' | 'original_number_source'>
+  product:   Pick<Product, 'internal_sku' | 'ean' | 'manufacturer_sku' | 'bestillingsnummer' | 'original_number' | 'original_number_source'>
   suppliers: ProductSupplier[]
   variants:  Variant[]
   onSet:     (value: string, source: string) => Promise<void>
@@ -329,8 +329,8 @@ function OriginalNumberSelector({ product, suppliers, variants, onSet }: {
     ids.push({ value: product.ean,                label: 'EAN / stregkode',      source: 'ean' })
   if (product.manufacturer_sku)
     ids.push({ value: product.manufacturer_sku,   label: 'Producent SKU',        source: 'manufacturer_sku' })
-  if (product.woo_bestillingsnummer)
-    ids.push({ value: product.woo_bestillingsnummer, label: 'Bestillingsnr.',    source: 'woo_bestillingsnummer' })
+  if (product.bestillingsnummer)
+    ids.push({ value: product.bestillingsnummer, label: 'Bestillingsnr.',    source: 'bestillingsnummer' })
 
   for (const s of suppliers) {
     if (s.supplier_sku)
@@ -352,7 +352,7 @@ function OriginalNumberSelector({ product, suppliers, variants, onSet }: {
     if (src === 'internal_sku')          return 'Internt varenr.'
     if (src === 'ean')                   return 'EAN'
     if (src === 'manufacturer_sku')      return 'Producent SKU'
-    if (src === 'woo_bestillingsnummer') return 'Bestillingsnr.'
+    if (src === 'bestillingsnummer') return 'Bestillingsnr.'
     if (src === 'manual')                return 'Manuel'
     if (src.startsWith('supplier_sku:')) return 'Leverandør-nr.'
     if (src.startsWith('mfr_sku:'))      return 'Lev. producent-nr.'
@@ -927,7 +927,8 @@ export function ProductDetail({
       .then(j => {
         if (j.error) setError(j.error)
         else {
-          setProduct(j.data)
+          // bestillingsnummer hed woo_bestillingsnummer før migration 072
+          setProduct(j.data ? { ...j.data, bestillingsnummer: j.data.bestillingsnummer ?? j.data.woo_bestillingsnummer ?? null } : j.data)
           setVariants(j.data?.product_variants ?? [])
           setImages([...(j.data?.product_images ?? [])].sort((a: ProductImage, b: ProductImage) => a.position - b.position))
           setSuppliersState([...(j.data?.product_suppliers ?? [])].sort((a: ProductSupplier, b: ProductSupplier) => a.priority - b.priority))
@@ -1368,7 +1369,7 @@ export function ProductDetail({
     <Section title="Identifikation">
       <dl>
         <Field label="Internt varenr." value={product.internal_sku} mono />
-        <Field label="Bestillingsnr."  value={product.woo_bestillingsnummer} mono />
+        <Field label="Bestillingsnr."  value={product.bestillingsnummer} mono />
         <InlineField label="EAN / Stregkode" value={product.ean} mono
           onSave={v => patchField({ ean: v }, 'ean')} saving={saving.has('ean')} />
         <InlineField label="Producent SKU" value={product.manufacturer_sku} mono

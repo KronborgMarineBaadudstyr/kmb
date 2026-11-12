@@ -18,7 +18,7 @@ type Product = {
   categories: string[]
   brand: string | null
   status: 'draft' | 'validated' | 'published'
-  woo_bestillingsnummer: string | null
+  bestillingsnummer: string | null
   ean: string | null
   manufacturer_sku: string | null
   weight: number | null
@@ -305,7 +305,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
 
 type ColKey =
   | 'image' | 'name' | 'internal_sku' | 'manufacturer_sku' | 'ean'
-  | 'woo_bestillingsnummer' | 'brand' | 'categories' | 'sales_price'
+  | 'bestillingsnummer' | 'brand' | 'categories' | 'sales_price'
   | 'own_stock_quantity' | 'weight' | 'status'
   | 'shop_visibility' | 'image_count' | 'created_at' | 'updated_at'
 
@@ -317,7 +317,7 @@ const ALL_COLUMNS: ColDef[] = [
   { key: 'internal_sku',        label: 'Varenr.',          sortable: 'internal_sku',       defaultOn: true  },
   { key: 'manufacturer_sku',    label: 'Prod. SKU',        defaultOn: false },
   { key: 'ean',                 label: 'EAN',              defaultOn: false },
-  { key: 'woo_bestillingsnummer', label: 'Bestillingsnr.', defaultOn: false }, // reference fra Woo-import
+  { key: 'bestillingsnummer', label: 'Bestillingsnr.', defaultOn: false }, // bestillingsnummer fra det gamle katalog
   { key: 'brand',               label: 'Brand',            defaultOn: false },
   { key: 'categories',          label: 'Kategori',         defaultOn: true  },
   { key: 'sales_price',         label: 'Pris',             sortable: 'sales_price',        defaultOn: true  },
@@ -534,8 +534,8 @@ export default function ProductsPage() {
         return <span className="font-mono text-xs text-gray-500">{p.manufacturer_sku ?? <span className="text-gray-300">—</span>}</span>
       case 'ean':
         return <span className="font-mono text-xs text-gray-500">{p.ean ?? <span className="text-gray-300">—</span>}</span>
-      case 'woo_bestillingsnummer':
-        return <span className="font-mono text-xs text-gray-500">{p.woo_bestillingsnummer ?? <span className="text-gray-300">—</span>}</span>
+      case 'bestillingsnummer':
+        return <span className="font-mono text-xs text-gray-500">{p.bestillingsnummer ?? <span className="text-gray-300">—</span>}</span>
       case 'brand':
         return <span className="text-xs text-gray-700">{p.brand ?? <span className="text-gray-300">—</span>}</span>
       case 'categories':
