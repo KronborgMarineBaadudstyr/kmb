@@ -108,8 +108,8 @@ async function saveImportSummary(supplierId: string, data: ImportProgress, kind:
 
 // Varenumre der står flere gange i leverandørens fil (lib/import-run.ts → sync_state.duplicate_skus).
 // Importen bruger kun én linje pr. varenummer; her kan admin se forskellen og vælge hvilken.
-type DuplicateSku = { sku: string; used: number; entries: Record<string, string | number | null>[] }
-type DuplicateReport = { checked_at: string; count: number; items: DuplicateSku[] }
+type DuplicateSku = { sku: string; used: number; entries: Record<string, string | number | null>[]; auto?: string }
+type DuplicateReport = { checked_at: string; count: number; attention?: number; items: DuplicateSku[] }
 
 function DuplicatesPanel({ supplier, onSaved }: { supplier: Supplier; onSaved: (syncState: Record<string, unknown>) => void }) {
   const [open, setOpen]     = useState(false)
@@ -121,7 +121,7 @@ function DuplicatesPanel({ supplier, onSaved }: { supplier: Supplier; onSaved: (
   async function choose(sku: string, idx: number) {
     setSaving(sku)
     const nextChoice = { ...choice, [sku]: idx }
-    const nextReport = { ...report!, items: report!.items.map(d => d.sku === sku ? { ...d, used: idx } : d) }
+    const nextReport = { ...report!, items: report!.items.map(d => d.sku === sku ? { sku: d.sku, entries: d.entries, used: idx } : d) }
     const res = await fetch(`/api/suppliers/${supplier.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sync_state: { duplicate_choice: nextChoice, duplicate_skus: nextReport } }),
@@ -132,28 +132,17 @@ function DuplicatesPanel({ supplier, onSaved }: { supplier: Supplier; onSaved: (
   }
 
   const fmt = (v: string | number | null) => v == null || v === '' ? '—' : typeof v === 'number' ? v.toLocaleString('da-DK') : v
+  const needs = report.items.filter(d => !d.auto)
+  const autos = report.items.filter(d => d.auto)
+  const attention = report.attention ?? needs.length
+  const tone = attention > 0 ? 'bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-600'
 
-  return (
-    <div className="mt-3 border-t border-gray-100 pt-3 text-xs rounded px-3 py-2 bg-amber-50 text-amber-900">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <span>
-          ⚠ <strong>{report.count.toLocaleString('da-DK')}</strong> {report.count === 1 ? 'varenummer står' : 'varenumre står'} flere gange i leverandørens fil
-          — importen bruger kun én linje pr. varenummer
-          <span className="text-amber-700/70"> · tjekket {fmtTime(report.checked_at)}</span>
-        </span>
-        <button onClick={() => setOpen(v => !v)} className="underline hover:text-amber-700">{open ? 'Skjul' : 'Vis og vælg'}</button>
-      </div>
-      {open && (
-        <div className="mt-2 space-y-3 max-h-[28rem] overflow-y-auto">
-          <p className="text-amber-800">
-            Vælg hvilken linje der skal bruges for hvert varenummer. Valget gælder fra næste import. Felter der er forskellige, er fremhævet.
-            {report.items.length < report.count && ` Viser de første ${report.items.length}.`}
-          </p>
-          {report.items.map(d => {
+  const table = (d: DuplicateSku) => {
             const fields = [...new Set(d.entries.flatMap(e => Object.keys(e)))]
             const differs = (f: string) => new Set(d.entries.map(e => String(e[f] ?? ''))).size > 1
             return (
               <div key={d.sku} className="bg-white border border-amber-200 rounded overflow-x-auto">
+                {d.auto && <div className="px-2 py-1 text-[11px] text-gray-500 bg-gray-50 border-b border-amber-100">Valgt automatisk: {d.auto}. Vælg en anden linje for at overstyre.</div>}
                 <table className="w-full text-xs tabular-nums">
                   <thead className="bg-amber-100/60 text-amber-900">
                     <tr>
@@ -180,7 +169,35 @@ function DuplicatesPanel({ supplier, onSaved }: { supplier: Supplier; onSaved: (
                 </table>
               </div>
             )
-          })}
+  }
+
+  return (
+    <div className={`mt-3 border-t border-gray-100 pt-3 text-xs rounded px-3 py-2 ${tone}`}>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span>
+          {attention > 0 ? '⚠ ' : ''}<strong>{report.count.toLocaleString('da-DK')}</strong> {report.count === 1 ? 'varenummer står' : 'varenumre står'} flere gange i leverandørens fil
+          {attention > 0
+            ? <> — <strong>{attention.toLocaleString('da-DK')}</strong> kræver dit valg{autos.length > 0 && `, ${autos.length.toLocaleString('da-DK')} er løst automatisk`}</>
+            : ' — alle løst automatisk'}
+          <span className="opacity-60"> · tjekket {fmtTime(report.checked_at)}</span>
+        </span>
+        <button onClick={() => setOpen(v => !v)} className="underline hover:opacity-70">{open ? 'Skjul' : attention > 0 ? 'Vis og vælg' : 'Vis'}</button>
+      </div>
+      {open && (
+        <div className="mt-2 space-y-3 max-h-[28rem] overflow-y-auto">
+          {needs.length > 0 && (
+            <p className="text-amber-800">
+              Vælg hvilken linje der skal bruges for hvert varenummer. Valget gælder fra næste import. Felter der er forskellige, er fremhævet.
+              {report.items.length < report.count && ` Viser de første ${report.items.length}.`}
+            </p>
+          )}
+          {needs.map(table)}
+          {autos.length > 0 && (
+            <details className="pt-1">
+              <summary className="cursor-pointer text-gray-600 hover:text-gray-900">{autos.length.toLocaleString('da-DK')} løst automatisk (ens linjer eller leverandørens regel) — vis</summary>
+              <div className="mt-2 space-y-3">{autos.map(table)}</div>
+            </details>
+          )}
         </div>
       )}
     </div>

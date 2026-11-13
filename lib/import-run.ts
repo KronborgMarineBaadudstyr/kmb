@@ -87,12 +87,37 @@ export async function mergeSyncState(supplierId: string, patch: Record<string, u
 // en anden (sync_state.duplicate_choice = { varenr: nummer i rækkefølgen, 0 = første }).
 
 export type DuplicateChoice = Record<string, number>
+export type DuplicateEntry  = Record<string, string | number | null>
 export type DuplicateSku = {
   sku:     string
-  used:    number                                        // hvilken forekomst importen bruger
-  entries: Record<string, string | number | null>[]      // felterne pr. forekomst, i filens rækkefølge
+  used:    number                 // hvilken forekomst importen bruger
+  entries: DuplicateEntry[]       // felterne pr. forekomst, i filens rækkefølge
+  auto?:   string                 // valgt automatisk efter leverandørens regel (begrundelse) — admin kan stadig vælge om
 }
-export type DuplicateReport = { checked_at: string; count: number; items: DuplicateSku[] }
+export type DuplicateReport = { checked_at: string; count: number; attention: number; items: DuplicateSku[] }
+
+// Leverandørens regel for, hvilken linje der bruges, når admin ikke har valgt. null = admin skal vælge (første bruges indtil da).
+export type DuplicatePolicy = (entries: DuplicateEntry[]) => { index: number; why: string } | null
+
+const sameEntries = (entries: DuplicateEntry[]) => new Set(entries.map(e => JSON.stringify(e))).size === 1
+const differingKeys = (entries: DuplicateEntry[]) =>
+  [...new Set(entries.flatMap(e => Object.keys(e)))].filter(k => new Set(entries.map(e => String(e[k] ?? ''))).size > 1)
+
+// Standard: kun fuldstændig ens linjer løses af sig selv
+export const identicalOnly: DuplicatePolicy = entries => sameEntries(entries) ? { index: 0, why: 'Linjerne er ens' } : null
+
+// Samme vare to gange, hvor kun prisfelterne afviger → den dyreste. Engholm eksporterer udgaven på bagkort/hænger
+// ("H" i deres varenummer) som en ekstra linje med lidt højere pris, og det er den, butikken bruger.
+export function preferHighestPrice(priceKey: string, why: string): DuplicatePolicy {
+  return entries => {
+    if (sameEntries(entries)) return { index: 0, why: 'Linjerne er ens' }
+    const diff = differingKeys(entries)
+    if (!diff.length || !diff.every(k => /pris/i.test(k))) return null
+    let index = 0
+    entries.forEach((e, i) => { if (Number(e[priceKey] ?? 0) > Number(entries[index][priceKey] ?? 0)) index = i })
+    return { index, why }
+  }
+}
 
 function groupBySku<T>(items: T[], skuOf: (t: T) => string): Map<string, T[]> {
   const m = new Map<string, T[]>()
@@ -103,18 +128,34 @@ function groupBySku<T>(items: T[], skuOf: (t: T) => string): Map<string, T[]> {
 const usedIndex = (n: number, choice: number | undefined) =>
   choice !== undefined && Number.isInteger(choice) && choice >= 0 && choice < n ? choice : 0
 
-// Varenumre der står flere gange — med de felter, der kan vise forskellen (navn, pris, EAN, enhed …)
+// Varenumre der står flere gange — med de felter, der kan vise forskellen (navn, pris, EAN, enhed …).
+// `effective` er den linje pr. varenummer, importen bruger: admins valg, ellers leverandørens regel, ellers første.
 export function findDuplicates<T>(
   items: T[], skuOf: (t: T) => string,
-  describe: (t: T) => Record<string, string | number | null>,
+  describe: (t: T) => DuplicateEntry,
   choice: DuplicateChoice = {},
-): DuplicateReport {
+  policy: DuplicatePolicy = identicalOnly,
+): { report: DuplicateReport; effective: DuplicateChoice } {
   const dups = [...groupBySku(items, skuOf)].filter(([, g]) => g.length > 1)
-  return {
-    checked_at: new Date().toISOString(),
-    count: dups.length,
-    items: dups.slice(0, 300).map(([sku, g]) => ({ sku, used: usedIndex(g.length, choice[sku]), entries: g.map(describe) })),
+  const effective: DuplicateChoice = {}
+  const items2: DuplicateSku[] = []
+  let attention = 0
+  for (const [sku, g] of dups) {
+    const entries = g.map(describe)
+    let used: number, auto: string | undefined
+    if (choice[sku] !== undefined) used = usedIndex(g.length, choice[sku])
+    else {
+      const picked = policy(entries)
+      used = picked ? usedIndex(g.length, picked.index) : 0
+      auto = picked?.why
+      if (!picked) attention++
+    }
+    effective[sku] = used
+    if (items2.length < 300) items2.push({ sku, used, entries, ...(auto ? { auto } : {}) })
   }
+  // Dem der kræver et valg først
+  items2.sort((a, b) => Number(!!a.auto) - Number(!!b.auto))
+  return { report: { checked_at: new Date().toISOString(), count: dups.length, attention, items: items2 }, effective }
 }
 
 // Sorterer varerne efter varenummer, beholder én linje pr. varenummer (første, eller den admin har valgt)
@@ -132,15 +173,15 @@ export function remainingAfterCursor<T>(
 // så de kan ses på Leverandører), bruger admins valg pr. varenummer og returnerer de varer, der er tilbage.
 export async function prepareImportItems<T>(
   supplierId: string, items: T[], skuOf: (t: T) => string,
-  describe: (t: T) => Record<string, string | number | null>,
-  opts: { resume: ImportCursor | null },
+  describe: (t: T) => DuplicateEntry,
+  opts: { resume: ImportCursor | null; policy?: DuplicatePolicy },
 ): Promise<{ products: T[]; total: number; duplicates: number }> {
   const { data } = await createServiceClient().from('suppliers').select('sync_state').eq('id', supplierId).single()
   const choice = (((data?.sync_state ?? {}) as Record<string, unknown>).duplicate_choice ?? {}) as DuplicateChoice
-  const report = findDuplicates(items, skuOf, describe, choice)
+  const { report, effective } = findDuplicates(items, skuOf, describe, choice, opts.policy)
   if (!opts.resume) await mergeSyncState(supplierId, { duplicate_skus: report })
-  if (report.count > 0) console.warn(`[import] ${report.count} varenumre står flere gange i leverandørens fil — én linje pr. varenummer bruges`)
-  const products = remainingAfterCursor(items, skuOf, opts.resume, choice)
+  if (report.attention > 0) console.warn(`[import] ${report.attention} varenumre står flere gange i leverandørens fil og kræver et valg — første linje bruges indtil da`)
+  const products = remainingAfterCursor(items, skuOf, opts.resume, effective)
   return { products, total: new Set(items.map(skuOf)).size, duplicates: report.count }
 }
 

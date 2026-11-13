@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
 import { lifespanLabel } from '@/lib/shop/lifecycle'
+import { CategoryPicker } from './_category-picker'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export type Supplier = { id: string; name: string; contact_email: string | null; data_format: string | null }
@@ -766,6 +767,12 @@ function VariantsEditor({ variants, onChange, campaigns }: {
                   <div className="text-sm font-medium text-gray-800 leading-tight truncate mb-0.5">{sup.supplier_product_name}</div>
                 )}
                 <div className="flex items-center gap-2 flex-wrap">
+                  {/* Det, der adskiller varianten — tomme værdier markeres, så de kan udfyldes */}
+                  {(v.attributes ?? []).length === 0
+                    ? <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">Ingen attributter — kan ikke skelnes fra de andre</span>
+                    : (v.attributes ?? []).map((a, j) => a.value
+                        ? <span key={j} className="text-xs bg-blue-50 text-blue-800 border border-blue-100 px-1.5 py-0.5 rounded"><span className="text-blue-500">{a.name}:</span> {a.value}</span>
+                        : <span key={j} className="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-1.5 py-0.5 rounded" title="Udfyld værdien under Rediger">{a.name || 'attribut'}: <em>mangler</em></span>)}
                   <span className="font-mono text-xs bg-white border border-gray-200 px-1.5 py-0.5 rounded text-gray-500 shrink-0">{v.internal_variant_sku}</span>
                   {sup && <span className="text-xs text-gray-500">{sup.name}</span>}
                   {sup?.supplier_sku && <span className="font-mono text-xs text-gray-400">{sup.supplier_sku}</span>}
@@ -1430,12 +1437,13 @@ export function ProductDetail({
   const catSection = (
     <Section title="Kategorier & tags">
       <dl>
-        <InlineField label="Kategorier" value={(product.categories ?? []).join(', ')}
-          displayValue={product.categories?.length > 0
-            ? <div className="flex flex-wrap gap-1">{product.categories.map(c => <span key={c} className="text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded">{c}</span>)}</div>
-            : null}
-          onSave={v => patchField({ categories: v ? String(v).split(',').map(s => s.trim()).filter(Boolean) : [] }, 'categories')}
-          saving={saving.has('categories')} />
+        <div className="py-2">
+          <dt className="text-xs text-gray-400 mb-1.5">Kategorier <span className="font-normal">— den første er primær (brødkrumme, “Flere i …”)</span></dt>
+          <dd className="m-0">
+            <CategoryPicker value={product.categories ?? []} saving={saving.has('categories')}
+              onChange={next => patchField({ categories: next }, 'categories')} />
+          </dd>
+        </div>
         <InlineField label="Tags" value={(product.tags ?? []).join(', ')}
           displayValue={product.tags?.length > 0
             ? <div className="flex flex-wrap gap-1">{product.tags.map(t => <span key={t} className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">{t}</span>)}</div>

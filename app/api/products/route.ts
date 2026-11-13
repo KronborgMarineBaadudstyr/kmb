@@ -128,7 +128,7 @@ export async function GET(request: Request) {
 
   if (search) {
     // Direct product-table fields
-    const directOr = `name.ilike.%${search}%,internal_sku.ilike.%${search}%,bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%,manufacturer_sku.ilike.%${search}%,brand.ilike.%${search}%`
+    const directOr = `name.ilike.%${search}%,internal_sku.ilike.%${search}%,bestillingsnummer.ilike.%${search}%,ean.ilike.%${search}%,manufacturer_sku.ilike.%${search}%,original_number.ilike.%${search}%,brand.ilike.%${search}%`
     if (crossTableIds && crossTableIds.size > 0) {
       // Combine: product fields OR id in cross-table matches
       const idList = [...crossTableIds].join(',')

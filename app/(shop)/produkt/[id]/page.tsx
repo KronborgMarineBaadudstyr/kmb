@@ -28,7 +28,7 @@ const getProduct = cache(async (id: string) => {
     .from('products')
     .select(`
       id, name, description, short_description, categories, brand, status,
-      sales_price, internal_sku, ean, manufacturer_sku,
+      sales_price, internal_sku, ean, manufacturer_sku, original_number, original_number_source,
       weight, length, width, height,
       product_images ( url, is_primary, position ),
       product_suppliers (
@@ -120,12 +120,6 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   const cats = (p.categories as string[] | null) ?? []
   const firstCat = cats[0]
 
-  const suppliers = ((p.product_suppliers ?? []) as {
-    supplier_sku: string
-    recommended_sales_price: number | null
-    is_active: boolean
-    suppliers: { name: string }[] | { name: string } | null
-  }[]).filter(s => s.is_active)
 
   function fmtPrice(n: number) {
     return n.toLocaleString('da-DK', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' kr'
@@ -133,7 +127,9 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
 
   const specs: [string, string][] = []
   if (p.ean)              specs.push(['EAN', p.ean])
-  if (p.manufacturer_sku) specs.push(['Producent varenr.', p.manufacturer_sku])
+  // Producentens originale varenummer — aldrig leverandørens (kunden skal kunne genkende varen fra producentens katalog)
+  const originalNo = p.manufacturer_sku || (p.original_number_source === 'manufacturer_sku' ? p.original_number : null)
+  if (originalNo)         specs.push(['Producentens varenr.', originalNo])
   if (p.internal_sku)     specs.push(['Varenr.', p.internal_sku])
   if (p.weight)           specs.push(['Vægt', `${p.weight} kg`])
   if (p.length)           specs.push(['Længde', `${p.length} cm`])
@@ -218,14 +214,6 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             </div>
           )}
 
-          {suppliers.length > 0 && (
-            <div style={{ fontSize: 12, color: 'var(--ink-3)' }}>
-              Leverandør: {[...new Set(suppliers.map(s => {
-                const sup = Array.isArray(s.suppliers) ? s.suppliers[0] : s.suppliers
-                return sup?.name
-              }).filter(Boolean))].join(', ')}
-            </div>
-          )}
         </div>
       </div>
 
