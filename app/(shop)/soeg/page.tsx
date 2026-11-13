@@ -1,4 +1,4 @@
-import { createServiceClient } from '@/lib/supabase/server'
+import { GET as getProducts } from '@/app/api/products/route'
 import type { Metadata } from 'next'
 import { ProductCard } from '../_product-card'
 import { SearchInput } from './_search-input'
@@ -15,26 +15,19 @@ export default async function SearchPage({
 }) {
   const { q = '', page: pageStr = '1' } = await searchParams
   const page   = Math.max(1, parseInt(pageStr))
-  const offset = (page - 1) * PAGE_SIZE
 
-  let products: any[] = []
+  let products: Record<string, unknown>[] = []
   let total = 0
   let pages = 0
 
   if (q.trim().length >= 2) {
-    const supabase = createServiceClient()
-
-    const { data, count } = await supabase
-      .from('products')
-      .select('id, name, categories, sales_price, brand, product_images(url, is_primary)', { count: 'exact' })
-      .not('status', 'eq', 'archived')
-      .not('status', 'eq', 'rejected')
-      .ilike('name', `%${q}%`)
-      .order('name', { ascending: true })
-      .range(offset, offset + PAGE_SIZE - 1)
-
-    products = data ?? []
-    total    = count ?? 0
+    // Samme søgning som admin (navn, varenumre, EAN, producentens/original varenr., brand, leverandørens varenr. og navn,
+    // variant-EAN/stregkoder) — kalder API-handleren direkte i samme proces, som kategorisiden gør
+    const params = new URLSearchParams({ shop: '1', search: q.trim(), sort: 'name', order: 'asc', page: String(page), per_page: String(PAGE_SIZE) })
+    const res  = await getProducts(new Request(`http://internal/api/products?${params.toString()}`))
+    const json = res.ok ? await res.json() : { data: [], total: 0 }
+    products = (json.data ?? []) as Record<string, unknown>[]
+    total    = (json.total ?? 0) as number
     pages    = Math.ceil(total / PAGE_SIZE)
   }
 
@@ -52,7 +45,7 @@ export default async function SearchPage({
 
           {products.length > 0 ? (
             <div className="ls-prodgrid">
-              {products.map(p => <ProductCard key={p.id} product={p} />)}
+              {products.map(p => <ProductCard key={String(p.id)} product={p as Parameters<typeof ProductCard>[0]['product']} />)}
             </div>
           ) : (
             <div className="ls-empty">
