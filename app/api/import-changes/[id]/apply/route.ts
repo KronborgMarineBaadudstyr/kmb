@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic'
 // Bruger leverandørens nye vejl. pris som vores salgspris (for varer hvor vi havde vores egen pris,
 // eller hvor leverandøren ikke er den foretrukne). Kræver admin (middleware).
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   const supabase = createServiceClient()
 

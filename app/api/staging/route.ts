@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/staging?status=pending_review&supplier_id=&search=&page=1&per_page=50&ids_only=1
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url        = new URL(request.url)
   const status     = url.searchParams.get('status')      || 'pending_review'
   const supplierId = url.searchParams.get('supplier_id') || ''

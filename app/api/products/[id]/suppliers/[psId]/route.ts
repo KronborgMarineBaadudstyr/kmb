@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,6 +8,7 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string; psId: string }> }
 ) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { psId } = await params
   const supabase  = createServiceClient()
   const body      = await request.json() as Record<string, unknown>

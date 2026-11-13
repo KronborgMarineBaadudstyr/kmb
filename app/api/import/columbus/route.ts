@@ -1,6 +1,7 @@
 import { importColumbus } from '@/lib/importers/columbus'
 import { trackImport } from '@/lib/import-run'
 import type { ColumbusImportProgress } from '@/lib/importers/columbus'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -10,6 +11,7 @@ export const maxDuration = 300
 // GET /api/import/columbus?continue=1 → næste del af en opdelt kørsel (browseren kalder selv, når en del melder 'partial')
 
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url   = new URL(request.url)
   const resume = url.searchParams.get('continue') === '1'
 

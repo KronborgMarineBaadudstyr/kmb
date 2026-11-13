@@ -1,11 +1,13 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/products?search=&status=&category=&supplier_id=&brand=&in_stock=1&min_price=&max_price=&page=1&per_page=50&sort=name&order=asc
 export async function GET(request: Request) {
   const url        = new URL(request.url)
+  if (url.searchParams.get('shop') !== '1') { const denied = await requireAdmin(); if (denied) return denied }   // shop=1 er offentlig (se middleware.ts)
   const search     = url.searchParams.get('search')      || ''
   const status     = url.searchParams.get('status')      || ''
   const category   = url.searchParams.get('category')    || ''
@@ -205,6 +207,7 @@ export async function GET(request: Request) {
 
 // POST /api/products — opret nyt produkt
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   let body: Record<string, unknown>
   try { body = await request.json() } catch {

@@ -1,6 +1,7 @@
 import { importKapHorn } from '@/lib/importers/kaphorn'
 import { trackImport } from '@/lib/import-run'
 import type { KapHornImportProgress } from '@/lib/importers/kaphorn'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -9,6 +10,7 @@ export const maxDuration = 300
 // GET /api/import/kaphorn?limit=N  → test med N produkter
 
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url   = new URL(request.url)
 
   const encoder = new TextEncoder()

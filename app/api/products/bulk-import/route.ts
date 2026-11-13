@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { extractBrand, KnownBrand } from '@/lib/extract-brand'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +30,7 @@ const TEMPLATE_COLUMNS = [
 
 // GET /api/products/bulk-import — download Excel template
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const wb = XLSX.utils.book_new()
 
   // ── Tab 1: Import-skabelon ────────────────────────────────────────────────
@@ -91,6 +93,7 @@ export async function GET() {
 // POST /api/products/bulk-import — parse uploaded xlsx and create products
 // Content-Type: multipart/form-data  field: "file"
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   let formData: FormData

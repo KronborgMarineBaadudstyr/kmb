@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { getCurrentAdmin } from '@/lib/admin-auth'
 import { TOOL_LABELS } from '@/lib/ai/tools'
 import type { ChatItem } from '@/lib/ai/config'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -36,6 +37,7 @@ async function owned(id: string) {
 }
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   const conv = await owned(id)
   if (!conv) return Response.json({ error: 'Samtalen findes ikke' }, { status: 404 })
@@ -45,6 +47,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   if (!(await owned(id))) return Response.json({ error: 'Samtalen findes ikke' }, { status: 404 })
   await createServiceClient().from('ai_conversations').delete().eq('id', id)

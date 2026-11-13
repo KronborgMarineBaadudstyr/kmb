@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { extractBrandFromDB } from '@/lib/extract-brand'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -22,6 +23,7 @@ export const dynamic = 'force-dynamic'
 //   image_url?,             ← primary image URL
 // }
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   let body: Record<string, unknown>

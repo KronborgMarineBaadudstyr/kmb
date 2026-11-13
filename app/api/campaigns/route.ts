@@ -1,9 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase  = createServiceClient()
   const url       = new URL(request.url)
   const productId = url.searchParams.get('product_id') ?? ''
@@ -49,6 +51,7 @@ export async function GET(request: Request) {
 //   apply_prices: boolean  — if true, write sale_price back to products table
 // }
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   let body: Record<string, unknown>
   try { body = await request.json() }

@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/inventory?search=&status=&stock_filter=low|zero|in_stock&page=1&per_page=50
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url         = new URL(request.url)
   const search      = url.searchParams.get('search')       || ''
   const status      = url.searchParams.get('status')       || ''

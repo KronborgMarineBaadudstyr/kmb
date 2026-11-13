@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { getCategoryCounts } from '@/lib/shop/categories'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/products/category-options — kategoriforslag til "Rediger produkt" på shoppen
 // (kategoritabellen inkl. underkategorier + alle brugte kategorier). Kræver admin (middleware.ts).
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const [{ data: catRows }, used] = await Promise.all([
     createServiceClient().from('categories').select('name, subcategories'),
     getCategoryCounts(),

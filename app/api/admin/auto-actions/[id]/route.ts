@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,7 @@ type Params = { params: Promise<{ id: string }> }
 // PATCH /api/admin/auto-actions/[id]
 // body: { action: 'revert' }  — fortryder den automatiske handling
 export async function PATCH(request: Request, { params }: Params) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id }  = await params
   const body    = await request.json() as { action: 'revert' }
   const supabase = createServiceClient()

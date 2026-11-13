@@ -3,6 +3,7 @@ import { runMatchingEngine } from '@/lib/matching-engine'
 import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
 import { loadCategories, normalizeCategoryFromDB, buildDedupMapFromDB } from '@/lib/db-categories'
 import { PipelineRun } from '@/lib/pipeline-run'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -10,6 +11,7 @@ export const maxDuration = 300
 // GET /api/pipeline/run — SSE stream
 // Stages: categories → matching → auto_confirm → auto_create → done
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
 

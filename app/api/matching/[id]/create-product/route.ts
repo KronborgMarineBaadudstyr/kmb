@@ -2,6 +2,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { createProductFromGroup, createProductFromGroupWithVariants } from '@/lib/product-creator'
 import type { ProductType } from '@/lib/product-creator'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,6 +11,7 @@ type RouteParams = { params: Promise<{ id: string }> }
 // POST /api/matching/[id]/create-product
 // Body: { chosen_name: string, product_type_id?: string }
 export async function POST(request: Request, { params }: RouteParams) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id }         = await params
   const body           = await request.json() as { chosen_name?: string; product_type_id?: string }
   const chosenName     = (body.chosen_name ?? '').trim()

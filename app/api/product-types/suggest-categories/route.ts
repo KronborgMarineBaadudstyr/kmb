@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { anthropicClient } from '@/lib/ai/key'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -8,6 +9,7 @@ export const maxDuration = 60
 // Takes full category structure (cat > sub > product type names) and
 // asks Claude Sonnet to suggest category merges with full context.
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const client = await anthropicClient()
   if (!client) {
     return NextResponse.json({ error: 'Ingen Anthropic-nøgle — en ejer kan indtaste den under Indstillinger → AI-nøgle.' }, { status: 503 })

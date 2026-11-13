@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { cleanAttributeInput } from '@/lib/variant-attributes'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,7 @@ type Params = { params: Promise<{ id: string }> }
 
 // PATCH /api/variant-attributes/[id] — ret navn, enhed, værdier eller rækkefølge
 export async function PATCH(request: Request, { params }: Params) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   const body = await request.json().catch(() => null)
   // Kun rækkefølge
@@ -29,6 +31,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
 // DELETE /api/variant-attributes/[id] — fjerner kun definitionen; eksisterende varianters egenskaber røres ikke
 export async function DELETE(_request: Request, { params }: Params) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   const { error } = await createServiceClient().from('variant_attributes').delete().eq('id', id)
   return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ ok: true })

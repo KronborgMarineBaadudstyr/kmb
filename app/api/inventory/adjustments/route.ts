@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/inventory/adjustments?product_id=&limit=50
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url       = new URL(request.url)
   const productId = url.searchParams.get('product_id') || ''
   const limit     = Math.min(200, parseInt(url.searchParams.get('limit') || '50', 10))
@@ -27,6 +29,7 @@ export async function GET(request: Request) {
 // POST /api/inventory/adjustments
 // Body: { product_id, variant_id?, field, delta, reason, note }
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const body = await request.json() as {
     product_id: string

@@ -1,11 +1,13 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/navigation?boat_type=sailboat|motorboat
 // Returns all active hotspots for the given boat type (or all if no filter)
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase   = createServiceClient()
   const boatType   = new URL(request.url).searchParams.get('boat_type') ?? ''
   const includeAll = new URL(request.url).searchParams.get('all') === '1'
@@ -27,6 +29,7 @@ export async function GET(request: Request) {
 // POST /api/navigation
 // Body: { boat_type, label, category_slug, description?, x_pct, y_pct, label_side?, color?, sort_order? }
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   let body: Record<string, unknown>
   try { body = await request.json() }
@@ -60,6 +63,7 @@ export async function POST(request: Request) {
 
 // PATCH /api/navigation?id=xxx
 export async function PATCH(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id påkrævet' }, { status: 400 })
@@ -87,6 +91,7 @@ export async function PATCH(request: Request) {
 
 // DELETE /api/navigation?id=xxx
 export async function DELETE(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id påkrævet' }, { status: 400 })

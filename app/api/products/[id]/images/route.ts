@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,6 +10,7 @@ type Ctx = { params: Promise<{ id: string }> }
 // Uploader en billedfil til Supabase Storage og opretter en product_images-række.
 // Body: multipart/form-data med feltet "file"
 export async function POST(request: Request, { params }: Ctx) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id: productId } = await params
   const supabase = createServiceClient()
 
@@ -72,6 +74,7 @@ export async function POST(request: Request, { params }: Ctx) {
 // Opdatér ét eller flere billeder (is_primary, alt_text, position)
 // Body: Array<{ id: string; is_primary?: boolean; alt_text?: string; position?: number }>
 export async function PATCH(request: Request, { params }: Ctx) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id: productId } = await params
   const supabase = createServiceClient()
 
@@ -102,6 +105,7 @@ export async function PATCH(request: Request, { params }: Ctx) {
 
 // DELETE /api/products/[id]/images?image_id=xxx
 export async function DELETE(request: Request, { params }: Ctx) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id: productId } = await params
   const supabase = createServiceClient()
   const imageId  = new URL(request.url).searchParams.get('image_id')

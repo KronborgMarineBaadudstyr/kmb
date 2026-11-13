@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,7 @@ export const dynamic = 'force-dynamic'
 //
 // Returnerer antal opdaterede produkter.
 export async function PATCH(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   let body: { product_ids?: string[]; category?: string; hide_when_out_of_stock: boolean }
@@ -64,6 +66,7 @@ export async function PATCH(request: Request) {
 // GET /api/products/visibility/stats?category=
 // Returns counts of hide_when_out_of_stock = true/false in a category (or globally)
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const category = new URL(request.url).searchParams.get('category') ?? ''
 

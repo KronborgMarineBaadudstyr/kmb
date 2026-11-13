@@ -1,9 +1,11 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const [{ data, error }, { data: ptCounts }] = await Promise.all([
     supabase.from('categories').select('*').order('sort_order'),
@@ -23,6 +25,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const body = await request.json() as {
     name?: string
     subcategories?: { name: string; keywords: string[] }[]

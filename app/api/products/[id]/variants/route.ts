@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -9,6 +10,7 @@ export async function GET(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   const supabase = createServiceClient()
 
@@ -29,6 +31,7 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id: productId } = await params
   const supabase = createServiceClient()
 
@@ -66,6 +69,7 @@ export async function DELETE(
   request: Request,
   _ctx: { params: Promise<{ id: string }> },
 ) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase  = createServiceClient()
   const variantId = new URL(request.url).searchParams.get('variant_id')
 

@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/brands — list all known brands
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('known_brands')
@@ -17,6 +19,7 @@ export async function GET() {
 
 // POST /api/brands — create a new brand
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   let body: { name: string; aliases?: string[] }
   try { body = await request.json() } catch {
@@ -39,6 +42,7 @@ export async function POST(request: Request) {
 
 // PATCH /api/brands?id=
 export async function PATCH(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id påkrævet' }, { status: 400 })
@@ -65,6 +69,7 @@ export async function PATCH(request: Request) {
 
 // DELETE /api/brands?id=
 export async function DELETE(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const id = new URL(request.url).searchParams.get('id')
   if (!id) return NextResponse.json({ error: 'id påkrævet' }, { status: 400 })

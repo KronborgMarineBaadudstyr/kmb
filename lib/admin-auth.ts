@@ -3,7 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server'
 import { hashToken, newToken } from '@/lib/tokens'
 import { ADMIN_COOKIE, ADMIN_SESSION_DAYS, adminFromToken, type Admin } from './admin-session'
 
-// Til sider og Server Actions. API-ruter beskyttes centralt i middleware.ts.
+// Til sider og Server Actions. API-ruter afvises i middleware.ts OG tjekker selv med requireAdmin() (lib/api-admin.ts).
 
 export async function getCurrentAdmin(): Promise<Admin | null> {
   return adminFromToken((await cookies()).get(ADMIN_COOKIE)?.value)

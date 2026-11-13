@@ -1,9 +1,11 @@
 import { runMatchingEngine } from '@/lib/matching-engine'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
 
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
 

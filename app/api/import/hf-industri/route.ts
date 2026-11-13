@@ -1,10 +1,12 @@
 import { importHfIndustri } from '@/lib/importers/hf-industri'
 import { trackImport } from '@/lib/import-run'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
 
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   let formData: FormData
   try {
     formData = await request.formData()
