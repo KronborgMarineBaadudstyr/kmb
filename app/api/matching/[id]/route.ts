@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +12,7 @@ type RouteParams = { params: Promise<{ id: string }> }
 // der har et fejlagtigt EAN i denne gruppe. De skrives til supplier_ean_exclusions
 // så fremtidige imports og pipeline-kørsel ikke matcher dem forkert igen.
 export async function PATCH(request: Request, { params }: RouteParams) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { id } = await params
   const body   = await request.json() as {
     suggested_name?:        string

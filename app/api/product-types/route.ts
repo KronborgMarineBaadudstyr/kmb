@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/product-types — list all product types ordered by name
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('product_types')
@@ -17,6 +19,7 @@ export async function GET() {
 
 // POST /api/product-types — create a new product type
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const body = await request.json() as {
     name?: string
     keywords?: string[]

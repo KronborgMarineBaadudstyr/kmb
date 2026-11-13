@@ -1,6 +1,7 @@
 import { importPalby, syncPalbyStock } from '@/lib/importers/palby'
 import { trackImport } from '@/lib/import-run'
 import type { PalbyImportProgress } from '@/lib/importers/palby'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 300
@@ -13,6 +14,7 @@ export const maxDuration = 300
 // GET /api/import/palby?mode=stock-full → komplet lagersync (web_stockstatus_newitemid.xml)
 
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url   = new URL(request.url)
   const mode  = url.searchParams.get('mode')   // 'stock' | 'stock-full' | null
   const delta = url.searchParams.get('delta')  // '1' = brug delta produktfil

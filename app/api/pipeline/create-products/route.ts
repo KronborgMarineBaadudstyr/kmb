@@ -4,6 +4,7 @@ import { assignProductCategory } from '@/lib/standard-categories'
 import { loadCategories, assignFromDB } from '@/lib/db-categories'
 import { processAutoStage } from '@/lib/auto-stage-processor'
 import { PipelineRun } from '@/lib/pipeline-run'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
@@ -13,6 +14,7 @@ export const maxDuration = 300
 // Called automatically by the client after /api/pipeline/run completes.
 // Idempotent: confirmed groups that already have a product are skipped.
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
 

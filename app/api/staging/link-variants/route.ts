@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { assignProductCategory } from '@/lib/standard-categories'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,7 @@ function generateSku(): string {
 // creates product_suppliers on the PARENT with variant_id set,
 // marks staging rows as matched.
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   let body: { parent_name: string; variants: Array<{ staging_id: string; variant_attrs: Record<string, string> }> }

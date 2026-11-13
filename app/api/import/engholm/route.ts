@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
 import { trackImport } from '@/lib/import-run'
 import { importEngholm } from '@/lib/importers/engholm'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 300
 
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const { searchParams } = new URL(request.url)
   const resume = searchParams.get('continue') === '1'   // næste del af en opdelt kørsel (browseren kalder selv ved 'partial')
 

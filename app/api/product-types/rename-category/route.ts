@@ -5,6 +5,7 @@ import { normalizeCategory, buildDedupeMap } from '@/lib/standard-categories'
 function stripPrefix(cat: string): string { return cat.replace(/^[A-Za-zÆØÅæøå]+\s*[–\-:]\s*/, '').trim() }
 function mapToStandard(cat: string): string | null { const n = normalizeCategory(cat); return n !== cat ? n : null }
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,7 @@ export const dynamic = 'force-dynamic'
 // ?preview=standard  →  show standard-structure mapping
 // (no param)         →  show prefix-strip preview
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url  = new URL(request.url)
   const mode = url.searchParams.get('preview')
 
@@ -52,6 +54,7 @@ export async function GET(request: Request) {
 
 // POST — auto_cleanup | apply_standard | rename a specific category
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const body = await request.json() as {
     auto_cleanup?:    boolean

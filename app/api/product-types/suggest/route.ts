@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { anthropicClient } from '@/lib/ai/key'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -28,6 +29,7 @@ function matchesAnyType(name: string, keywordSets: string[][]): boolean {
 // Samples product names NOT yet covered by an existing product type,
 // calls Claude, returns product type suggestions.
 export async function POST() {
+  const denied = await requireAdmin(); if (denied) return denied
   const client = await anthropicClient()
   if (!client) {
     return NextResponse.json(

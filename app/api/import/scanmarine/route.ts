@@ -1,6 +1,7 @@
 import { importScanmarine } from '@/lib/importers/scanmarine'
 import { trackImport } from '@/lib/import-run'
 import type { ScanmarineImportProgress } from '@/lib/importers/scanmarine'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 export const maxDuration = 120
@@ -9,6 +10,7 @@ export const maxDuration = 120
 // GET /api/import/scanmarine?limit=N  → test med N produkter
 
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const url   = new URL(request.url)
 
   const encoder = new TextEncoder()

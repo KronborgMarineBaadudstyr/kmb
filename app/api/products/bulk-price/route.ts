@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,6 +13,7 @@ export const dynamic = 'force-dynamic'
 //   category?: string                      — alt. til product_ids: alle i kategori
 // }
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   let body: Record<string, unknown>
   try { body = await request.json() }

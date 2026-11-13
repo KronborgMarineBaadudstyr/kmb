@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { normalizeForMatching, matchingNumbers, numbersCompatible } from '@/lib/matching-normalize'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
@@ -37,6 +38,7 @@ function wordOverlap(a: string, b: string): number {
 // auto-confirms those with ≥2 common meaningful words across ALL member pairs.
 // Sets notes on groups that need manual review explaining why.
 export async function POST() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   // Load all pending EAN groups with their members' names

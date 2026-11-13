@@ -1,10 +1,12 @@
 import { NextResponse } from 'next/server'
 import { buildPurchaseList, purchaseCsv } from '@/lib/purchasing'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET /api/purchasing/export?supplier=<supplier_id|none> — CSV til leverandøren
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supplier = new URL(request.url).searchParams.get('supplier') ?? ''
   const { groups, error } = await buildPurchaseList()
   if (error) return NextResponse.json({ error }, { status: 500 })

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { cleanAttributeInput } from '@/lib/variant-attributes'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -8,6 +9,7 @@ const missingTable = (code?: string) => code === '42P01' || code === 'PGRST205'
 
 // GET /api/variant-attributes — alle fælles variant-egenskaber (tom liste før migration 065)
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const { data, error } = await createServiceClient()
     .from('variant_attributes').select('id, name, unit, values, sort_order')
     .order('sort_order').order('name')
@@ -20,6 +22,7 @@ export async function GET() {
 
 // POST /api/variant-attributes — opret egenskab
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const input = cleanAttributeInput(await request.json().catch(() => null))
   if (typeof input === 'string') return NextResponse.json({ error: input }, { status: 400 })
   const { data, error } = await createServiceClient()

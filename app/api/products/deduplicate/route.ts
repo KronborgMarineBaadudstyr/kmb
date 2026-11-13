@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic'
 // Finds products with identical names, keeps the one with most product_suppliers,
 // merges all product_suppliers onto the winner, deletes duplicates.
 export async function POST() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   // 1. Load all products

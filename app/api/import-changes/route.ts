@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,6 +12,7 @@ export const dynamic = 'force-dynamic'
 //   page         – page number (default 1)
 //   per_page     – results per page (default 50)
 export async function GET(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const { searchParams } = new URL(request.url)
 
@@ -66,6 +68,7 @@ export async function GET(request: Request) {
 // that were NOT updated since the last import run.
 // Body: { supplier_id: string, cutoff_hours?: number }
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   let body: { supplier_id: string; cutoff_hours?: number }
   try { body = await request.json() }

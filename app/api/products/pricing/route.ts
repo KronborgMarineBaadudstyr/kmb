@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -7,6 +8,7 @@ export const dynamic = 'force-dynamic'
 // Returns products where sales_price IS NULL, enriched with supplier pricing.
 // Each product gets its active suppliers sorted by priority.
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   const { data: products, error } = await supabase

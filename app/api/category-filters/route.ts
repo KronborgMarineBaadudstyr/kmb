@@ -1,10 +1,12 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
+import { requireAdmin } from '@/lib/api-admin'
 
 export const dynamic = 'force-dynamic'
 
 // GET — hent alle category_attribute_filters + alle kendte kategorier fra products
 export async function GET() {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
 
   const [{ data: filters }, { data: cats }, { data: variants }, { data: globalAttrs }] = await Promise.all([
@@ -49,6 +51,7 @@ export async function GET() {
 
 // POST — opret ny category_attribute_filter
 export async function POST(request: Request) {
+  const denied = await requireAdmin(); if (denied) return denied
   const supabase = createServiceClient()
   const body = await request.json()
 
