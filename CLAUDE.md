@@ -9,6 +9,7 @@ Ingen WooCommerce — shop og betaling bygges selv, og alle Woo-kolonner er fjer
 - **FTP:** `basic-ftp` pakke
 - **XML parsing:** `fast-xml-parser`
 - **Cron jobs:** Vercel Cron (vercel.json) med `CRON_SECRET` Bearer token auth
+- **Sårbarheder (`npm audit --omit=dev`):** kendte og accepterede: `postcss` 8.4.31 ligger fast inde i Next 15 (kun byggetrin, løses med Next 16) og `xlsx` 0.18.5 (ingen rettet udgave på npm; bruges kun til admin-upload og HF's leverandørfil). Alt andet skal holdes grønt
 
 ## Projekt-struktur
 ```
