@@ -10,7 +10,6 @@ export const maxDuration = 300
 
 export async function GET(request: Request) {
   const url   = new URL(request.url)
-  const limit = url.searchParams.get('limit')
 
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
@@ -21,8 +20,8 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await trackImport({ supplier: 'Kap-Horn', source: 'manual', kind: 'products', test: !!limit },
-        onP => importKapHorn(onP, { limit: limit ? parseInt(limit, 10) : undefined }),
+      await trackImport({ supplier: 'Kap-Horn', source: 'manual', kind: 'products' },
+        onP => importKapHorn(onP),
         (data: KapHornImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         })

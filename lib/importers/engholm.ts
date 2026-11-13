@@ -109,7 +109,7 @@ async function findFuzzyMatches(
 
 export async function importEngholm(
   onProgress: ProgressCallback,
-  options: { limit?: number } & Partial<RunContext> = {}
+  options: Partial<RunContext> = {}
 ): Promise<void> {
   const supabase = createServiceClient()
   const { resume, deadline } = { ...NO_CHUNKING, ...options }
@@ -130,7 +130,6 @@ export async function importEngholm(
   if (!json.success) throw new Error('Engholm API returnerede success: false')
 
   let all = json.products
-  if (options.limit) all = all.slice(0, options.limit)
 
   // Sorteret efter varenummer, hvert varenummer én gang — en fortsat kørsel springer de behandlede over
   const { products, total } = await prepareImportItems(SUPPLIER_ID, all, p => p.sku, p => ({
@@ -141,7 +140,7 @@ export async function importEngholm(
     'Enhed':        p.unit || null,
     'Lager':        p.stock ?? null,
     'Sidst ændret': p.lastUpdate || null,
-  }), { resume, test: !!options.limit })
+  }), { resume })
   onProgress({
     stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,
     staged: resume?.staged ?? 0, updated: resume?.updated ?? 0, errors: resume?.errors ?? 0,

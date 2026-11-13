@@ -108,7 +108,7 @@ function formatDescription(piped: unknown): string | null {
 
 export async function importColumbus(
   onProgress: ProgressCallback,
-  options: { limit?: number } & Partial<RunContext> = {}
+  options: Partial<RunContext> = {}
 ): Promise<void> {
   const { resume, deadline } = { ...NO_CHUNKING, ...options }
   const supabase = createServiceClient()
@@ -150,7 +150,6 @@ export async function importColumbus(
     })
 
     let all = parseColumbusXml(xmlBuf)
-    if (options.limit) all = all.slice(0, options.limit)
 
     // Sorteret efter varenummer — en fortsat kørsel springer dem over, der allerede er behandlet
     const { products, total } = await prepareImportItems(SUPPLIER_ID, all, p => String(p.ItemId), p => ({
@@ -160,7 +159,7 @@ export async function importColumbus(
       'EAN':         p.EAN && String(p.EAN) !== '0' ? String(p.EAN) : null,
       'Lager':       Number(p.InStock) || 0,
       'Varegruppe':  p.ItemGroup || null,
-    }), { resume, test: !!options.limit })
+    }), { resume })
 
     onProgress({
       stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,

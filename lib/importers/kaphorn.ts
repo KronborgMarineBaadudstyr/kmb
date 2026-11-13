@@ -190,7 +190,6 @@ function buildSupplierFiles(
 
 export async function importKapHorn(
   onProgress: ProgressCallback,
-  options: { limit?: number } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -230,7 +229,6 @@ export async function importKapHorn(
     })
 
     let products = parseProductFeed(xmlBuf)
-    if (options.limit) products = products.slice(0, options.limit)
 
     const total = products.length
 
@@ -479,7 +477,6 @@ export async function importKapHorn(
 
 export async function syncKapHornStock(
   onProgress: StockProgressCallback,
-  options: { limit?: number } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -519,7 +516,6 @@ export async function syncKapHornStock(
     })
 
     let rows = parseStockFeed(xmlBuf)
-    if (options.limit) rows = rows.slice(0, options.limit)
 
     const total = rows.length
 
