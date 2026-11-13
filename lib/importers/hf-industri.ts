@@ -122,7 +122,6 @@ function parseSheet(sheet: XLSX.WorkSheet, sheetName: string): HfRow[] {
 export async function importHfIndustri(
   fileBuffer: Buffer,
   onProgress: ProgressCallback,
-  options: { limit?: number } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -151,7 +150,6 @@ export async function importHfIndustri(
     allRows = allRows.concat(rows)
   }
 
-  if (options.limit) allRows = allRows.slice(0, options.limit)
 
   const total = allRows.length
 

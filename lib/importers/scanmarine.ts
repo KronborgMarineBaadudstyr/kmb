@@ -142,7 +142,6 @@ function parseCsv(text: string): ScanmarineProduct[] {
 
 export async function importScanmarine(
   onProgress: ProgressCallback,
-  options: { limit?: number } = {}
 ): Promise<void> {
   const supabase = createServiceClient()
 
@@ -174,7 +173,6 @@ export async function importScanmarine(
   })
 
   let products = parseCsv(csvText)
-  if (options.limit) products = products.slice(0, options.limit)
 
   const total = products.length
 

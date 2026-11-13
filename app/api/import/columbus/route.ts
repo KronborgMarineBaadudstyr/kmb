@@ -11,7 +11,6 @@ export const maxDuration = 300
 
 export async function GET(request: Request) {
   const url   = new URL(request.url)
-  const limit = url.searchParams.get('limit')
   const resume = url.searchParams.get('continue') === '1'
 
   const encoder = new TextEncoder()
@@ -23,8 +22,8 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await trackImport({ supplier: 'Columbus Marine', source: 'manual', kind: 'products', test: !!limit, resumable: true, resume },
-        (onP, ctx) => importColumbus(onP, { limit: limit ? parseInt(limit, 10) : undefined, ...ctx }),
+      await trackImport({ supplier: 'Columbus Marine', source: 'manual', kind: 'products', resumable: true, resume },
+        (onP, ctx) => importColumbus(onP, ctx),
         (data: ColumbusImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         })

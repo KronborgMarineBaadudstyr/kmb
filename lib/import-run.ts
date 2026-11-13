@@ -133,12 +133,12 @@ export function remainingAfterCursor<T>(
 export async function prepareImportItems<T>(
   supplierId: string, items: T[], skuOf: (t: T) => string,
   describe: (t: T) => Record<string, string | number | null>,
-  opts: { resume: ImportCursor | null; test?: boolean },
+  opts: { resume: ImportCursor | null },
 ): Promise<{ products: T[]; total: number; duplicates: number }> {
   const { data } = await createServiceClient().from('suppliers').select('sync_state').eq('id', supplierId).single()
   const choice = (((data?.sync_state ?? {}) as Record<string, unknown>).duplicate_choice ?? {}) as DuplicateChoice
   const report = findDuplicates(items, skuOf, describe, choice)
-  if (!opts.resume && !opts.test) await mergeSyncState(supplierId, { duplicate_skus: report })
+  if (!opts.resume) await mergeSyncState(supplierId, { duplicate_skus: report })
   if (report.count > 0) console.warn(`[import] ${report.count} varenumre står flere gange i leverandørens fil — én linje pr. varenummer bruges`)
   const products = remainingAfterCursor(items, skuOf, opts.resume, choice)
   return { products, total: new Set(items.map(skuOf)).size, duplicates: report.count }
@@ -146,7 +146,7 @@ export async function prepareImportItems<T>(
 
 export async function trackImport<P extends ProgressLike>(
   opts: {
-    supplier: string; source: RunSource; kind: RunKind; test?: boolean
+    supplier: string; source: RunSource; kind: RunKind
     resumable?: boolean     // importøren understøtter opdeling (RunContext)
     resume?: boolean        // fortsæt en opdelt kørsel i stedet for at starte forfra
   },
@@ -175,7 +175,7 @@ export async function trackImport<P extends ProgressLike>(
   const chunk     = (resume?.chunk ?? 0) + 1
   const ctx: RunContext = {
     resume,
-    deadline: opts.resumable && !opts.test ? Date.now() + CHUNK_BUDGET_MS : 0,
+    deadline: opts.resumable ? Date.now() + CHUNK_BUDGET_MS : 0,
   }
   await mergeSyncState(supplierId, { last_run_started_at: now, [cursorKey]: resume })
 
@@ -201,7 +201,6 @@ export async function trackImport<P extends ProgressLike>(
       started_at: startedAt,
       source: opts.source,
       kind:   opts.kind,
-      ...(opts.test ? { test: true } : {}),
       ...(chunk > 1 || stage === 'partial' ? { chunks: chunk } : {}),
     }
     // Seneste kørsel uanset type + seneste pr. type (så en lagersync ikke skjuler produktimportens resultat)

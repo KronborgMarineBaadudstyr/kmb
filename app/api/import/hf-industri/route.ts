@@ -19,9 +19,6 @@ export async function POST(request: Request) {
 
   const buffer = Buffer.from(await file.arrayBuffer())
 
-  const limitParam = new URL(request.url).searchParams.get('limit')
-  const options = limitParam ? { limit: parseInt(limitParam, 10) } : {}
-
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
   const stream = new ReadableStream<Uint8Array>({ start(c) { ctrl = c } })
@@ -30,8 +27,8 @@ export async function POST(request: Request) {
 
   ;(async () => {
     try {
-      await trackImport({ supplier: 'HF Industri Marine', source: 'manual', kind: 'products', test: !!limitParam },
-        onP => importHfIndustri(buffer, onP, options), send)
+      await trackImport({ supplier: 'HF Industri Marine', source: 'manual', kind: 'products' },
+        onP => importHfIndustri(buffer, onP), send)
     } catch (e: unknown) {
       send({
         stage: 'error', total: 0, processed: 0, matched: 0,

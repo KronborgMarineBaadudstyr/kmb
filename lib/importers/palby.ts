@@ -234,7 +234,7 @@ function parseStockXml(buf: Buffer): StockRow[] {
 
 export async function importPalby(
   onProgress: ProgressCallback,
-  options: { limit?: number; delta?: boolean } & Partial<RunContext> = {}
+  options: { delta?: boolean } & Partial<RunContext> = {}
 ): Promise<void> {
   const { resume, deadline } = { ...NO_CHUNKING, ...options }
   const supabase = createServiceClient()
@@ -278,7 +278,6 @@ export async function importPalby(
     let all = parsePalbyProductCsv(csvBuf)
       .filter(p => p.CatalogElementType === 'Single')
 
-    if (options.limit) all = all.slice(0, options.limit)
 
     // Sorteret efter varenummer — en fortsat kørsel springer dem over, der allerede er behandlet
     const { products, total } = await prepareImportItems(SUPPLIER_ID, all, p => p.ItemId, p => ({
@@ -288,7 +287,7 @@ export async function importPalby(
       'EAN':         p.Barcode || null,
       'Variant':     p.VariantName || null,
       'Master':      p.MasterItemId || null,
-    }), { resume, test: !!options.limit })
+    }), { resume })
 
     onProgress({
       stage: 'importing', total, processed: resume?.processed ?? 0, matched: resume?.matched ?? 0,

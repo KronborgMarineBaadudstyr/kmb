@@ -17,7 +17,7 @@ type ImportSummary = {
   started_at?: string                 // gemmes af serveren (lib/import-run.ts)
   source?:   'manual' | 'cron'
   kind?:     'products' | 'stock'
-  test?:     boolean
+  test?:     boolean          // kun på gamle kørsler — testmodus er fjernet
   chunks?:   number                   // antal dele en opdelt kørsel har brugt
 }
 
@@ -211,7 +211,6 @@ export default function SuppliersPage() {
   const [importing,    setImporting]    = useState<string | null>(null)
   const [lastImported, setLastImported] = useState<string | null>(null)
   const [progress,     setProgress]     = useState<ImportProgress | null>(null)
-  const [testMode,     setTestMode]     = useState(false)
   const [selectedFile, setSelectedFile] = useState<Record<string, File>>({})
   const [savingPrio,   setSavingPrio]   = useState(false)
   const esRef = useRef<EventSource | null>(null)
@@ -276,11 +275,7 @@ export default function SuppliersPage() {
     setProgress(null)
 
     let url = cfg.endpoint
-    if (testMode) {
-      url += mode ? `?mode=${mode}&limit=20` : '?limit=100'
-    } else if (mode) {
-      url += `?mode=${mode}`
-    }
+    if (mode) url += `?mode=${mode}`
 
     progressRef.current = null
     const kind = mode === 'stock' || mode === 'stock-full' ? 'stock' : 'products'
@@ -350,8 +345,7 @@ export default function SuppliersPage() {
     const formData = new FormData()
     formData.append('file', file)
 
-    let url = cfg.endpoint
-    if (testMode) url += '?limit=100'
+    const url = cfg.endpoint
 
     try {
       const response = await fetch(url, { method: 'POST', body: formData })
@@ -503,16 +497,6 @@ export default function SuppliersPage() {
                     ) : IMPORT_CONFIG[s.name]?.needsFile ? (
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center gap-2">
-                          <label
-                            className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer"
-                            title="Importerer kun de første 100 produkter — til at verificere at importen virker korrekt"
-                          >
-                            <input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)}
-                              className="accent-blue-500" />
-                            Testmodus (100 stk.)
-                          </label>
-                        </div>
-                        <div className="flex items-center gap-2">
                           <label className="flex items-center gap-2 cursor-pointer">
                             <span className="text-xs text-gray-500">
                               {selectedFile[s.id] ? selectedFile[s.id].name : 'Ingen fil valgt'}
@@ -567,14 +551,6 @@ export default function SuppliersPage() {
 
                         {/* Produkt-import */}
                         <div className="flex items-center gap-2">
-                          <label
-                            className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer"
-                            title="Importerer kun de første 100 produkter — til at verificere at importen virker korrekt"
-                          >
-                            <input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)}
-                              className="accent-blue-500" />
-                            Testmodus (100 stk.)
-                          </label>
                           <button
                             onClick={() => startImport(s)}
                             disabled={!!importing}

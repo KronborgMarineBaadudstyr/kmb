@@ -10,7 +10,6 @@ export const maxDuration = 120
 
 export async function GET(request: Request) {
   const url   = new URL(request.url)
-  const limit = url.searchParams.get('limit')
 
   const encoder = new TextEncoder()
   let ctrl: ReadableStreamDefaultController<Uint8Array> = null!
@@ -21,8 +20,8 @@ export async function GET(request: Request) {
 
   ;(async () => {
     try {
-      await trackImport({ supplier: 'Scanmarine', source: 'manual', kind: 'products', test: !!limit },
-        onP => importScanmarine(onP, { limit: limit ? parseInt(limit, 10) : undefined }),
+      await trackImport({ supplier: 'Scanmarine', source: 'manual', kind: 'products' },
+        onP => importScanmarine(onP),
         (data: ScanmarineImportProgress) => {
           ctrl.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`))
         })
