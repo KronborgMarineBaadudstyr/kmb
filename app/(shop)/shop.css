@@ -1624,3 +1624,23 @@
 .ls-boatprompt--compact { padding: 12px 14px; }
 .ls-boatprompt--compact .ls-boatprompt-icon { font-size: 26px; }
 @media (max-width: 640px) { .ls-boatprompt { padding: 14px 12px; } .ls-boatprompt-icon { display: none; } .ls-boatprompt-close { position: static; align-self: flex-start; } }
+
+/* ── OUTLET (varianter med afvigende pris vises som selvstændige varer) ── */
+.ls-outlet-tag {
+  display: inline-block; margin-left: 8px; padding: 2px 8px; border-radius: 99px;
+  font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+  background: #fff4e5; color: #b4530a; vertical-align: middle;
+}
+.ls-outlet-tag--lg { font-size: 12px; padding: 3px 10px; }
+.ls-outlet-note { font-size: 13px; color: var(--ink-3); margin: -6px 0 10px; }
+.ls-outlet-note a { color: var(--navy); font-weight: 600; }
+.ls-varpicker-outlet { border-top: 1px solid var(--line); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.ls-varpicker-outlet ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ls-outlet-link {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1.5px solid var(--line); border-radius: var(--r-md); background: var(--card);
+  color: var(--ink); font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.ls-outlet-link:hover { border-color: var(--navy); color: var(--navy); }
+.ls-outlet-link > span:first-child { flex: 1; }
+.ls-outlet-price { font-size: 15px; font-weight: 800; }

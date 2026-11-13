@@ -1,6 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { NextResponse } from 'next/server'
 import { requireAdmin } from '@/lib/api-admin'
+import { splitOutlet } from '@/lib/shop/variant-pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -167,31 +168,30 @@ export async function GET(request: Request) {
   const { data: variantRows } = pageIds.length
     ? await supabase
         .from('product_variants')
-        .select('product_id, sales_price')
+        .select('id, product_id, sales_price')
         .in('product_id', pageIds)
         .eq('status', 'active')
     : { data: [] }
 
-  const variantCounts   = new Map<string, number>()
-  const variantMinPrice = new Map<string, number>()
-  for (const row of (variantRows ?? []) as { product_id: string; sales_price: number | null }[]) {
-    variantCounts.set(row.product_id, (variantCounts.get(row.product_id) ?? 0) + 1)
-    if (row.sales_price != null) {
-      const cur = variantMinPrice.get(row.product_id)
-      if (cur === undefined || row.sales_price < cur) variantMinPrice.set(row.product_id, row.sales_price)
-    }
+  // Varianter pr. produkt — kortets pris er produktets normalpris, aldrig "fra laveste" (lib/shop/variant-pricing.ts)
+  const variantsByProduct = new Map<string, { id: string; sales_price: number | null }[]>()
+  for (const row of (variantRows ?? []) as { id: string; product_id: string; sales_price: number | null }[]) {
+    const list = variantsByProduct.get(row.product_id) ?? []
+    list.push({ id: row.id, sales_price: row.sales_price }); variantsByProduct.set(row.product_id, list)
   }
 
   const products = productList.map(p => {
     const imgs    = (p.product_images as { url: string; is_primary: boolean; position: number }[]) ?? []
     const primary = imgs.find(i => i.is_primary) ?? imgs.sort((a, b) => a.position - b.position)[0]
-    const vc      = variantCounts.get(p.id) ?? 0
+    const vs      = variantsByProduct.get(p.id) ?? []
+    const split   = vs.length ? splitOutlet(vs, (p.sales_price as number | null) ?? null) : null
     return {
       ...p,
       primary_image_url: primary?.url ?? null,
       image_count:       imgs.length,
-      variant_count:     vc,
-      min_variant_price: vc > 0 ? (variantMinPrice.get(p.id) ?? null) : null,
+      variant_count:     vs.length,
+      display_price:     split ? split.reference : ((p.sales_price as number | null) ?? null),
+      outlet_count:      split ? split.outlet.length : 0,
       product_images:    undefined,
     }
   })

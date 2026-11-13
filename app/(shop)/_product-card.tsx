@@ -9,7 +9,8 @@ type Product = {
   name: string
   brand?: string | null
   sales_price?: number | null
-  min_variant_price?: number | null
+  display_price?: number | null   // normalpris (varianter med afvigende pris er outlet og tæller ikke)
+  outlet_count?: number
   variant_count?: number
   categories?: string[]
   product_images?: { url: string; is_primary: boolean }[]
@@ -37,7 +38,7 @@ export function ProductCard({ product: p }: { product: Product }) {
     ?? p.product_images?.[0]?.url
 
   const hasVariants = (p.variant_count ?? 0) > 0
-  const displayPrice = hasVariants ? (p.min_variant_price ?? p.sales_price) : p.sales_price
+  const displayPrice = p.display_price ?? p.sales_price
   const firstCat = p.categories?.[0]
 
   function handleAdd(e: React.MouseEvent) {
@@ -72,11 +73,9 @@ export function ProductCard({ product: p }: { product: Product }) {
         <div className="ls-prodcard-name">{p.name}</div>
         <div className="ls-prodcard-price">
           {displayPrice
-            ? <>
-                {hasVariants && <span className="ls-prodcard-price-from">fra </span>}
-                <PriceDisplay price={displayPrice} />
-              </>
+            ? <PriceDisplay price={displayPrice} />
             : <span className="ls-prodcard-price-unknown">Pris ukendt</span>}
+          {(p.outlet_count ?? 0) > 0 && <span className="ls-outlet-tag" title="Enkelte udgaver sælges til outlet-pris">Outlet</span>}
         </div>
         <button
           onClick={handleAdd}

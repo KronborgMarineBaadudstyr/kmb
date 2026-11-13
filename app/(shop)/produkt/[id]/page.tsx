@@ -11,6 +11,7 @@ import { getCurrentAdmin } from '@/lib/admin-auth'
 import { slugify } from '@/lib/shop/categories'
 import { getAttrOrder } from '@/lib/shop/variant-order'
 import { sortVariantsByAttributes } from '@/lib/variant-attributes'
+import { splitOutlet, attrLabel } from '@/lib/shop/variant-pricing'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,10 +61,15 @@ async function getVariants(id: string): Promise<Variant[]> {
   return (data ?? []) as Variant[]
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const { id } = await params
+export async function generateMetadata({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ variant?: string }> }): Promise<Metadata> {
+  const [{ id }, { variant }] = await Promise.all([params, searchParams])
   const p = await getProduct(id)
-  return { title: p?.name ?? 'Produkt' }
+  if (!p) return { title: 'Produkt' }
+  if (variant) {
+    const v = (await getVariants(id)).find(x => x.id === variant)
+    if (v) return { title: `${p.name} ${attrLabel(v.attributes)} (Outlet)`.trim() }
+  }
+  return { title: p.name }
 }
 
 // "Flere i …" streames ind efter selve produktet, så siden ikke venter på det
@@ -96,8 +102,8 @@ async function RelatedProducts({ id, category }: { id: string; category: string 
   )
 }
 
-export default async function ProductPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params
+export default async function ProductPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ variant?: string }> }) {
+  const [{ id }, { variant: variantParam }] = await Promise.all([params, searchParams])
 
   // Produkt, varianter, admin-tjek og variant-rækkefølgen (Sortiment → Variant-egenskaber) hentes samtidig
   const [p, rawVariants, admin, attrOrder] = await Promise.all([getProduct(id), getVariants(id), getCurrentAdmin(), getAttrOrder()])
@@ -136,7 +142,12 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
   if (p.width)            specs.push(['Bredde', `${p.width} cm`])
   if (p.height)           specs.push(['Højde', `${p.height} cm`])
 
-  const hasVariants = variants.length > 0
+  // Varianter med afvigende pris er outlet-varer (lib/shop/variant-pricing.ts). ?variant=<id> på en af dem viser den som et selvstændigt produkt
+  const { reference, regular, outlet } = splitOutlet(variants, p.sales_price ?? null)
+  const outletVariant = variantParam ? outlet.find(v => v.id === variantParam) ?? null : null
+  const hasVariants = !outletVariant && (regular.length > 0 || outlet.length > 0)
+  const title = outletVariant ? `${p.name} ${attrLabel(outletVariant.attributes)}`.trim() : p.name
+  const shownPrice = outletVariant ? outletVariant.sales_price : (hasVariants ? null : (p.sales_price ?? reference))
 
   return (
     <>
@@ -149,7 +160,7 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
             <span>/</span>
           </>
         )}
-        <span style={{ color: 'var(--ink)' }}>{p.name}</span>
+        <span style={{ color: 'var(--ink)' }}>{title}</span>
       </nav>
 
       <div className="ls-pdp">
@@ -166,11 +177,16 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
         {/* Right: info */}
         <div className="ls-pdp-info">
           {p.brand && <div className="ls-pdp-brand">{p.brand}</div>}
-          <h1 className="ls-pdp-name">{p.name}</h1>
+          <h1 className="ls-pdp-name">{title}{outletVariant && <span className="ls-outlet-tag ls-outlet-tag--lg">Outlet</span>}</h1>
+          {outletVariant && (
+            <p className="ls-outlet-note">
+              Udgave til særpris · <Link href={`/produkt/${p.id}`}>Se {p.name} i alle udgaver →</Link>
+            </p>
+          )}
 
           {!hasVariants && (
-            p.sales_price
-              ? <div className="ls-pdp-price">{fmtPrice(p.sales_price)}</div>
+            shownPrice
+              ? <div className="ls-pdp-price">{fmtPrice(shownPrice)}</div>
               : <div className="ls-pdp-price" style={{ fontSize: 16, color: 'var(--ink-3)' }}>Kontakt for pris</div>
           )}
 
@@ -182,19 +198,24 @@ export default async function ProductPage({ params }: { params: Promise<{ id: st
           {/* Variant picker — replaces simple add-to-cart when variants exist */}
           {hasVariants
             ? <VariantPicker
-                variants={variants}
+                variants={regular}
+                outlet={outlet}
                 productId={p.id}
                 productName={p.name}
-                basePrice={p.sales_price ?? null}
+                basePrice={reference}
                 image={primaryImage}
                 attrOrder={attrOrder}
               />
             : <AddToCartBtn
-                product={{ id: p.id, name: p.name, price: p.sales_price ?? 0, image: primaryImage }}
+                product={{
+                  id:    outletVariant ? `${p.id}__${outletVariant.id}` : p.id,   // produktId__variantId → ordren får variantens pris
+                  name:  outletVariant ? `${title} (Outlet)` : p.name,
+                  price: shownPrice ?? 0, image: primaryImage,
+                }}
               />
           }
 
-          <WishlistBtn name={p.name} price={p.sales_price} image={primaryImage} />
+          <WishlistBtn name={title} price={shownPrice} image={primaryImage} />
 
           {p.description && (
             <div className="ls-pdp-desc" style={{ marginTop: 8 }}
