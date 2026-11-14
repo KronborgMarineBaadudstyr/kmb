@@ -2,7 +2,9 @@
 
 import { useState } from 'react'
 import { useCart } from '../../_cart'
+import Link from 'next/link'
 import { compareAttrValues, orderAttributeNames, type AttrOrder } from '@/lib/variant-attributes'
+import { attrLabel } from '@/lib/shop/variant-pricing'
 
 type Variant = {
   id:                 string
@@ -23,13 +25,14 @@ type Props = {
   basePrice:   number | null
   image?:      string | null
   attrOrder?:  AttrOrder      // rækkefølge fra Sortiment → Variant-egenskaber
+  outlet?:     Variant[]      // varianter med afvigende pris — vises som selvstændige outlet-varer
 }
 
 function fmtPrice(n: number) {
   return n.toLocaleString('da-DK', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' kr'
 }
 
-export function VariantPicker({ variants, productId, productName, basePrice, image, attrOrder = [] }: Props) {
+export function VariantPicker({ variants, productId, productName, basePrice, image, attrOrder = [], outlet = [] }: Props) {
   const { add } = useCart()
   const [selected, setSelected] = useState<string | null>(null)
   const [toasted, setToasted]   = useState(false)
@@ -39,7 +42,7 @@ export function VariantPicker({ variants, productId, productName, basePrice, ima
     Object.fromEntries((variants[0]?.attributes ?? []).map(a => [a.name, a.value])))
 
   // Hooks skal kaldes før en tidlig return
-  if (variants.length === 0) return null
+  if (variants.length === 0 && outlet.length === 0) return null
 
   // Group attribute names
   const attrNames = orderAttributeNames([...new Set(variants.flatMap(v => v.attributes.map(a => a.name)))], attrOrder)
@@ -116,13 +119,32 @@ export function VariantPicker({ variants, productId, productName, basePrice, ima
         </div>
       )}
 
-      <button
-        className={`ls-prodcard-btn ls-varpicker-add${toasted ? ' toasted' : ''}`}
-        onClick={handleAdd}
-        disabled={!matched || !inStock}
-      >
-        {toasted ? '✓ Lagt i kurv' : matched ? 'Læg i kurv' : 'Vælg variant'}
-      </button>
+      {variants.length > 0 && (
+        <button
+          className={`ls-prodcard-btn ls-varpicker-add${toasted ? ' toasted' : ''}`}
+          onClick={handleAdd}
+          disabled={!matched || !inStock}
+        >
+          {toasted ? '✓ Lagt i kurv' : matched ? 'Læg i kurv' : 'Vælg variant'}
+        </button>
+      )}
+
+      {outlet.length > 0 && (
+        <div className="ls-varpicker-outlet">
+          <div className="ls-varpicker-label">Outlet <span className="ls-varpicker-chosen">— udgaver til særpris</span></div>
+          <ul>
+            {outlet.map(v => (
+              <li key={v.id}>
+                <Link href={`/produkt/${productId}?variant=${v.id}`} className="ls-outlet-link">
+                  <span>{attrLabel(v.attributes, v.internal_variant_sku)}</span>
+                  <span className="ls-outlet-price">{v.sales_price != null ? fmtPrice(v.sales_price) : ''}</span>
+                  <span className={`ls-varpicker-stock ${available(v) > 0 ? 'in' : 'out'}`}>{available(v) > 0 ? `${available(v)} på lager` : 'Ikke på lager'}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
