@@ -44,16 +44,32 @@ export type PurchaseOrder = {
   lines:           { name: string; sku: string; supplier_sku: string | null; qty: number; purchase_price: number | null }[]
 }
 
+// Bestillingsoplysninger pr. leverandør (suppliers.ordering, migration 073) — redigeres på Indkøb
+export type SupplierOrdering = {
+  portal_url?:      string
+  customer_number?: string
+  order_email?:     string
+  order_phone?:     string
+  cutoff?:          string
+  delivery?:        string
+  min_order?:       number
+  free_freight?:    number
+  notes?:           string
+}
+
 export type PurchaseGroup = {
   supplier_id:   string | null
   supplier_name: string
   contact_email: string | null
+  contact_name:  string | null
+  contact_phone: string | null
+  ordering:      SupplierOrdering
   lines:         PurchaseLine[]
   orders:        PurchaseOrder[]   // de samme varer fordelt på ordrer (nyeste først)
   total:         number            // indkøbsværdi ekskl. moms (linjer med kendt pris)
 }
 
-export type OrderedEntry = { ref: string; qty: number; supplier_id: string; supplier_name: string; at: string; by: string }
+export type OrderedEntry = { ref: string; qty: number; supplier_id: string; supplier_name: string; at: string; by: string; supplier_ref?: string }
 type Line  = { product_id?: string; variant_id?: string | null; name?: string; sku?: string; qty?: number; reserved_qty?: number; ordered?: OrderedEntry[] }
 
 export const orderedQty = (l: { ordered?: OrderedEntry[] }) =>
@@ -180,6 +196,7 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
       supplier_id:   ps?.suppliers?.id ?? null,
       supplier_name: ps?.suppliers?.name ?? 'Ingen leverandør fundet',
       contact_email: ps?.suppliers?.contact_email ?? null,
+      contact_name: null, contact_phone: null, ordering: {},
       lines: [], orders: [], total: 0,
     }
     g.lines.push(line)
@@ -200,6 +217,19 @@ export async function buildPurchaseList(): Promise<{ groups: PurchaseGroup[]; er
     g.orders = [...byOrder.values()].sort((a, b) => (b.ordered_at ?? '').localeCompare(a.ordered_at ?? ''))
   }
 
+  // Kontakt og bestillingsoplysninger (ordering kommer med migration 073 — uden den vises siden stadig)
+  const supplierIds = [...groups.values()].map(g => g.supplier_id).filter((v): v is string => !!v)
+  if (supplierIds.length) {
+    const sel = (cols: string) => supabase.from('suppliers').select(cols).in('id', supplierIds)
+    let res = await sel('id, contact_name, contact_phone, ordering')
+    if (res.error && /ordering/.test(res.error.message)) res = await sel('id, contact_name, contact_phone')
+    for (const r of (res.data ?? []) as unknown as { id: string; contact_name: string | null; contact_phone: string | null; ordering?: SupplierOrdering | null }[]) {
+      const g = groups.get(r.id)
+      if (!g) continue
+      g.contact_name = r.contact_name; g.contact_phone = r.contact_phone; g.ordering = r.ordering ?? {}
+    }
+  }
+
   const sorted = [...groups.values()]
     .map(g => ({ ...g, total: Math.round(g.total * 100) / 100, lines: g.lines.sort((a, b) => a.name.localeCompare(b.name, 'da')) }))
     .sort((a, b) => (a.supplier_id ? 0 : 1) - (b.supplier_id ? 0 : 1) || a.supplier_name.localeCompare(b.supplier_name, 'da'))
@@ -218,6 +248,23 @@ export function purchaseCsv(group: PurchaseGroup): string {
     ...group.lines.map(l => [l.supplier_sku, l.ean, l.name, l.order_qty, num(l.purchase_price), l.sku, l.orders.join(', ')]),
   ]
   return '﻿' + rows.map(r => r.map(esc).join(';')).join('\r\n') + '\r\n'
+}
+
+// Til at indsætte i leverandørens portal (hurtigbestilling): ét varenr. og antal pr. linje, tab-separeret
+export function portalPaste(group: PurchaseGroup, keys?: string[]): string {
+  return group.lines.filter(l => !keys || keys.includes(l.key))
+    .map(l => `${l.supplier_sku ?? l.ean ?? l.sku}\t${l.order_qty}`).join('\n')
+}
+
+// Mail-udkast til leverandører, der tager imod bestillinger på e-mail
+export function orderMailBody(group: PurchaseGroup): string {
+  const o = group.ordering
+  return [
+    'Hej', '',
+    `Vi vil gerne bestille følgende${o.customer_number ? ` (kundenr. ${o.customer_number})` : ''}:`, '',
+    ...group.lines.map(l => `${l.order_qty} stk  ${l.supplier_sku ?? '—'}  ${l.name}`),
+    '', 'Venlig hilsen', 'Kronborg Marine Bådudstyr',
+  ].join('\n')
 }
 
 // ── Bestilt ──────────────────────────────────────────────────────────────────────
@@ -249,10 +296,14 @@ function newRef(supplierName: string): string {
   return `IND-${stamp}-${slug}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
 }
 
-// Markér alt, der skal bestilles hos én leverandør, som bestilt. Listen beregnes igen på serveren.
-// Med orderId: kun den ene ordres varer (fx bestilt med levering direkte til kunden).
-export async function markSupplierOrdered(supplierId: string, by: string, orderId?: string):
+// Markér det, der skal bestilles hos én leverandør, som bestilt. Listen beregnes igen på serveren.
+// orderId: kun den ene ordres varer (fx bestilt med levering direkte til kunden).
+// lineKeys: kun de valgte varer (fx når leverandøren ikke har alt). supplierRef: leverandørens ordrenr./bekræftelse.
+export async function markSupplierOrdered(supplierId: string, by: string,
+  opts: { orderId?: string; lineKeys?: string[]; supplierRef?: string } = {}):
   Promise<{ ref: string; lines: number; orders: number; failed: number } | { error: string }> {
+  const { orderId, lineKeys } = opts
+  const supplierRef = opts.supplierRef?.trim().slice(0, 80) || undefined
   const { groups, error } = await buildPurchaseList()
   if (error) return { error }
   const group = groups.find(g => g.supplier_id === supplierId)
@@ -263,11 +314,12 @@ export async function markSupplierOrdered(supplierId: string, by: string, orderI
   const byOrder = new Map<string, PurchaseLine['sources']>()
   let lineCount = 0
   for (const l of group.lines) {
+    if (lineKeys && !lineKeys.includes(l.key)) continue
     const srcs = orderId ? l.sources.filter(s => s.order_id === orderId) : l.sources
     if (srcs.length) lineCount++
     for (const s of srcs) byOrder.set(s.order_id, [...(byOrder.get(s.order_id) ?? []), s])
   }
-  if (byOrder.size === 0) return { error: 'Ordren har intet at bestille hos denne leverandør' }
+  if (byOrder.size === 0) return { error: lineKeys ? 'Vælg mindst én vare' : 'Ordren har intet at bestille hos denne leverandør' }
 
   let failed = 0
   for (const [orderId, sources] of byOrder) {
@@ -279,7 +331,7 @@ export async function markSupplierOrdered(supplierId: string, by: string, orderI
         const still = Math.max(0, (Number(l.qty) || 0) - (Number(l.reserved_qty) || 0) - orderedQty(l))
         const qty = Math.min(still, s.missing)
         if (qty <= 0) continue
-        const entry: OrderedEntry = { ref, qty, supplier_id: supplierId, supplier_name: group.supplier_name, at, by }
+        const entry: OrderedEntry = { ref, qty, supplier_id: supplierId, supplier_name: group.supplier_name, at, by, ...(supplierRef ? { supplier_ref: supplierRef } : {}) }
         l.ordered = [...(Array.isArray(l.ordered) ? l.ordered : []), entry]
         changed = true
       }
@@ -291,7 +343,7 @@ export async function markSupplierOrdered(supplierId: string, by: string, orderI
 }
 
 export type OrderedBatch = {
-  ref: string; supplier_name: string; at: string; by: string
+  ref: string; supplier_name: string; at: string; by: string; supplier_ref?: string
   lines: { name: string; sku: string; qty: number; order_number: string | null; order_id: string }[]
 }
 
@@ -307,7 +359,7 @@ export async function buildOrderedList(): Promise<{ batches: OrderedBatch[]; err
   for (const o of orders ?? []) {
     for (const l of (Array.isArray(o.line_items) ? o.line_items : []) as Line[]) {
       for (const e of Array.isArray(l.ordered) ? l.ordered : []) {
-        const b = batches.get(e.ref) ?? { ref: e.ref, supplier_name: e.supplier_name, at: e.at, by: e.by, lines: [] }
+        const b = batches.get(e.ref) ?? { ref: e.ref, supplier_name: e.supplier_name, at: e.at, by: e.by, supplier_ref: e.supplier_ref, lines: [] }
         b.lines.push({ name: l.name ?? '', sku: l.sku ?? '', qty: Number(e.qty) || 0, order_number: o.order_number, order_id: o.id })
         batches.set(e.ref, b)
       }
@@ -338,4 +390,25 @@ export async function undoOrdered(ref: string): Promise<{ orders: number; failed
     if (!ok) failed++
   }
   return { orders: orderIds.length, failed }
+}
+
+// Gem en leverandørs bestillingsoplysninger (fra Indkøb). Tomme felter fjernes.
+export async function saveSupplierOrdering(supplierId: string, input: Record<string, string>): Promise<string | null> {
+  const text = (k: string, max = 300) => (input[k] ?? '').trim().slice(0, max) || undefined
+  const num  = (k: string) => {
+    const t = (input[k] ?? '').trim().replace(/\s|kr\.?/gi, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')
+    const n = Number(t)
+    return t && Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : undefined
+  }
+  const url = text('portal_url', 500)
+  if (url && !/^https?:\/\//i.test(url)) return 'Portal-linket skal starte med https://'
+  const ordering: SupplierOrdering = {
+    portal_url: url, customer_number: text('customer_number', 80), order_email: text('order_email', 200),
+    order_phone: text('order_phone', 40), cutoff: text('cutoff', 120), delivery: text('delivery', 120),
+    min_order: num('min_order'), free_freight: num('free_freight'), notes: text('notes', 1000),
+  }
+  for (const k of Object.keys(ordering) as (keyof SupplierOrdering)[]) if (ordering[k] === undefined) delete ordering[k]
+  const { error } = await createServiceClient().from('suppliers').update({ ordering }).eq('id', supplierId)
+  if (error) return /ordering/.test(error.message) ? 'Kør migration 073_supplier_ordering.sql i Supabase først' : error.message
+  return null
 }
