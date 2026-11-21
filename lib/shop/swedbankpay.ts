@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { createServiceClient } from '@/lib/supabase/server'
 import { decryptSecret } from '@/lib/secrets'
 
@@ -11,6 +12,11 @@ import { decryptSecret } from '@/lib/secrets'
 //   4. Capture (POST …/captures) når varen sendes/udleveres — dansk regel: først trække ved levering
 //      Cancel  (POST …/cancellations) hvis ordren annulleres før capture
 //   Callback (POST til callbackUrl) er en sikkerhedsnet: vi henter altid status med GET selv.
+//   Abort (PATCH paymentorder, operation "Abort") lukker en ubetalt betaling, før en ny oprettes til samme ordre —
+//   ellers kan kunden stadig betale den gamle (anden fane, MobilePay-appen), og den kender vi ikke længere.
+//
+//   Headere (fundamental-principles): version=3.1, ny Session-Id pr. kald (sporing hos Swedbank), Forwarded med
+//   kundens IP når den kendes (svindelvurdering). Kun basis-URL'erne gemmes — alle andre URL'er tages fra svarene.
 //
 // Opsætning: Indstillinger → Betaling (/admin/betaling, kun ejere) — gemmes krypteret i app_settings
 // ('swedbankpay'). Fallback: env SWEDBANK_PAY_TOKEN, SWEDBANK_PAY_PAYEE_ID, SWEDBANK_PAY_ENV=test|prod.
@@ -49,14 +55,17 @@ export class SwedbankError extends Error {
   }
 }
 
-async function call<T>(cfg: SwedbankConfig, method: 'GET' | 'POST' | 'PATCH', pathOrUrl: string, body?: unknown): Promise<T> {
+async function call<T>(cfg: SwedbankConfig, method: 'GET' | 'POST' | 'PATCH', pathOrUrl: string, body?: unknown, opts: { payerIp?: string } = {}): Promise<T> {
   const url = pathOrUrl.startsWith('http') ? pathOrUrl : `${BASE[cfg.env]}${pathOrUrl}`
+  const ip = opts.payerIp?.trim()
   const res = await fetch(url, {
     method,
     headers: {
       Authorization: `Bearer ${cfg.token}`,
       ...(method === 'GET' ? { Accept: 'application/json;version=3.1' } : { 'Content-Type': 'application/json;version=3.1', Accept: 'application/json;version=3.1' }),
       'User-Agent': 'LoveSailing/1.0',
+      'Session-Id': randomUUID(),
+      ...(ip && /^[0-9a-f.:]{3,45}$/i.test(ip) ? { Forwarded: `for=${ip.includes(':') ? `"[${ip}]"` : ip}` } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(20_000),
@@ -94,7 +103,7 @@ export function payeeReference(orderNumber: string, kind: 'P' | 'C' | 'X'): stri
 }
 
 export async function createPaymentOrder(cfg: SwedbankConfig, o: {
-  orderNumber: string; total: number; userAgent: string; site: string
+  orderNumber: string; total: number; userAgent: string; site: string; payerIp?: string
   completeUrl: string; cancelUrl: string; callbackUrl: string; termsUrl: string
 }): Promise<{ id: string; redirectUrl: string; payeeReference: string }> {
   const amount = toMinor(o.total)
@@ -122,7 +131,7 @@ export async function createPaymentOrder(cfg: SwedbankConfig, o: {
         orderReference: o.orderNumber,
       },
     },
-  })
+  }, { payerIp: o.payerIp })
   const redirect = r.operations?.find(op => op.rel === 'redirect-checkout')?.href
   if (!redirect) throw new SwedbankError('Swedbank Pay returnerede ingen betalingsside (redirect-checkout)', 502, r)
   return { id: r.paymentOrder.id, redirectUrl: redirect, payeeReference: ref }
@@ -155,6 +164,23 @@ export async function cancelPayment(cfg: SwedbankConfig, id: string, orderNumber
   return call<unknown>(cfg, 'POST', href, {
     transaction: { description: `Ordre ${orderNumber} annulleret`.slice(0, 40), payeeReference: payeeReference(orderNumber, 'X') },
   })
+}
+
+// Luk en betaling, der ikke er betalt endnu (status Initialized), så den ikke kan gennemføres senere.
+// Returnerer betalingens status bagefter — 'Paid' betyder, at kunden nåede at betale, og den må IKKE erstattes.
+export async function abortPaymentOrder(cfg: SwedbankConfig, id: string): Promise<string> {
+  const po = await getPaymentOrder(cfg, id)
+  const href = operation(po, 'abort')
+  if (po.paymentOrder.status !== 'Initialized' || !href) return po.paymentOrder.status
+  try {
+    const r = await call<PaymentOrderResponse>(cfg, 'PATCH', href, { paymentOrder: { operation: 'Abort', abortReason: 'CancelledByConsumer' } })
+    return r.paymentOrder?.status ?? 'Aborted'
+  } catch (e) {
+    // Fx betalt i samme øjeblik — hent den aktuelle status, så kaldet kan tage stilling
+    const now = await getPaymentOrder(cfg, id).catch(() => null)
+    if (now) return now.paymentOrder.status
+    throw e
+  }
 }
 
 // Tjek at token og Payee ID virker (opretter intet). Et GET på en ukendt betaling giver 404 ved gyldigt token, 401 ved ugyldigt.
