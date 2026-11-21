@@ -195,7 +195,7 @@ export async function POST(request: Request) {
   try {
     const { redirectUrl } = await startPayment(
       { ...order, order_total: total, email: customer.email },
-      { userAgent: request.headers.get('user-agent') ?? '' },
+      { userAgent: request.headers.get('user-agent') ?? '', ip: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null },
     )
     return NextResponse.json({ ok: true, order_number: order.order_number, redirect: redirectUrl })
   } catch (e) {

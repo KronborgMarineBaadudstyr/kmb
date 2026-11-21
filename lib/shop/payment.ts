@@ -1,6 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server'
 import { siteUrl } from '@/lib/shop/email'
-import { resolveSwedbankConfig, createPaymentOrder, getPaymentOrder, capturePayment, cancelPayment, SwedbankError } from '@/lib/shop/swedbankpay'
+import { resolveSwedbankConfig, createPaymentOrder, getPaymentOrder, capturePayment, cancelPayment, abortPaymentOrder, SwedbankError } from '@/lib/shop/swedbankpay'
 import { fromMaskedPan, rememberCard } from '@/lib/payment-refs'
 import { paymentReturnPath, type PaymentOrder } from '@/lib/shop/payment-methods'
 
@@ -29,13 +29,30 @@ async function logPayment(orderId: string, type: string, data: Record<string, un
   if (error) console.log(`[betaling ${orderId}] ${type}`, JSON.stringify(data))
 }
 
-// Opret betaling hos Swedbank Pay og returnér betalingssiden
-export async function startPayment(order: PaymentOrder, ctx: { userAgent: string }): Promise<{ redirectUrl: string }> {
+export class AlreadyPaidError extends Error {}
+
+// Opret betaling hos Swedbank Pay og returnér betalingssiden.
+// Har ordren allerede en betaling (kunden prøver igen), lukkes den gamle først (Abort) — er den betalt i mellemtiden,
+// registreres det, og der oprettes ingen ny (AlreadyPaidError).
+export async function startPayment(order: PaymentOrder, ctx: { userAgent: string; ip?: string | null }): Promise<{ redirectUrl: string }> {
   const { config } = await resolveSwedbankConfig()
   if (!config) throw new Error('Online betaling er ikke sat op')
+
+  const { data: prev } = await createServiceClient().from('orders')
+    .select('payment_provider, payment_reference').eq('id', order.id).maybeSingle()
+  if (prev?.payment_provider === 'swedbankpay' && prev.payment_reference) {
+    const status = await abortPaymentOrder(config, prev.payment_reference)
+    await logPayment(order.id, 'previous_payment_closed', { payment_order: prev.payment_reference, status })
+    if (status === 'Paid') {
+      await syncPayment(order.id)
+      throw new AlreadyPaidError('Ordren er allerede betalt')
+    }
+  }
+
   const site = await siteUrl()
   const po = await createPaymentOrder(config, {
     orderNumber: order.order_number, total: Number(order.order_total), userAgent: ctx.userAgent, site,
+    payerIp: ctx.ip ?? undefined,
     completeUrl: `${site}${paymentReturnPath(order)}`,
     cancelUrl:   `${site}${paymentReturnPath(order, true)}`,
     callbackUrl: `${site}/api/shop/payments/swedbank`,

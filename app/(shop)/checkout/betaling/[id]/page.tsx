@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { headers } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 import { createServiceClient } from '@/lib/supabase/server'
-import { confirmationPath, startPayment, syncPayment } from '@/lib/shop/payment'
+import { confirmationPath, startPayment, syncPayment, AlreadyPaidError } from '@/lib/shop/payment'
 import { fmtKr } from '@/lib/shop/email'
 import { PendingSubmit } from '@/app/_components/pending-submit'
 
@@ -26,10 +26,13 @@ async function retry(formData: FormData) {
   if (!o || o.payment_status === 'authorized' || o.payment_status === 'paid') redirect('/')
   let target: string
   try {
-    const ua = (await headers()).get('user-agent') ?? ''
-    target = (await startPayment({ ...o, order_total: Number(o.order_total), email: o.email ?? '' }, { userAgent: ua })).redirectUrl
-  } catch {
-    target = `/checkout/betaling/${o.id}?t=${encodeURIComponent(o.access_token)}&fejl=1`
+    const h  = await headers()
+    const ip = h.get('x-forwarded-for')?.split(',')[0]?.trim() || null
+    target = (await startPayment({ ...o, order_total: Number(o.order_total), email: o.email ?? '' }, { userAgent: h.get('user-agent') ?? '', ip })).redirectUrl
+  } catch (e) {
+    target = e instanceof AlreadyPaidError
+      ? confirmationPath(o)                                  // den første betaling nåede at gå igennem
+      : `/checkout/betaling/${o.id}?t=${encodeURIComponent(o.access_token)}&fejl=1`
   }
   redirect(target)
 }
